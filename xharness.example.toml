@@ -1,0 +1,26 @@
+# Copy this file to xharness.toml and adjust.
+# xHarness talks to any OpenAI-compatible endpoint: llama.cpp (llama-server),
+# vLLM, Ollama, LiteLLM, or a company gateway.
+
+default_provider = "local"
+
+# "prompt" | "auto" — whether mutating tools (bash, write, edit) ask before running.
+approval = "prompt"
+
+max_turns = 40
+
+# system_prompt = """
+# Your custom system prompt.
+# """
+
+[providers.local]
+base_url = "http://localhost:8080/v1"
+model = "your-model-id"
+# api_key_env = "XHARNESS_API_KEY"   # omit for open local endpoints
+# temperature = 0.6
+# max_tokens = 8192
+
+# User plugins: a Python file exposing a module-level `plugin = Plugin(...)`.
+# [[plugins]]
+# id = "my-tool"
+# module = "./plugins/my_tool.py"

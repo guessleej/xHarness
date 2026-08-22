@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xharness"
+version = "0.1.0"
+description = "xHarness: a plugin-based AI agent harness by xCloudinfo. Standard library only; runs against any OpenAI-compatible endpoint."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "xCloudinfo Corp. Limited" }]
+requires-python = ">=3.11"
+dependencies = []
+keywords = ["ai", "agent", "harness", "llm", "plugin", "openai-compatible"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+]
+
+[project.urls]
+Homepage = "https://github.com/guessleej/xHarness"
+Issues = "https://github.com/guessleej/xHarness/issues"
+
+[project.scripts]
+xharness = "xharness.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["xharness*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
