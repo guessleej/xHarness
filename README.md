@@ -149,6 +149,10 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 - `bash` 的檔案系統沙箱模式
 - 供應端型錄預設集
 
+## 安全
+
+威脅模型、生命週期管控與 CI 安全閘門見 [docs/ssdlc.zh.md](docs/ssdlc.zh.md)；弱點回報見 [SECURITY.zh.md](SECURITY.zh.md)。
+
 ## 授權
 
 [MIT](LICENSE) — 版權所有 xCloudinfo Corp. Limited（云碩科技股份有限公司）。

@@ -170,6 +170,10 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 - Filesystem sandbox modes for `bash`
 - Provider catalog presets
 
+## Security
+
+Threat model, life-cycle controls, and the CI security gates are in [docs/ssdlc.md](docs/ssdlc.md); vulnerability reporting is in [SECURITY.md](SECURITY.md).
+
 ## License
 
 [MIT](LICENSE) — copyright xCloudinfo Corp. Limited.

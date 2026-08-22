@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -46,6 +47,9 @@ class OpenAIAdapter:
     ) -> None:
         if not base_url:
             raise ValueError("provider base_url is required")
+        scheme = urllib.parse.urlsplit(base_url).scheme
+        if scheme not in ("http", "https"):
+            raise ValueError(f"provider base_url must be http or https, got: {scheme or '(none)'}")
         if not model:
             raise ValueError("provider model is required")
         self.base_url = base_url.rstrip("/")
@@ -129,7 +133,9 @@ class OpenAIAdapter:
             method="POST",
         )
         try:
-            response = urllib.request.urlopen(request, timeout=self.timeout_seconds)  # noqa: S310
+            # Scheme is validated to http/https in __init__, so file:/ and custom
+            # schemes cannot reach this call.
+            response = urllib.request.urlopen(request, timeout=self.timeout_seconds)  # nosec B310
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")[:500]
             raise RuntimeError(f"LLM request failed: {error.code} {error.reason} {detail}") from error

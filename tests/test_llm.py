@@ -94,3 +94,8 @@ def test_missing_config_rejected():
         OpenAIAdapter(base_url="", model="m")
     with pytest.raises(ValueError):
         OpenAIAdapter(base_url="http://x", model="")
+
+
+def test_non_http_base_url_rejected():
+    with pytest.raises(ValueError, match="http or https"):
+        OpenAIAdapter(base_url="file:///etc/passwd", model="m")

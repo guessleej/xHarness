@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404
 from typing import Any
 
 from ..context import Context, Plugin
@@ -21,7 +21,9 @@ def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return ToolResult("denied by approval policy", is_error=True)
     timeout = min(float(args.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS), MAX_TIMEOUT_SECONDS)
     try:
-        completed = subprocess.run(  # noqa: S603 - running commands is this tool's purpose
+        # Arbitrary commands are this tool's purpose; the guard is the approval
+        # policy above, and the residual risk (no sandbox) is in docs/ssdlc.md.
+        completed = subprocess.run(  # nosec B603 B607
             ["bash", "-c", command],
             cwd=ctx.cwd,
             capture_output=True,
