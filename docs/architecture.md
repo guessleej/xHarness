@@ -1,6 +1,8 @@
 # xHarness architecture
 
-English notes for contributors. The README covers usage; this file covers design.
+English | [中文](architecture.zh.md)
+
+Notes for contributors. The README covers usage; this file covers design.
 
 ## The kernel: Context, Plugin, Harness
 

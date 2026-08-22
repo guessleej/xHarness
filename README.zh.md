@@ -37,7 +37,7 @@ export XHARNESS_MODEL=your-model-id
 ./.venv/bin/xharness "列出這個目錄的檔案並摘要這個專案"
 ```
 
-或複製 `xharness.example.toml` 為 `xharness.toml` 後編輯：
+或複製 `xharness.example.zh.toml`（中文註解版）為 `xharness.toml` 後編輯：
 
 ```toml
 default_provider = "local"
@@ -128,7 +128,7 @@ answer = agent.run("pyproject.toml 宣告的測試相依是什麼？")
 
 ## 架構
 
-架構圖與設計說明（接縫、與 DeepSeek Harness 的對照）見 [docs/architecture.md](docs/architecture.md)。
+架構圖與設計說明（接縫、與 DeepSeek Harness 的對照）見 [docs/architecture.zh.md](docs/architecture.zh.md)。
 
 ## 開發
 

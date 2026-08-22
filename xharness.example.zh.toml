@@ -1,0 +1,27 @@
+# 中文註解版範例設定（英文版見 xharness.example.toml）。
+# 複製本檔為 xharness.toml 後修改。
+# xHarness 可對接任何 OpenAI 相容端點：llama.cpp（llama-server）、
+# vLLM、Ollama、LiteLLM 或企業閘道。
+
+default_provider = "local"
+
+# "prompt" | "auto" — 有副作用的工具（bash、write、edit）動手前是否先詢問。
+approval = "prompt"
+
+max_turns = 40
+
+# system_prompt = """
+# 你的自訂系統提示。
+# """
+
+[providers.local]
+base_url = "http://localhost:8080/v1"
+model = "your-model-id"
+# api_key_env = "XHARNESS_API_KEY"   # 開放的本機端點可省略
+# temperature = 0.6
+# max_tokens = 8192
+
+# 使用者插件：一個 Python 檔，模組層級曝露 `plugin = Plugin(...)`。
+# [[plugins]]
+# id = "my-tool"
+# module = "./plugins/my_tool.py"

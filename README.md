@@ -41,7 +41,7 @@ export XHARNESS_MODEL=your-model-id
 ./.venv/bin/xharness "list the files in this directory and summarize the project"
 ```
 
-Or copy `xharness.example.toml` to `xharness.toml` and edit it:
+Or copy `xharness.example.toml` (Chinese-commented version: `xharness.example.zh.toml`) to `xharness.toml` and edit it:
 
 ```toml
 default_provider = "local"

@@ -1,5 +1,7 @@
 # xHarness 架構
 
+[English](architecture.md) | 中文
+
 給貢獻者的設計說明。用法見 README；本文講設計。
 
 ## 核心：Context、Plugin、Harness
