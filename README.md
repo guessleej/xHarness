@@ -18,6 +18,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness。�
 - **任何 OpenAI 相容供應端。** SSE 串流含 tool calls、憑證每次請求時才從環境變數解析、可設定 temperature 與 token 上限。
 - **內建工具。** `bash`、`read`、`write`、`edit`、`glob`、`grep`、`todo_write`。
 - **審批策略。** 有副作用的工具（`bash`、`write`、`edit`）在互動模式會先詢問；`--yes` 或 `approval = "auto"` 可關閉。
+- **專案指示檔。** 工作目錄的 `AGENTS.md`（或 `CLAUDE.md`）會自動讀入 system prompt，agent 進到哪個 repo 就遵守哪個 repo 的慣例；`--no-instructions` 或 `project_instructions = false` 可關閉。
 - **只增不改的 session 記錄。** 每則訊息與工具結果都以 JSONL 記錄在 `~/.xharness/sessions/`；`--resume <id>` 可接續。
 - **兩種執行模式。** headless 一次性（`xharness "任務"`）與互動 REPL。
 - **可擴充。** 使用者插件模組可從設定檔加入工具與服務；`llm/stream` 中介層可攔截每次模型呼叫做快取、記錄或路由。

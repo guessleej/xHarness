@@ -47,6 +47,7 @@ the threat model in the same pull request.
 | Supply-chain compromise | Zero runtime dependencies (standard library only); dev-only dependencies audited by pip-audit in CI weekly and on every push | Mitigated |
 | Malicious or vulnerable session resume data | JSONL parsed line-by-line; corrupt lines skipped; content is data, never executed | Mitigated |
 | Runaway agent (cost / DoS) | `max_turns` bound, per-command timeouts, output size caps on every tool | Mitigated |
+| Malicious `AGENTS.md`/`CLAUDE.md` in an untrusted repo steers the agent (system-prompt injection) | Instruction files are repo content: loading them is a trust decision. Size-capped (24k chars), disabled with `--no-instructions` / `project_instructions = false`; the approval policy still gates mutating tools | Mitigated; residual in `auto` mode on untrusted repos |
 | Model exfiltrates file contents to the endpoint | Inherent to the design: the model must see file contents to work. Point xHarness at an endpoint you trust (on-prem friendly by construction) | Accepted, disclosed |
 
 ### Residual risks (accepted and disclosed)

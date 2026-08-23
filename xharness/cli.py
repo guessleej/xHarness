@@ -32,6 +32,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-turns", type=int, dest="max_turns", help="max model turns per task (default 40)")
     parser.add_argument("--approve", choices=["prompt", "auto"], help="approval for mutating tools")
     parser.add_argument("-y", "--yes", action="store_true", help="shorthand for --approve auto")
+    parser.add_argument(
+        "--no-instructions",
+        action="store_true",
+        help="do not read AGENTS.md / CLAUDE.md from the working directory",
+    )
     parser.add_argument("-V", "--version", action="version", version=__version__)
     return parser
 
@@ -86,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         system_prompt=config.system_prompt,
         max_turns=args.max_turns or config.max_turns or AgentOptions.max_turns,
         approval_mode=approval_mode,
+        project_instructions=config.project_instructions and not args.no_instructions,
         prompt=_prompt_approval if sys.stdin.isatty() else None,
         initial_messages=initial_messages,
         on_delta=lambda text: (sys.stdout.write(text), sys.stdout.flush()) and None,

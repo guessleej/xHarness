@@ -102,3 +102,34 @@ def test_resume_keeps_existing_system_prompt():
     agent = Agent(harness.ctx, AgentOptions(approval_mode="auto", initial_messages=initial))
     assert agent.messages[0]["content"] == "custom"
     assert sum(1 for message in agent.messages if message["role"] == "system") == 1
+
+
+def test_project_instructions_loaded_into_system_prompt(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("Always run scripts/check before finishing.")
+    (tmp_path / "CLAUDE.md").write_text("should not be used when AGENTS.md exists")
+    harness, _adapter = build([AssistantTurn(content="ok")])
+    agent = Agent(harness.ctx, AgentOptions(approval_mode="auto", cwd=str(tmp_path)))
+    system = agent.messages[0]["content"]
+    assert "Project instructions (AGENTS.md)" in system
+    assert "scripts/check" in system
+    assert "should not be used" not in system
+
+
+def test_claude_md_fallback_and_opt_out(tmp_path):
+    (tmp_path / "CLAUDE.md").write_text("repo rules here")
+    harness, _adapter = build([AssistantTurn(content="ok")])
+    agent = Agent(harness.ctx, AgentOptions(approval_mode="auto", cwd=str(tmp_path)))
+    assert "Project instructions (CLAUDE.md)" in agent.messages[0]["content"]
+
+    harness2, _adapter2 = build([AssistantTurn(content="ok")])
+    agent2 = Agent(
+        harness2.ctx,
+        AgentOptions(approval_mode="auto", cwd=str(tmp_path), project_instructions=False),
+    )
+    assert "Project instructions" not in agent2.messages[0]["content"]
+
+
+def test_no_instruction_file_leaves_prompt_unchanged(tmp_path):
+    harness, _adapter = build([AssistantTurn(content="ok")])
+    agent = Agent(harness.ctx, AgentOptions(approval_mode="auto", cwd=str(tmp_path)))
+    assert "Project instructions" not in agent.messages[0]["content"]

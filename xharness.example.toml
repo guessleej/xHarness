@@ -9,6 +9,8 @@ approval = "prompt"
 
 max_turns = 40
 
+# project_instructions = true  # read AGENTS.md / CLAUDE.md from cwd into the system prompt
+
 # system_prompt = """
 # Your custom system prompt.
 # """

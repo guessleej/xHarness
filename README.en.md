@@ -18,6 +18,7 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Any OpenAI-compatible provider.** Streaming SSE with tool calls, per-request credential resolution from environment variables, configurable temperature and token caps.
 - **Built-in tools.** `bash`, `read`, `write`, `edit`, `glob`, `grep`, `todo_write`.
 - **Approval policy.** Mutating tools (`bash`, `write`, `edit`) ask before acting in interactive mode; `--yes` or `approval = "auto"` opts out.
+- **Project instructions.** `AGENTS.md` (or `CLAUDE.md`) in the working directory is read into the system prompt automatically, so the agent follows each repo's own conventions; disable with `--no-instructions` or `project_instructions = false`.
 - **Append-only session log.** Every message and tool result is recorded as JSONL under `~/.xharness/sessions/`; `--resume <id>` continues a session.
 - **Two run modes.** Headless one-shot (`xharness "task"`) and an interactive REPL.
 - **Extensible.** User plugin modules add tools and services from config; `llm/stream` middleware intercepts every model call for caching, logging, or routing.

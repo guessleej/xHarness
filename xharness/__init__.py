@@ -1,6 +1,6 @@
 """xHarness: a plugin-based AI agent harness by xCloudinfo."""
 
-from .agent import Agent, AgentOptions, default_system_prompt
+from .agent import Agent, AgentOptions, default_system_prompt, load_project_instructions
 from .config import ResolvedConfig, load_config
 from .context import Context, Harness, Plugin
 from .llm import AssistantTurn, OpenAIAdapter, Usage, llm_plugin
@@ -12,7 +12,7 @@ from .tools.fs import edit_tool, fs_tools_plugin, read_tool, write_tool
 from .tools.search import glob_to_regex, glob_tool, grep_tool, search_tools_plugin
 from .tools.todo import todo_tool_plugin
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "Agent",
@@ -40,6 +40,7 @@ __all__ = [
     "glob_tool",
     "grep_tool",
     "harness_home",
+    "load_project_instructions",
     "llm_plugin",
     "load_config",
     "messages_from_events",

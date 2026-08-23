@@ -17,6 +17,7 @@ class ResolvedConfig:
     system_prompt: str | None = None
     max_turns: int | None = None
     approval: str = "prompt"
+    project_instructions: bool = True
     plugins: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -68,5 +69,6 @@ def load_config(
         system_prompt=raw.get("system_prompt"),
         max_turns=raw.get("max_turns"),
         approval=approval,
+        project_instructions=bool(raw.get("project_instructions", True)),
         plugins=raw.get("plugins", []),
     )

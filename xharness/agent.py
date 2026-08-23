@@ -16,6 +16,29 @@ from .session import SessionLog
 from .tools import ToolContext, ToolRegistry, ToolResult
 
 DEFAULT_MAX_TURNS = 40
+INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md")
+MAX_INSTRUCTIONS_CHARS = 24_000
+
+
+def load_project_instructions(cwd: str) -> str | None:
+    """Read the project's agent instructions (AGENTS.md, then CLAUDE.md).
+
+    First file found in cwd wins. Content is treated like any other repo
+    content: useful context, but a trust decision — see docs/ssdlc.md.
+    """
+    for name in INSTRUCTION_FILES:
+        path = os.path.join(cwd, name)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                text = handle.read().strip()
+        except OSError:
+            continue
+        if not text:
+            continue
+        if len(text) > MAX_INSTRUCTIONS_CHARS:
+            text = text[:MAX_INSTRUCTIONS_CHARS] + "\n[instructions truncated]"
+        return f"## Project instructions ({name})\n\n{text}"
+    return None
 
 
 def default_system_prompt(cwd: str) -> str:
@@ -44,6 +67,8 @@ class AgentOptions:
     on_tool_end: Callable[[str, str, bool], None] | None = None
     #: Resume: prior messages, including their system prompt if any.
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
+    #: Read AGENTS.md / CLAUDE.md from cwd into the system prompt.
+    project_instructions: bool = True
 
 
 class Agent:
@@ -56,13 +81,12 @@ class Agent:
         if self.options.initial_messages:
             self.messages.extend(self.options.initial_messages)
         if not any(message.get("role") == "system" for message in self.messages):
-            self.messages.insert(
-                0,
-                {
-                    "role": "system",
-                    "content": self.options.system_prompt or default_system_prompt(cwd),
-                },
-            )
+            system = self.options.system_prompt or default_system_prompt(cwd)
+            if self.options.project_instructions:
+                instructions = load_project_instructions(cwd)
+                if instructions:
+                    system = f"{system}\n\n{instructions}"
+            self.messages.insert(0, {"role": "system", "content": system})
 
     def run(self, task: str) -> str:
         llm = self.ctx.get("llm")
