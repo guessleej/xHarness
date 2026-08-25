@@ -62,7 +62,9 @@ def _bwrap_wrap(allow_network: bool) -> Wrap:
             "--dev", "/dev",
             "--proc", "/proc",
             "--bind", real_cwd, real_cwd,
-            "--bind", "/tmp", "/tmp",
+            # A bind mount target, not a temp file we create: commands need a
+            # writable /tmp inside the sandbox.
+            "--bind", "/tmp", "/tmp",  # nosec B108
             "--die-with-parent",
         ]
         if not allow_network:
