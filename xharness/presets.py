@@ -8,12 +8,15 @@ import os
 from .config import ResolvedConfig
 from .context import Harness, Plugin
 from .llm import llm_plugin
+from .mcp import mcp_plugin
+from .sandbox import sandbox_plugin
 from .session import session_plugin
 from .tools import tools_plugin
 from .tools.bash import bash_tool_plugin
 from .tools.fs import fs_tools_plugin
 from .tools.search import search_tools_plugin
 from .tools.todo import todo_tool_plugin
+from .tools.webfetch import webfetch_tool_plugin
 
 
 def _load_user_plugin(module_path: str) -> Plugin:
@@ -36,10 +39,15 @@ def build_harness(
 ) -> Harness:
     harness = Harness()
     harness.use("tools", tools_plugin)
+    harness.use("sandbox", sandbox_plugin(config.sandbox))  # before tool-bash
     harness.use("tool-fs", fs_tools_plugin)
     harness.use("tool-search", search_tools_plugin)
     harness.use("tool-bash", bash_tool_plugin)
     harness.use("tool-todo", todo_tool_plugin)
+    if config.webfetch:
+        harness.use("tool-webfetch", webfetch_tool_plugin)
+    if config.mcp_servers:
+        harness.use("mcp", mcp_plugin(config.mcp_servers))
     if not no_session:
         harness.use("session", session_plugin(resume))
     harness.use("llm", llm_plugin(config.provider))

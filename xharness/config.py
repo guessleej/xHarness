@@ -19,6 +19,9 @@ class ResolvedConfig:
     approval: str = "prompt"
     project_instructions: bool = True
     plugins: list[dict[str, Any]] = field(default_factory=list)
+    sandbox: dict[str, Any] = field(default_factory=dict)
+    mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    webfetch: bool = False
 
 
 def _find_config_file(explicit_path: str | None) -> str | None:
@@ -71,4 +74,7 @@ def load_config(
         approval=approval,
         project_instructions=bool(raw.get("project_instructions", True)),
         plugins=raw.get("plugins", []),
+        sandbox=raw.get("sandbox", {}),
+        mcp_servers=raw.get("mcp", {}).get("servers", {}),
+        webfetch=bool(raw.get("tools", {}).get("webfetch", False)),
     )

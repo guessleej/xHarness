@@ -107,8 +107,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"session: {session.id}", file=sys.stderr)
             return 0
 
+        sandbox = harness.ctx.optional("sandbox")
         print(f"xHarness {__version__} — session {session.id}")
         print(f"model: {config.provider['model']} @ {config.provider['base_url']}")
+        print(f"sandbox: {sandbox.name if sandbox else 'off'}")
         print("commands: /tools /session /clear /exit")
         while True:
             try:

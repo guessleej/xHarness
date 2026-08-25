@@ -45,18 +45,18 @@ xHarness borrows the composition idea from DeepSeek Harness (dsh) and deliberate
 | | dsh | xHarness |
 |---|---|---|
 | Language | TypeScript | Python (3.11+, stdlib only) |
-| Size | ~565k lines, 227 packages | ~1.5k lines, 1 package |
+| Size | ~565k lines, 227 packages | ~1.9k lines, 1 package |
 | Plugin runtime | Cordis (services, typed events, HMR, fibers) | `Context` (services, events, middleware, scoped disposal) |
 | Composition | profiles, bundles, layered YAML patches | one preset function + a TOML plugin list |
 | Providers | adapter registry, catalogs, model discovery | one OpenAI-compatible adapter |
-| Sandbox | bwrap / Landlock / Seatbelt / ACL, fail-closed | none yet (approval policy only) |
+| Sandbox | bwrap / Landlock / Seatbelt / ACL, fail-closed | Seatbelt (macOS) / bwrap (Linux); `require` mode fail-closed, `auto` falls back to approval policy |
 | UI | web app | CLI |
 
 The claim is not parity. The claim is that the architectural core — plugins over a shared context with reversible effects, an interceptable model-call seam, an append-only session log — fits in a package a single developer can audit, which matters for on-prem deployments where every line that touches the network must be reviewable.
 
 ## Known limitations
 
-- The `bash` tool has no sandbox; approval policy is the only guard. Do not run untrusted tasks with `--approve auto`.
+- The `bash` sandbox needs a backend (`sandbox-exec` on macOS, `bwrap` on Linux); in `auto` mode without one, approval policy is the only guard. Use `mode = "require"` for a hard guarantee, and do not run untrusted tasks with `--approve auto` on an unsandboxed host.
 - One provider per run; no mid-session model switching.
 - Sync, single-threaded: one model call and one tool at a time.
 - `resume` replays what the log holds; nothing more granular than whole messages.

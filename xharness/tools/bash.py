@@ -6,6 +6,7 @@ import subprocess  # nosec B404
 from typing import Any
 
 from ..context import Context, Plugin
+from ..sandbox import Sandbox
 from . import Tool, ToolContext, ToolResult, register_tools
 
 MAX_OUTPUT = 50_000
@@ -13,18 +14,21 @@ DEFAULT_TIMEOUT_SECONDS = 120
 MAX_TIMEOUT_SECONDS = 600
 
 
-def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+def _run(args: dict[str, Any], ctx: ToolContext, sandbox: Sandbox | None = None) -> ToolResult:
     command = str(args.get("command") or "")
     if not command:
         return ToolResult("command is required", is_error=True)
     if not ctx.approve(f"bash: {command}"):
         return ToolResult("denied by approval policy", is_error=True)
     timeout = min(float(args.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS), MAX_TIMEOUT_SECONDS)
+    argv = ["bash", "-c", command]
+    if sandbox is not None:
+        argv = sandbox.wrap(argv, ctx.cwd)
     try:
-        # Arbitrary commands are this tool's purpose; the guard is the approval
-        # policy above, and the residual risk (no sandbox) is in docs/ssdlc.md.
+        # Arbitrary commands are this tool's purpose; the guards are the
+        # approval policy above and the sandbox (when a backend is available).
         completed = subprocess.run(  # nosec B603 B607
-            ["bash", "-c", command],
+            argv,
             cwd=ctx.cwd,
             capture_output=True,
             timeout=timeout,
@@ -44,13 +48,14 @@ def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     return ToolResult(output or "(no output)")
 
 
-def bash_tool() -> Tool:
+def bash_tool(sandbox: Sandbox | None = None) -> Tool:
+    confinement = f" Commands run under {sandbox.name}." if sandbox else ""
     return Tool(
         name="bash",
         description=(
             "Run a shell command with bash -c in the working directory and return "
             "stdout and stderr. Use for builds, tests, git, and anything the "
-            "filesystem tools do not cover."
+            f"filesystem tools do not cover.{confinement}"
         ),
         mutating=True,
         parameters={
@@ -64,12 +69,12 @@ def bash_tool() -> Tool:
             },
             "required": ["command"],
         },
-        execute=_run,
+        execute=lambda args, tool_ctx: _run(args, tool_ctx, sandbox=sandbox),
     )
 
 
 def _apply(ctx: Context, _config: Any) -> None:
-    register_tools(ctx, [bash_tool()])
+    register_tools(ctx, [bash_tool(sandbox=ctx.optional("sandbox"))])
 
 
 bash_tool_plugin = Plugin("tool-bash", _apply)

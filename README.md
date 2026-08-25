@@ -10,19 +10,21 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness。�
 
 ## 為什麼做這個
 
-多數 agent harness 綁死單一廠商 API，還拖著龐大的相依樹。xHarness 保留架構核心——工具、模型 adapter、session 記錄、agent 迴圈的組裝全部都是掛在共享 context 上的插件——但把規模控制在一個人一個下午讀得完：約 1,500 行 Python、**零執行期相依**（純標準函式庫，含 SSE 串流client與 TOML 設定讀取），測試跑完只要 0.1 秒。
+多數 agent harness 綁死單一廠商 API，還拖著龐大的相依樹。xHarness 保留架構核心——工具、模型 adapter、session 記錄、agent 迴圈的組裝全部都是掛在共享 context 上的插件——但把規模控制在一個人一個下午讀得完：約 1,900 行 Python、**零執行期相依**（純標準函式庫，含 SSE 串流client、TOML 設定讀取與 MCP client），測試跑完不到一秒。
 
 ## 特色
 
 - **一切皆插件。** 服務、事件、工具註冊都掛在共享 `Context` 上；卸載插件時自動回捲它註冊的一切。
 - **任何 OpenAI 相容供應端。** SSE 串流含 tool calls、憑證每次請求時才從環境變數解析、可設定 temperature 與 token 上限。
-- **內建工具。** `bash`、`read`、`write`、`edit`、`glob`、`grep`、`todo_write`。
-- **審批策略。** 有副作用的工具（`bash`、`write`、`edit`）在互動模式會先詢問；`--yes` 或 `approval = "auto"` 可關閉。
+- **內建工具。** `bash`、`read`、`write`、`edit`、`glob`、`grep`、`todo_write`，另有選配的 `webfetch`。
+- **沙箱隔離。** `bash` 自動用作業系統現成機制圈住：macOS 走 `sandbox-exec`（Seatbelt）、Linux 走 `bwrap`（bubblewrap）——寫入限制在工作目錄與暫存目錄，`allow_network = false` 可一併斷網；`mode = "require"` 沒有後端就拒絕啟動。
+- **MCP client。** `[mcp.servers.*]` 設定 stdio MCP server，其工具以 `mcp__{server}__{tool}` 名稱進工具清單；沒有標 `readOnlyHint` 的一律視為有副作用、走審批策略。
+- **審批策略。** 有副作用的工具（`bash`、`write`、`edit`、`webfetch`、MCP 工具）在互動模式會先詢問；`--yes` 或 `approval = "auto"` 可關閉。
 - **專案指示檔。** 工作目錄的 `AGENTS.md`（或 `CLAUDE.md`）會自動讀入 system prompt，agent 進到哪個 repo 就遵守哪個 repo 的慣例；`--no-instructions` 或 `project_instructions = false` 可關閉。
 - **只增不改的 session 記錄。** 每則訊息與工具結果都以 JSONL 記錄在 `~/.xharness/sessions/`；`--resume <id>` 可接續。
 - **兩種執行模式。** headless 一次性（`xharness "任務"`）與互動 REPL。
 - **可擴充。** 使用者插件模組可從設定檔加入工具與服務；`llm/stream` 中介層可攔截每次模型呼叫做快取、記錄或路由。
-- **零遙測。** 除了你設定的模型端點，xHarness 不對任何地方傳送資料。沒有匿名 id、沒有使用量上傳、沒有任何 phone-home。
+- **零遙測。** 除了你設定的模型端點（以及你自己選擇啟用的 `webfetch` 與 MCP server），xHarness 不對任何地方傳送資料。沒有匿名 id、沒有使用量上傳、沒有任何 phone-home。
 
 ## 快速開始
 
@@ -74,8 +76,35 @@ xharness --resume 2026-08-22-ab12cd34   # 接續 session
 | `glob` | 否 | 以 glob 樣式（`**`、`*`、`?`）找檔案 |
 | `grep` | 否 | 以正規表示式搜尋檔案內容 |
 | `todo_write` | 否 | 維護多步驟任務的工作清單 |
+| `webfetch` | 是 | 抓取 http(s) 網頁並轉成可讀文字；**預設關閉**（`[tools] webfetch = true` 才開）——開了它才會有模型端點以外的對外連線，且每次抓取都走審批 |
 
 審批只作用於有副作用的工具。headless 模式預設 `auto`（沒有人盯著管線）；互動模式預設 `prompt`。明確指定 `--approve prompt|auto` 一律優先。
+
+## 沙箱
+
+`bash` 工具的指令會在偵測到後端時自動圈住（macOS `sandbox-exec` / Linux `bwrap`）：根目錄唯讀、只有工作目錄與暫存目錄可寫。REPL 啟動列會顯示目前沙箱狀態。
+
+```toml
+[sandbox]
+mode = "auto"          # auto（預設）| require（沒有後端就拒絕啟動）| off
+allow_network = true   # false 時 bash 內的指令一併斷網
+```
+
+`auto` 在沒有後端的環境（例如未裝 bwrap 的容器）會退回無沙箱執行——要保證圈住就用 `require`。
+
+## MCP servers
+
+任何 stdio MCP server 都能把工具掛進來：
+
+```toml
+[mcp.servers.fs]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+# env = { KEY = "value" }
+# timeout_seconds = 60
+```
+
+工具以 `mcp__fs__read_file` 這類名稱出現在 `/tools` 清單。沒有宣告 `readOnlyHint` 的 MCP 工具一律視為有副作用、受審批策略管；起不來的 server 會被略過並警告，不會拖垮整個 harness。
 
 ## 寫一個插件
 
@@ -146,8 +175,6 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 - Web UI（本機伺服器、串流逐字稿、防中文輸入法 Enter 誤送的輸入處理）
 - 子代理與平行任務分派
-- MCP client 支援
-- `bash` 的檔案系統沙箱模式
 - 供應端型錄預設集
 
 ## 安全

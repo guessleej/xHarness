@@ -10,19 +10,21 @@ xHarness is a plugin-based AI agent harness by xCloudinfo. It is inspired by the
 
 ## Why
 
-Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one person can read in an afternoon: about 1,500 lines of Python, **zero runtime dependencies** (standard library only, including the SSE streaming client and the TOML config reader), and a test suite that runs in a tenth of a second.
+Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one person can read in an afternoon: about 1,900 lines of Python, **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a test suite that runs in under a second.
 
 ## Features
 
 - **Everything is a plugin.** Services, events, and tool registrations are contributed to a shared `Context`; unloading a plugin unwinds everything it registered.
 - **Any OpenAI-compatible provider.** Streaming SSE with tool calls, per-request credential resolution from environment variables, configurable temperature and token caps.
-- **Built-in tools.** `bash`, `read`, `write`, `edit`, `glob`, `grep`, `todo_write`.
-- **Approval policy.** Mutating tools (`bash`, `write`, `edit`) ask before acting in interactive mode; `--yes` or `approval = "auto"` opts out.
+- **Built-in tools.** `bash`, `read`, `write`, `edit`, `glob`, `grep`, `todo_write`, plus an opt-in `webfetch`.
+- **Sandboxing.** `bash` is confined with OS facilities that are already installed: `sandbox-exec` (Seatbelt) on macOS, `bwrap` (bubblewrap) on Linux — writes are limited to the working directory and temp dirs, `allow_network = false` also cuts the network, and `mode = "require"` refuses to start without a backend.
+- **MCP client.** Configure stdio MCP servers under `[mcp.servers.*]`; their tools join the registry as `mcp__{server}__{tool}`. Tools without a `readOnlyHint` are treated as side-effectful and go through the approval policy.
+- **Approval policy.** Mutating tools (`bash`, `write`, `edit`, `webfetch`, MCP tools) ask before acting in interactive mode; `--yes` or `approval = "auto"` opts out.
 - **Project instructions.** `AGENTS.md` (or `CLAUDE.md`) in the working directory is read into the system prompt automatically, so the agent follows each repo's own conventions; disable with `--no-instructions` or `project_instructions = false`.
 - **Append-only session log.** Every message and tool result is recorded as JSONL under `~/.xharness/sessions/`; `--resume <id>` continues a session.
 - **Two run modes.** Headless one-shot (`xharness "task"`) and an interactive REPL.
 - **Extensible.** User plugin modules add tools and services from config; `llm/stream` middleware intercepts every model call for caching, logging, or routing.
-- **No telemetry.** xHarness sends nothing anywhere except your configured model endpoint. There is no anonymous id, no usage upload, no phone-home of any kind.
+- **No telemetry.** xHarness sends nothing anywhere except your configured model endpoint (and the `webfetch` tool or MCP servers you enable yourself). There is no anonymous id, no usage upload, no phone-home of any kind.
 
 ## Quickstart
 
@@ -74,8 +76,35 @@ xharness --resume 2026-08-22-ab12cd34   # continue a session
 | `glob` | no | Find files by glob pattern (`**`, `*`, `?`) |
 | `grep` | no | Search file contents by regular expression |
 | `todo_write` | no | Maintain a working todo list for multi-step tasks |
+| `webfetch` | yes | Fetch an http(s) URL as readable text; **disabled by default** (`[tools] webfetch = true`) — enabling it is the only egress besides the model endpoint, and every fetch goes through approval |
 
 Approval applies to mutating tools only. In headless mode the default is `auto` (nobody is watching a pipe); in interactive mode the default is `prompt`. An explicit `--approve prompt|auto` always wins.
+
+## Sandbox
+
+Commands from the `bash` tool run confined when a backend is detected (`sandbox-exec` on macOS, `bwrap` on Linux): the filesystem is read-only except the working directory and temp dirs. The REPL banner shows the active sandbox.
+
+```toml
+[sandbox]
+mode = "auto"          # auto (default) | require (refuse to start without a backend) | off
+allow_network = true   # false also cuts the network inside bash commands
+```
+
+`auto` falls back to bare execution where no backend exists (say, a container without bwrap) — use `require` to make confinement a hard guarantee.
+
+## MCP servers
+
+Any stdio MCP server can contribute tools:
+
+```toml
+[mcp.servers.fs]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+# env = { KEY = "value" }
+# timeout_seconds = 60
+```
+
+Tools appear in `/tools` as `mcp__fs__read_file` and the like. MCP tools without a declared `readOnlyHint` are treated as side-effectful and gated by the approval policy; a server that fails to start is skipped with a warning instead of taking the harness down.
 
 ## Writing a plugin
 
@@ -167,8 +196,6 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 - Web UI (local server, streaming transcript, IME-safe input handling)
 - Subagents and parallel task fan-out
-- MCP client support
-- Filesystem sandbox modes for `bash`
 - Provider catalog presets
 
 ## Security

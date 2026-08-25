@@ -45,18 +45,18 @@ xHarness 借用 DeepSeek Harness（dsh）的組合思想，並刻意捨棄其規
 | | dsh | xHarness |
 |---|---|---|
 | 語言 | TypeScript | Python（3.11+，純標準函式庫） |
-| 規模 | 約 56.5 萬行、227 個套件 | 約 1,500 行、1 個套件 |
+| 規模 | 約 56.5 萬行、227 個套件 | 約 1,900 行、1 個套件 |
 | 插件執行期 | Cordis（服務、型別化事件、HMR、fiber） | `Context`（服務、事件、中介層、scope 回捲） |
 | 組合方式 | profile、bundle、分層 YAML patch | 一個 preset 函式 + TOML 插件清單 |
 | 供應端 | adapter 註冊表、型錄、模型探索 | 一個 OpenAI 相容 adapter |
-| 沙箱 | bwrap / Landlock / Seatbelt / ACL，fail-closed | 尚無（僅審批策略） |
+| 沙箱 | bwrap / Landlock / Seatbelt / ACL，fail-closed | Seatbelt（macOS）/ bwrap（Linux）；`require` 模式 fail-closed，`auto` 無後端時退回審批策略 |
 | 介面 | Web 應用 | CLI |
 
 重點不是對等，而是：架構核心——掛在共享 context 上、效果可回捲的插件；可攔截的模型呼叫接縫；只增不改的 session 記錄——可以塞進一個開發者審計得完的套件裡。對地端部署來說這很重要：每一行會碰網路的程式碼都必須可被審查。
 
 ## 已知限制
 
-- `bash` 工具沒有沙箱；審批策略是唯一防線。不要用 `--approve auto` 跑不受信任的任務。
+- `bash` 沙箱需要後端（macOS `sandbox-exec`、Linux `bwrap`）；`auto` 模式下沒有後端時，審批策略是唯一防線。要硬保證就設 `mode = "require"`，且不要在無沙箱的主機上用 `--approve auto` 跑不受信任的任務。
 - 一次執行一個供應端；不支援 session 中途換模型。
 - 同步單執行緒：一次一個模型呼叫、一個工具。
 - `resume` 只重放記錄裡的內容；粒度就是整則訊息。

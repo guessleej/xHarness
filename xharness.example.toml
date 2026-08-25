@@ -22,6 +22,22 @@ model = "your-model-id"
 # temperature = 0.6
 # max_tokens = 8192
 
+# Sandbox for the bash tool: sandbox-exec on macOS, bwrap on Linux.
+# [sandbox]
+# mode = "auto"          # auto (default) | require | off
+# allow_network = true   # false also cuts the network inside bash commands
+
+# Optional built-in tools.
+# [tools]
+# webfetch = false       # true enables the webfetch tool (network egress, approval-gated)
+
+# MCP servers (stdio): their tools join the registry as mcp__{server}__{tool}.
+# [mcp.servers.fs]
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+# env = { KEY = "value" }
+# timeout_seconds = 60
+
 # User plugins: a Python file exposing a module-level `plugin = Plugin(...)`.
 # [[plugins]]
 # id = "my-tool"

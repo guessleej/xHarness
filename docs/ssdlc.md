@@ -52,9 +52,18 @@ the threat model in the same pull request.
 
 ### Residual risks (accepted and disclosed)
 
-- **No sandbox.** `bash` runs with the invoking user's full privileges. The
-  approval policy is the only guard; `--approve auto` on untrusted tasks is
-  explicitly outside the threat model. A filesystem sandbox is on the roadmap.
+- **Sandbox fallback.** `bash` runs under `sandbox-exec` (macOS) or `bwrap`
+  (Linux) when available: writes confined to the working directory and temp
+  dirs, network optionally cut. In `auto` mode without a backend, commands run
+  with the invoking user's full privileges and the approval policy is the only
+  guard — use `mode = "require"` where confinement must be a hard guarantee.
+  `--approve auto` on untrusted tasks without a sandbox is explicitly outside
+  the threat model.
+- **MCP servers are code.** A configured MCP server runs as a child process
+  with the user's privileges, outside the bash sandbox. Configuring one is a
+  trust decision, same as installing a plugin; the approval policy still gates
+  its non-read-only tools, and a misbehaving server is skipped at startup
+  rather than trusted silently.
 - **Plugins are code.** A plugin module runs with full interpreter privileges.
   Only load trusted paths.
 - **Session logs are plaintext.** They inherit `$XHARNESS_HOME` directory

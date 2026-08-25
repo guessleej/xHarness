@@ -23,6 +23,22 @@ model = "your-model-id"
 # temperature = 0.6
 # max_tokens = 8192
 
+# bash 工具的沙箱：macOS 用 sandbox-exec、Linux 用 bwrap。
+# [sandbox]
+# mode = "auto"          # auto（預設）| require（沒有後端就拒絕啟動）| off
+# allow_network = true   # false 時 bash 內的指令一併斷網
+
+# 選配內建工具。
+# [tools]
+# webfetch = false       # true 啟用 webfetch 工具（對外連線，走審批）
+
+# MCP server（stdio）：其工具以 mcp__{server}__{tool} 名稱進工具清單。
+# [mcp.servers.fs]
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+# env = { KEY = "value" }
+# timeout_seconds = 60
+
 # 使用者插件：一個 Python 檔，模組層級曝露 `plugin = Plugin(...)`。
 # [[plugins]]
 # id = "my-tool"
