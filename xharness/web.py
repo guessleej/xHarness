@@ -821,8 +821,10 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   function fmtState(s){return s==='running'?'執行中':s==='waiting'?'等待許可':'閒置';}
   async function renderFleet(){
     try{
-      const f=await api('/api/fleet');const k=f.summary;
-      $('#kpis').innerHTML=[['對話',k.conversations],['執行中',k.running],['等待許可',k.waiting],['子代理',k.children],['總 tokens',k.total_tokens]]
+      const f=await api('/api/fleet');const k=Object.assign({},f.summary);
+      (f.nodes||[]).forEach(n=>{const s=n.summary||{};['conversations','running','waiting','children','total_tokens'].forEach(key=>{k[key]=(k[key]||0)+(s[key]||0);});});
+      const nodesUp=(f.nodes||[]).filter(n=>n.ok).length,nodesAll=(f.nodes||[]).length;
+      $('#kpis').innerHTML=[['對話',k.conversations],['執行中',k.running],['等待許可',k.waiting],['子代理',k.children],['總 tokens',k.total_tokens]].concat(nodesAll?[['節點在線',nodesUp+'/'+nodesAll]]:[])
         .map(([l,n])=>'<div class="kpi"><div class="n">'+n+'</div><div class="l">'+l+'</div></div>').join('');
       $('#local-head').innerHTML='<h2>本機：'+f.node+'</h2><span class="m">v'+f.version+' · '+f.model+'</span>';
       const g=$('#fleet-grid');g.innerHTML='';
