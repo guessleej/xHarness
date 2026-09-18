@@ -41,6 +41,9 @@
 | 惡意或損毀的 session resume 資料 | JSONL 逐行解析；損毀行跳過；內容是資料，永不執行 | 已緩解 |
 | Agent 失控（成本 / DoS） | `max_turns` 上限、逐指令逾時、每個工具的輸出大小上限，加上 telemetry 預算中介層（`max_total_tokens` / `max_llm_calls`）在下一次模型呼叫前硬停迴圈 | 已緩解 |
 | 不受信任 repo 的惡意 `AGENTS.md`/`CLAUDE.md` 引導 agent（system prompt 注入） | 指示檔是 repo 內容：載入它是信任決定。有大小上限（24k 字元）、可用 `--no-instructions` / `project_instructions = false` 關閉；有副作用的工具仍受審批策略把關 | 已緩解；不受信任 repo 配 `auto` 模式仍有殘餘風險 |
+| Web UI 被其他網站觸發（CSRF）或 DNS rebinding | 預設只綁 loopback；未設 token 時拒絕非 loopback 的 `Host`；所有 POST 必須帶 `X-XHarness-Client` 標頭（自訂標頭會觸發永不放行的 CORS 預檢）；不送 CORS 標頭；頁面有 CSP | 已緩解 |
+| Web UI 暴露到網路 | 綁非 loopback 位址沒有 `--token` 就拒絕啟動；token 只走 `Authorization` 標頭；SSE 串流用 60 秒一次性票證；沒認證就不准對外綁 | 已緩解 |
+| 子代理遞迴／失控分派 | 子代理看不到 `subagent` 工具；`max_workers` 限制平行數；每個子代理有 `max_turns`；子代理的每個副作用都走父代理審批；telemetry 預算連子代理一起算 | 已緩解 |
 | 模型把檔案內容外送到端點 | 設計本質：模型必須看到檔案內容才能工作。請把 xHarness 指向你信任的端點（本設計對地端友善） | 接受並揭露 |
 
 ### 殘餘風險（接受並揭露）
@@ -82,7 +85,7 @@
   輸出上限與逾時。
 - 每個 `# nosec` 抑制都要在現場附理由註解，並在本文件登錄
   （現有：`tools/bash.py` 的 `B404`/`B603`/`B607`——執行指令就是該工具的本職；
-  `llm.py` 的 `B310`——scheme 已在建構時驗證；`tools/security.py` 的 `B404`/`B603`——呼叫掃描器是該工具本職，argv 固定且有逾時；`sandbox.py` 的 `B404`/`B603`/`B108`——後端功能探測與 bwrap 的 /tmp bind 目標，探測 argv 固定）。
+  `llm.py` 的 `B310`——scheme 已在建構時驗證；`tools/security.py` 的 `B404`/`B603`——呼叫掃描器是該工具本職，argv 固定且有逾時；`evals.py` 的 `B404`/`B603`——`command` 檢查是案例作者的程式碼、在用完即丟的工作區執行；`sandbox.py` 的 `B404`/`B603`/`B108`——後端功能探測與 bwrap 的 /tmp bind 目標，探測 argv 固定）。
 
 ### 階段四：驗證
 
@@ -107,6 +110,10 @@
 - 弱點依 [SECURITY.zh.md](../SECURITY.zh.md) 私下回報：
   3 個工作天內回覆確認，確認成立的問題 14 天內提出修補或緩解方案。
 - 安全修補進 `main`，並在 release notes 標明受影響版本。
+
+### Web UI
+
+介面以設定的審批策略執行對話；`prompt` 模式會顯示審批卡片並讓工具最多等人十分鐘，逾時視為拒絕。沒有使用者模型：能連到埠並通過上述防護的人就是操作者。就算有 token 也不要暴露到信任網路之外；要分享就在前面放有真正認證的反向代理。
 
 ### Eval 子系統
 

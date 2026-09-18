@@ -23,6 +23,8 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Project instructions.** `AGENTS.md` (or `CLAUDE.md`) in the working directory is read into the system prompt automatically, so the agent follows each repo's own conventions; disable with `--no-instructions` or `project_instructions = false`.
 - **Cost brakes (telemetry).** An `llm/stream` middleware counts tokens, tool calls, and latency per model call; `max_total_tokens` / `max_llm_calls` hard-stop a runaway task, the usage summary lands in the session log, and `/usage` shows it in the REPL.
 - **Eval subsystem.** `xharness eval <dir>` runs a scored suite against any model: each case executes in a clean temp workspace and is graded by deterministic checks (files, answers, command results, whether tools were actually called) plus an optional LLM judge, reporting pass rate, per-case tokens and time, with JSONL output. The bundled `evals/basic` suite quantifies whether a model uses tools and follows instructions.
+- **Subagents.** `subagent` delegates one bounded task to a fresh child agent; `subagent_batch` fans independent tasks out in parallel. Children share tools and model, cannot spawn children, and route every side effect through the parent's approval policy.
+- **Web UI.** `xharness web` serves a local interface: streaming transcript, tool cards, approval buttons, conversation and session lists, usage chips, light/dark theme. Binds 127.0.0.1 by default; binding elsewhere requires `--token`.
 - **Append-only session log.** Every message and tool result is recorded as JSONL under `~/.xharness/sessions/`; `--resume <id>` continues a session.
 - **Two run modes.** Headless one-shot (`xharness "task"`) and an interactive REPL.
 - **Extensible.** User plugin modules add tools and services from config; `llm/stream` middleware intercepts every model call for caching, logging, or routing.
@@ -78,6 +80,8 @@ xharness --resume 2026-08-22-ab12cd34   # continue a session
 | `glob` | no | Find files by glob pattern (`**`, `*`, `?`) |
 | `grep` | no | Search file contents by regular expression |
 | `todo_write` | no | Maintain a working todo list for multi-step tasks |
+| `subagent` | yes | Delegate a task to a fresh child agent and return its answer |
+| `subagent_batch` | yes | Run independent tasks in parallel children, one heading per task |
 | `security_scan` | no | Run bandit / pip-audit / gitleaks against a directory (missing scanners are skipped) |
 | `webfetch` | yes | Fetch an http(s) URL as readable text; **disabled by default** (`[tools] webfetch = true`) — enabling it is the only egress besides the model endpoint, and every fetch goes through approval |
 
@@ -108,6 +112,30 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
 ```
 
 Tools appear in `/tools` as `mcp__fs__read_file` and the like. MCP tools without a declared `readOnlyHint` are treated as side-effectful and gated by the approval policy; a server that fails to start is skipped with a warning instead of taking the harness down.
+
+## Web UI
+
+```sh
+xharness web                          # http://127.0.0.1:3080, opens a browser
+xharness web --port 8090 --no-open
+xharness web --host 0.0.0.0 --token <long-random-string>   # non-loopback binding requires a token
+```
+
+The UI is one zero-dependency page: a glass top bar with model, usage, and status; a live streaming transcript with tool calls folded into cards; approval cards with allow/deny for side effects (`-y` makes it fully automatic); a slide-over listing running conversations and on-disk sessions (resumable). The composer guards against IME Enter (no accidental sends mid-composition).
+
+Security: loopback by default, non-loopback `Host` headers rejected (DNS rebinding), every POST needs a custom header (cross-site form posts), tokens only in `Authorization`, SSE authenticated with 60-second single-use tickets. Details in [docs/ssdlc.md](docs/ssdlc.md).
+
+## Subagents
+
+The model can delegate sub-problems so their details do not flood its own context:
+
+```toml
+[subagent]
+max_workers = 4   # parallelism for subagent_batch
+max_turns = 20    # per-child turn limit
+```
+
+Children share tools, model, telemetry, and the session log (events tagged with the `agent` name; `--resume` rebuilds only the main line). Children cannot see the `subagent` tools, so there is no unbounded recursion, and every side effect goes through the parent's approval policy — a `prompt`-mode parent still asks you.
 
 ## Evaluating models (eval)
 
@@ -228,8 +256,8 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 ## Roadmap
 
-- Web UI (local server, streaming transcript, IME-safe input handling)
-- Subagents and parallel task fan-out
+- Memory layer (auditable cross-session memory)
+- Fleet view in the Web UI (watch many agents at once)
 - Provider catalog presets
 
 ## Security

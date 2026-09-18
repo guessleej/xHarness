@@ -69,6 +69,10 @@ class AgentOptions:
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
     #: Read AGENTS.md / CLAUDE.md from cwd into the system prompt.
     project_instructions: bool = True
+    #: Agent name; session events of non-main agents are tagged with it.
+    name: str = "main"
+    #: Tool names hidden from this agent (e.g. children may not spawn children).
+    exclude_tools: set[str] = field(default_factory=set)
 
 
 class Agent:
@@ -95,13 +99,14 @@ class Agent:
 
         self.messages.append({"role": "user", "content": task})
         if session:
-            session.append({"type": "message", "role": "user", "content": task})
+            session.append({"type": "message", "role": "user", "content": task, **self._tag()})
         self.ctx.emit("agent/task-start", {"task": task})
 
         for turn in range(self.options.max_turns):
             schemas = [
                 {"name": tool.name, "description": tool.description, "parameters": tool.parameters}
                 for tool in registry.list()
+                if tool.name not in self.options.exclude_tools
             ]
             payload = {"messages": self.messages, "tools": schemas}
             reply: AssistantTurn = self.ctx.invoke(
@@ -127,6 +132,7 @@ class Agent:
                         "content": reply.content,
                         "tool_calls": reply.tool_calls or None,
                         "usage": reply.usage.__dict__ if reply.usage else None,
+                        **self._tag(),
                     }
                 )
 
@@ -147,6 +153,7 @@ class Agent:
                             "name": call["name"],
                             "output": result.output,
                             "is_error": result.is_error,
+                            **self._tag(),
                         }
                     )
 
@@ -156,9 +163,12 @@ class Agent:
         )
         return "[stopped: max turns reached]"
 
+    def _tag(self) -> dict[str, str]:
+        return {"agent": self.options.name} if self.options.name != "main" else {}
+
     def _execute_call(self, registry: ToolRegistry, call: dict[str, str]) -> ToolResult:
         tool = registry.get(call["name"])
-        if tool is None:
+        if tool is None or call["name"] in self.options.exclude_tools:
             return ToolResult(f"unknown tool: {call['name']}", is_error=True)
         try:
             args = json.loads(call["arguments"]) if call["arguments"] else {}

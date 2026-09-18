@@ -8,6 +8,7 @@ tool-call counts from the returned turn, latency from wrapping the call.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -33,6 +34,7 @@ class Telemetry:
         self.completion_tokens = 0
         self.tool_calls = 0
         self.elapsed_seconds = 0.0
+        self._lock = threading.Lock()
 
     @property
     def total_tokens(self) -> int:
@@ -56,13 +58,14 @@ class Telemetry:
             )
 
     def record(self, turn: Any, elapsed: float) -> None:
-        self.calls += 1
-        self.elapsed_seconds += elapsed
-        usage = getattr(turn, "usage", None)
-        if usage:
-            self.prompt_tokens += usage.prompt_tokens
-            self.completion_tokens += usage.completion_tokens
-        self.tool_calls += len(getattr(turn, "tool_calls", []) or [])
+        with self._lock:
+            self.calls += 1
+            self.elapsed_seconds += elapsed
+            usage = getattr(turn, "usage", None)
+            if usage:
+                self.prompt_tokens += usage.prompt_tokens
+                self.completion_tokens += usage.completion_tokens
+            self.tool_calls += len(getattr(turn, "tool_calls", []) or [])
 
     def report(self) -> dict[str, Any]:
         data: dict[str, Any] = {

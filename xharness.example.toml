@@ -15,6 +15,10 @@ max_turns = 40
 # max_llm_calls = 100
 # cost_per_1k_tokens = 0.0   # optional; adds a cost line to reports
 
+# [subagent]
+# max_workers = 4   # parallelism for subagent_batch
+# max_turns = 20    # per-child turn limit
+
 # project_instructions = true  # read AGENTS.md / CLAUDE.md from cwd into the system prompt
 
 # system_prompt = """

@@ -11,6 +11,7 @@ from .llm import llm_plugin
 from .mcp import mcp_plugin
 from .sandbox import sandbox_plugin
 from .session import session_plugin
+from .subagent import subagent_plugin
 from .telemetry import telemetry_plugin
 from .tools import tools_plugin
 from .tools.bash import bash_tool_plugin
@@ -48,6 +49,7 @@ def build_harness(
     harness.use("tool-todo", todo_tool_plugin)
     harness.use("tool-security", security_tool_plugin)
     harness.use("telemetry", telemetry_plugin(config.telemetry))
+    harness.use("subagent", subagent_plugin(config.subagent))
     if config.webfetch:
         harness.use("tool-webfetch", webfetch_tool_plugin)
     if config.mcp_servers:

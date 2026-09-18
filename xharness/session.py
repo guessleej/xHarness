@@ -72,6 +72,8 @@ def messages_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Rebuild chat messages from logged events, for --resume."""
     messages: list[dict[str, Any]] = []
     for event in events:
+        if event.get("agent") not in (None, "main"):
+            continue  # subagent traffic is logged for audit, not replayed
         if event.get("type") == "message":
             message: dict[str, Any] = {
                 "role": event.get("role", "user"),

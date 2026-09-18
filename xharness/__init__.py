@@ -1,5 +1,7 @@
 """xHarness: a plugin-based AI agent harness by xCloudinfo."""
 
+__version__ = "0.4.0"
+
 from .agent import Agent, AgentOptions, default_system_prompt, load_project_instructions
 from .config import ResolvedConfig, load_config
 from .evals import AttemptResult, CaseReport, CheckResult, format_report, load_cases, run_case, run_suite, write_results
@@ -8,8 +10,10 @@ from .llm import AssistantTurn, OpenAIAdapter, Usage, llm_plugin
 from .mcp import McpClient, McpError, mcp_plugin
 from .presets import build_harness
 from .sandbox import Sandbox, resolve_sandbox, sandbox_plugin
+from .subagent import run_child, subagent_plugin
 from .telemetry import BudgetExceeded, Telemetry, telemetry_plugin
 from .session import SessionLog, harness_home, messages_from_events, session_plugin, sessions_dir
+from .web import WebApp, serve
 from .tools import Tool, ToolContext, ToolRegistry, ToolResult, register_tools, tools_plugin
 from .tools.bash import bash_tool, bash_tool_plugin
 from .tools.fs import edit_tool, fs_tools_plugin, read_tool, write_tool
@@ -18,7 +22,6 @@ from .tools.security import security_scan_tool, security_tool_plugin
 from .tools.todo import todo_tool_plugin
 from .tools.webfetch import webfetch_tool, webfetch_tool_plugin
 
-__version__ = "0.3.0"
 
 __all__ = [
     "Agent",
@@ -65,6 +68,8 @@ __all__ = [
     "register_tools",
     "run_case",
     "run_suite",
+    "run_child",
+    "subagent_plugin",
     "resolve_sandbox",
     "sandbox_plugin",
     "search_tools_plugin",
@@ -79,4 +84,6 @@ __all__ = [
     "webfetch_tool_plugin",
     "write_results",
     "write_tool",
+    "WebApp",
+    "serve",
 ]

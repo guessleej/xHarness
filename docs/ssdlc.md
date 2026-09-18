@@ -48,6 +48,9 @@ the threat model in the same pull request.
 | Malicious or vulnerable session resume data | JSONL parsed line-by-line; corrupt lines skipped; content is data, never executed | Mitigated |
 | Runaway agent (cost / DoS) | `max_turns` bound, per-command timeouts, output size caps on every tool, and the telemetry budget middleware (`max_total_tokens` / `max_llm_calls`) hard-stops the loop before the next model call | Mitigated |
 | Malicious `AGENTS.md`/`CLAUDE.md` in an untrusted repo steers the agent (system-prompt injection) | Instruction files are repo content: loading them is a trust decision. Size-capped (24k chars), disabled with `--no-instructions` / `project_instructions = false`; the approval policy still gates mutating tools | Mitigated; residual in `auto` mode on untrusted repos |
+| Web UI reached from another site (CSRF) or via DNS rebinding | Loopback binding by default; non-loopback `Host` rejected unless a token is configured; every POST requires the `X-XHarness-Client` header (custom headers force a CORS preflight that is never granted); no CORS headers; CSP on the page | Mitigated |
+| Web UI exposed on the network | Binding a non-loopback address refuses to start without `--token`; the token travels only in `Authorization`; the SSE stream uses 60-second single-use tickets; no auth means no non-loopback binding | Mitigated |
+| Subagent recursion / runaway fan-out | Children cannot see the `subagent` tools; `max_workers` bounds parallelism; per-child `max_turns`; every child side effect goes through the parent's approval policy; the telemetry budget counts children too | Mitigated |
 | Model exfiltrates file contents to the endpoint | Inherent to the design: the model must see file contents to work. Point xHarness at an endpoint you trust (on-prem friendly by construction) | Accepted, disclosed |
 
 ### Residual risks (accepted and disclosed)
@@ -100,7 +103,7 @@ Rules the architecture enforces:
   a corresponding entry in this document (current: `B404`/`B603`/`B607` in
   `tools/bash.py` — running commands is that tool's purpose; `B310` in
   `llm.py` — scheme validated at construction; `B404`/`B603` in `tools/security.py` —
-  invoking the scanners is that tool's purpose, with fixed argv and timeouts; `B404`/`B603`/`B108` in `sandbox.py` — backend
+  invoking the scanners is that tool's purpose, with fixed argv and timeouts; `B404`/`B603` in `evals.py` — `command` checks are case-author code run in a throwaway workspace; `B404`/`B603`/`B108` in `sandbox.py` — backend
   functional probes and the bwrap /tmp bind target, fixed probe argv).
 
 ### Phase 4 — Verification
@@ -130,6 +133,10 @@ validation, widening a permission) must say so explicitly in its description.
   days for confirmed issues.
 - Security fixes land on `main` and are called out in the release notes with
   affected versions.
+
+### Web UI
+
+The UI runs conversations with the configured approval policy; `prompt` mode surfaces an approval card and blocks the tool for up to ten minutes waiting for a human, then denies. There is no user model: whoever can reach the port and pass the guards above is the operator. Do not expose it beyond a trusted network even with a token; put a reverse proxy with real authentication in front for anything shared.
 
 ### Eval subsystem
 

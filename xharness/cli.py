@@ -11,6 +11,7 @@ from . import __version__
 from .agent import Agent, AgentOptions, default_system_prompt
 from .config import load_config
 from .evals import format_report, load_cases, run_suite, write_results
+from .web import serve
 from .presets import build_harness
 from .session import SessionLog, messages_from_events
 from .tools import ToolRegistry
@@ -29,7 +30,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -43,6 +44,10 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not read AGENTS.md / CLAUDE.md from the working directory",
     )
+    parser.add_argument("--host", default="127.0.0.1", help="web: bind address (non-loopback requires --token)")
+    parser.add_argument("--port", type=int, default=3080, help="web: port (default 3080)")
+    parser.add_argument("--token", help="web: bearer token required for the API")
+    parser.add_argument("--no-open", action="store_true", dest="no_open", help="web: do not open a browser")
     parser.add_argument("--repeat", type=int, default=1, help="eval: run each case N times")
     parser.add_argument("--json", dest="json_out", help="eval: write per-attempt results as JSONL")
     parser.add_argument("-V", "--version", action="version", version=__version__)
@@ -112,6 +117,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.task and args.task[0] == "eval":
         return _run_eval(args, config)
+    if args.task and args.task[0] == "web":
+        approval_mode = "auto" if args.yes else (args.approve or config.approval)
+        return serve(
+            config,
+            host=args.host,
+            port=args.port,
+            token=args.token,
+            approval_mode=approval_mode,
+            open_browser=not args.no_open,
+        )
 
     task = " ".join(args.task).strip()
     interactive = not task
