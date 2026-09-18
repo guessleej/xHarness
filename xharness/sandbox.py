@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess  # nosec B404
 import sys
 import tempfile
 from typing import Any, Callable
@@ -74,6 +75,35 @@ def _bwrap_wrap(allow_network: bool) -> Wrap:
     return wrap
 
 
+def _probe(argv: list[str]) -> bool:
+    """Functionally probe a backend: an installed binary is not a working one.
+
+    Real case: bwrap exists but the kernel forbids unprivileged user
+    namespaces ("setting up uid map: Permission denied"), so every wrapped
+    command would fail. Selecting on `which` alone breaks the bash tool.
+    """
+    try:
+        return (
+            # Fixed probe argv, no user input.
+            subprocess.run(  # nosec B603
+                argv, capture_output=True, timeout=10
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _probe_seatbelt() -> bool:
+    return _probe(["sandbox-exec", "-p", "(version 1)(allow default)", "true"])
+
+
+def _probe_bwrap() -> bool:
+    return _probe(
+        ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "true"]
+    )
+
+
 def resolve_sandbox(config: dict[str, Any] | None) -> Sandbox | None:
     config = config or {}
     mode = str(config.get("mode", "auto"))
@@ -82,14 +112,18 @@ def resolve_sandbox(config: dict[str, Any] | None) -> Sandbox | None:
     if mode == "off":
         return None
     allow_network = bool(config.get("allow_network", True))
+    broken: list[str] = []
     if sys.platform == "darwin" and shutil.which("sandbox-exec"):
-        return Sandbox("sandbox-exec", _seatbelt_wrap(allow_network))
+        if _probe_seatbelt():
+            return Sandbox("sandbox-exec", _seatbelt_wrap(allow_network))
+        broken.append("sandbox-exec (installed but probe failed)")
     if sys.platform.startswith("linux") and shutil.which("bwrap"):
-        return Sandbox("bwrap", _bwrap_wrap(allow_network))
+        if _probe_bwrap():
+            return Sandbox("bwrap", _bwrap_wrap(allow_network))
+        broken.append("bwrap (installed but probe failed, e.g. user namespaces disabled)")
     if mode == "require":
-        raise RuntimeError(
-            "sandbox required but no backend found: need sandbox-exec (macOS) or bwrap (Linux)"
-        )
+        detail = "; ".join(broken) if broken else "need sandbox-exec (macOS) or bwrap (Linux)"
+        raise RuntimeError(f"sandbox required but no working backend: {detail}")
     return None
 
 

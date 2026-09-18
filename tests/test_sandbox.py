@@ -65,3 +65,24 @@ def test_seatbelt_network_cut(tmp_path):
     argv = sandbox.wrap(["bash", "-c", "curl -s --max-time 5 http://example.com"], str(tmp_path))
     completed = subprocess.run(argv, capture_output=True, text=True, timeout=30)
     assert completed.returncode != 0
+
+
+def test_installed_but_broken_backend_is_rejected(monkeypatch):
+    import xharness.sandbox as sb
+
+    monkeypatch.setattr(sb.sys, "platform", "linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda name: "/usr/bin/bwrap")
+    monkeypatch.setattr(sb, "_probe_bwrap", lambda: False)
+    assert sb.resolve_sandbox({"mode": "auto"}) is None
+    with pytest.raises(RuntimeError, match="probe failed"):
+        sb.resolve_sandbox({"mode": "require"})
+
+
+def test_working_backend_is_selected(monkeypatch):
+    import xharness.sandbox as sb
+
+    monkeypatch.setattr(sb.sys, "platform", "linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda name: "/usr/bin/bwrap")
+    monkeypatch.setattr(sb, "_probe_bwrap", lambda: True)
+    sandbox = sb.resolve_sandbox({})
+    assert sandbox is not None and sandbox.name == "bwrap"

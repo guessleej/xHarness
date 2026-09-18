@@ -100,7 +100,8 @@ Rules the architecture enforces:
   a corresponding entry in this document (current: `B404`/`B603`/`B607` in
   `tools/bash.py` — running commands is that tool's purpose; `B310` in
   `llm.py` — scheme validated at construction; `B404`/`B603` in `tools/security.py` —
-  invoking the scanners is that tool's purpose, with fixed argv and timeouts).
+  invoking the scanners is that tool's purpose, with fixed argv and timeouts; `B404`/`B603`/`B108` in `sandbox.py` — backend
+  functional probes and the bwrap /tmp bind target, fixed probe argv).
 
 ### Phase 4 — Verification
 
