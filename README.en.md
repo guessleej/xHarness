@@ -27,7 +27,7 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Web UI and fleet view.** `xharness web` serves a local interface: streaming transcript, tool cards, approval buttons, conversation, session, and memory lists, usage chips, light/dark theme. The fleet view shows every conversation and subagent on one page — state, usage, pending approvals — with inline approve/deny and a **stop** button per agent. Binds 127.0.0.1 by default; binding elsewhere requires `--token`.
 - **Multi-node fleet.** Every machine runs its own `xharness web` as a node; any machine whose config lists the nodes becomes a hub: its fleet view merges local and remote conversations, and approve / deny / stop are proxied through the hub. Node tokens live only in the hub's environment; the browser never sees them. `xharness fleet` prints the whole fleet in the terminal.
 - **Provider catalog presets.** `preset = "ollama"` wires up llama.cpp, Ollama, vLLM, LM Studio, LiteLLM, or OpenAI, OpenRouter, Groq, Mistral, Together in one line; `xharness providers probe` checks each endpoint and lists the models it serves.
-- **Memory layer.** Persistent memory across sessions: one Markdown file per fact under `~/.xharness/memory/` with a generated `MEMORY.md` index. The model sees the index (names and one-line descriptions) on every call and loads a memory in full only when it asks; `memory_write`/`memory_delete` go through approval and every change is recorded in `audit.jsonl` with the agent and session. `xharness memory` shows a human exactly what the agent remembers. Memories are grouped by **topic** with generated `topics/<topic>.md` pages; `xharness memory consolidate` finds duplicate, contradictory, or stale memories and proposes a merge plan — dry-run by default, `--apply` executes, `--llm` lets the model propose.
+- **Memory layer.** Persistent memory across sessions: one Markdown file per fact under `~/.xharness/memory/` with a generated `MEMORY.md` index. The model sees the index (names and one-line descriptions) on every call and loads a memory in full only when it asks; `memory_write`/`memory_delete` go through approval and every change is recorded in `audit.jsonl` with the agent and session. `xharness memory` shows a human exactly what the agent remembers. Memories are grouped by **topic** with generated `topics/<topic>.md` pages; `xharness memory consolidate` finds duplicate, contradictory, or stale memories and proposes a merge plan — dry-run by default, `--apply` executes, `--llm` lets the model propose. Memories not confirmed or used for a long time are flagged **待確認** (stale, `stale_days`, default 90) for both the model and humans; `xharness memory verify` re-verifies them (optionally with the model, using newer memories in the same topic as evidence) and `memory expire` **archives** rather than deletes what is truly expired.
 - **Append-only session log.** Every message and tool result is recorded as JSONL under `~/.xharness/sessions/`; `--resume <id>` continues a session.
 - **Two run modes.** Headless one-shot (`xharness "task"`) and an interactive REPL.
 - **Extensible.** User plugin modules add tools and services from config; `llm/stream` middleware intercepts every model call for caching, logging, or routing.
@@ -88,6 +88,7 @@ xharness --resume 2026-08-22-ab12cd34   # continue a session
 | `memory_write` | yes | Save a cross-session memory (name, one-line description, content) |
 | `memory_read` / `memory_search` / `memory_list` | no | Read in full / keyword search / list the index |
 | `memory_delete` | yes | Remove a wrong or obsolete memory |
+| `memory_verify` | yes | Confirm a stale memory is still true; resets its verification date |
 | `memory_consolidate` | yes | Tidy one topic: find duplicates / contradictions / stale entries and merge; without `apply` it only returns the plan |
 | `security_scan` | no | Run bandit / pip-audit / gitleaks against a directory (missing scanners are skipped) |
 | `webfetch` | yes | Fetch an http(s) URL as readable text; **disabled by default** (`[tools] webfetch = true`) — enabling it is the only egress besides the model endpoint, and every fetch goes through approval |
@@ -207,7 +208,16 @@ xharness memory audit           # who wrote, deleted, or consolidated what, in w
 xharness memory consolidate ops          # merge plan for topic ops (dry run)
 xharness memory consolidate ops --llm    # plus model proposals (duplicates, contradictions, stale)
 xharness memory consolidate all --apply  # execute the plans for every topic
+xharness memory stale                    # memories not confirmed or used for a long time
+xharness memory verify deploy-target     # a human confirms one is still true
+xharness memory verify ops --llm         # the model judges stale ones against newer memories (dry run)
+xharness memory verify all --llm --apply # apply only "verify" verdicts; contradictions are never auto-deleted
+xharness memory expire --apply           # archive memories older than expire_days into memory/archive/
 ```
+
+### Expiry and re-verification
+
+A memory's freshness is the latest of `verified`, `updated`, and its last `memory_read`. Past `stale_days` it is **stale**: flagged in the index, in `MEMORY.md`, and in the Web panel, and the system prompt tells the model to treat it with caution and call `memory_verify` once confirmed. Three ways to re-verify: by hand (`verify <name>`); model-assisted (`verify <topic> --llm`), which uses only **newer** memories of the same topic as evidence and returns `verify` / `contradicted` / `unknown` — `--apply` acts only on `verify`, contradictions are listed for a human; and past `expire_days` (off by default) `expire --apply` archives them, **never deletes**, audited as `expire`.
 
 ### Topics and consolidation
 
@@ -220,6 +230,8 @@ Consolidation has two layers: a **deterministic** one finds near-duplicate memor
 # enabled = true
 # dir = "/path/to/memory"    # default ~/.xharness/memory; point it at a project for project memory
 # max_index_chars = 6000
+# stale_days = 90             # days without confirmation or use before a memory is flagged stale
+# expire_days = 0             # days before it may be archived (0 = off)
 ```
 
 Governance: writes and deletes are mutating tools (interactive mode asks you); every change is audited with the agent name and session; memory is model-written content that feeds future prompts, so like `AGENTS.md` it is a trust decision — review `xharness memory audit` periodically and `memory_delete` (or delete the file) when something is wrong. The Web UI side panel lists current memories.
@@ -344,7 +356,6 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ## Roadmap
 
 - Usage history in the fleet view (per-node tokens over time)
-- Memory expiry and re-verification (flag memories not referenced for a long time)
 
 ## Security
 

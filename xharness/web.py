@@ -275,9 +275,22 @@ class WebApp:
         directory = str(self.config.memory.get("dir") or default_memory_dir())
         if not os.path.isdir(directory):
             return []
-        store = MemoryStore(directory)
+        store = MemoryStore(
+            directory,
+            stale_days=int(self.config.memory.get("stale_days", 90)),
+            expire_days=int(self.config.memory.get("expire_days", 0)),
+        )
         return [
-            {"name": memory.name, "kind": memory.kind, "topic": memory.topic, "description": memory.description, "updated": memory.updated}
+            {
+                "name": memory.name,
+                "kind": memory.kind,
+                "topic": memory.topic,
+                "description": memory.description,
+                "updated": memory.updated,
+                "verified": memory.verified,
+                "age_days": store.freshness(memory)[0],
+                "stale": store.is_stale(memory),
+            }
             for memory in store.list()
         ]
 
@@ -814,7 +827,8 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
       mem.forEach(m=>{if(m.topic!==lastTopic){lastTopic=m.topic;const h=document.createElement('div');h.className='sec';h.textContent='主題：'+m.topic;mb.appendChild(h);}
         const d=document.createElement('div');d.className='item';d.style.cursor='default';
         d.innerHTML='<div class="t"></div><div class="m"><span></span></div>';d.querySelector('.t').textContent=m.name+' · '+m.description;
-        d.querySelector('.m span').textContent=m.kind+(m.updated?' · '+m.updated.slice(0,10):'');mb.appendChild(d);});
+        d.querySelector('.m span').textContent=m.kind+(m.updated?' · '+m.updated.slice(0,10):'')+(m.stale?' · 待確認 '+m.age_days+' 天':'');
+        if(m.stale)d.querySelector('.m span').style.color='#d97706';mb.appendChild(d);});
     }catch(e){console.error(e)}
   }
 

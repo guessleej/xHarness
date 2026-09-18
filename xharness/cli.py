@@ -13,7 +13,7 @@ from .agent import Agent, AgentOptions, default_system_prompt
 from .config import load_config
 from .evals import format_report, load_cases, run_suite, write_results
 from .fleet import format_table, load_nodes, poll_all
-from .consolidate import apply_plan, build_plan
+from .consolidate import apply_plan, apply_verdicts, build_plan, verify_plan
 from .memory import MemoryStore, default_memory_dir
 from .providers import PRESETS, probe_provider
 from .web import serve
@@ -35,7 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|topics|show <name>|search <q>|audit|consolidate <topic|all> [--apply] [--llm]]" inspects and tidies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -126,7 +126,11 @@ def _run_providers(args: argparse.Namespace, config: Any) -> int:
 
 
 def _run_memory(args: argparse.Namespace, config: Any) -> int:
-    store = MemoryStore(str(config.memory.get("dir") or default_memory_dir()))
+    store = MemoryStore(
+        str(config.memory.get("dir") or default_memory_dir()),
+        stale_days=int(config.memory.get("stale_days", 90)),
+        expire_days=int(config.memory.get("expire_days", 0)),
+    )
     words = args.task[1:]
     action = words[0] if words else "list"
     if action == "list":
@@ -181,6 +185,56 @@ def _run_memory(args: argparse.Namespace, config: Any) -> int:
             else:
                 print("  (dry run; add --apply to execute)")
         return 0
+    if action == "stale":
+        stale = store.stale()
+        if not stale:
+            print(f"no stale memories (threshold {store.stale_days} days)")
+            return 0
+        for memory, age in stale:
+            print(f"{memory.name:32} {age:5} days  [{memory.topic}] {memory.description}")
+        return 0
+    if action == "verify":
+        target = words[1] if len(words) > 1 else "all"
+        if target != "all" and store.read(target) is not None and not args.use_llm:
+            memory = store.verify(target, actor={"agent": "operator", "session": None})
+            print(f"verified {target} at {memory.verified}" if memory else f"no such memory: {target}")
+            return 0 if memory else 1
+        llm = None
+        if args.use_llm:
+            from .llm import OpenAIAdapter
+
+            llm = OpenAIAdapter(**config.provider)
+        topics = list(store.topics()) if target == "all" else [target]
+        total: list[Any] = []
+        for topic in topics:
+            verdicts = verify_plan(store, topic, llm=llm)
+            for verdict in verdicts:
+                print(f"{verdict.name:32} {verdict.age_days:5} days  {verdict.verdict:12} {verdict.reason}")
+            total.extend(verdicts)
+        if not total:
+            print("nothing stale to verify")
+            return 0
+        if args.apply:
+            for line in apply_verdicts(store, total, actor={"agent": "operator", "session": None}):
+                print(f"  applied: {line}")
+        else:
+            print("  (dry run; add --apply to mark 'verify' verdicts as confirmed; contradictions are never auto-deleted)")
+        return 0
+    if action == "expire":
+        expired = store.expired()
+        if store.expire_days <= 0:
+            print("expire_days is 0 (off); set [memory] expire_days in xharness.toml to archive very old memories")
+            return 0
+        if not expired:
+            print(f"nothing older than {store.expire_days} days")
+            return 0
+        for memory, age in expired:
+            print(f"{memory.name:32} {age:5} days  [{memory.topic}] {memory.description}")
+            if args.apply and store.archive(memory.name, actor={"agent": "operator", "session": None}):
+                print("  archived (memory/archive/, not deleted)")
+        if not args.apply:
+            print("  (dry run; add --apply to move these to memory/archive/)")
+        return 0
     if action == "audit":
         records = store.audit()
         for record in records:
@@ -188,7 +242,7 @@ def _run_memory(args: argparse.Namespace, config: Any) -> int:
         if not records:
             print("no audit records")
         return 0
-    print("usage: xharness memory [list | topics | show <name> | search <words> | audit | consolidate <topic|all> [--apply] [--llm]]", file=sys.stderr)
+    print("usage: xharness memory [list | topics | show <name> | search <words> | audit | consolidate <topic|all> | stale | verify <name|topic|all> | expire] [--apply] [--llm]", file=sys.stderr)
     return 2
 
 

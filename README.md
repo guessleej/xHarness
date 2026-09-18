@@ -27,7 +27,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：�
 - **Web UI 與艦隊視圖。** `xharness web` 起本機介面：串流逐字稿、工具卡片、審批按鈕、對話與歷史 session 清單、記憶清單、用量晶片、開燈關燈；「艦隊」視圖一頁看完所有對話與子代理的狀態、用量、等待中的許可，可就地審批或**停止**任何一個 agent。預設只綁 127.0.0.1，對外綁定必須帶 `--token`。
 - **多節點艦隊。** 每台機器跑自己的 `xharness web` 當節點，任一台在設定檔列出節點就成為 hub：艦隊視圖把本機與所有節點的對話合併呈現，允許／拒絕／停止透過 hub 代理到節點；節點 token 只存在 hub 的環境變數，瀏覽器永遠碰不到。`xharness fleet` 在終端機看整個艦隊。
 - **供應端型錄預設集。** `preset = "ollama"` 一行就接上 llama.cpp／Ollama／vLLM／LM Studio／LiteLLM 或 OpenAI／OpenRouter／Groq／Mistral／Together；`xharness providers probe` 探測每個端點並列出它提供的模型。
-- **記憶層。** 跨 session 的持久記憶，一則事實一個 Markdown 檔（`~/.xharness/memory/`），自動產生 `MEMORY.md` 索引；模型每次呼叫都看到索引（名稱＋一句描述），需要才 `memory_read` 全文；`memory_write`/`memory_delete` 走審批，每次異動寫入 `audit.jsonl`（哪個 agent、哪個 session）。`xharness memory` 讓人直接檢查 agent 到底記得什麼。記憶按 **主題** 分組並自動產生 `topics/<主題>.md` 主題頁；`xharness memory consolidate` 找出重複、矛盾、過時的記憶並提出合併計畫——預設 dry-run，`--apply` 才動手，`--llm` 可讓模型提案。
+- **記憶層。** 跨 session 的持久記憶，一則事實一個 Markdown 檔（`~/.xharness/memory/`），自動產生 `MEMORY.md` 索引；模型每次呼叫都看到索引（名稱＋一句描述），需要才 `memory_read` 全文；`memory_write`/`memory_delete` 走審批，每次異動寫入 `audit.jsonl`（哪個 agent、哪個 session）。`xharness memory` 讓人直接檢查 agent 到底記得什麼。記憶按 **主題** 分組並自動產生 `topics/<主題>.md` 主題頁；`xharness memory consolidate` 找出重複、矛盾、過時的記憶並提出合併計畫——預設 dry-run，`--apply` 才動手，`--llm` 可讓模型提案。久未確認或使用的記憶會標 **待確認**（`stale_days`，預設 90 天）讓模型與人都看見；`xharness memory verify` 重驗（可用同主題較新的記憶當證據請模型判斷）、`memory expire` 把真正過期的**歸檔**而非刪除。
 - **只增不改的 session 記錄。** 每則訊息與工具結果都以 JSONL 記錄在 `~/.xharness/sessions/`；`--resume <id>` 可接續。
 - **兩種執行模式。** headless 一次性（`xharness "任務"`）與互動 REPL。
 - **可擴充。** 使用者插件模組可從設定檔加入工具與服務；`llm/stream` 中介層可攔截每次模型呼叫做快取、記錄或路由。
@@ -88,6 +88,7 @@ xharness --resume 2026-08-22-ab12cd34   # 接續 session
 | `memory_write` | 是 | 存一則跨 session 的記憶（名稱、一句描述、內容） |
 | `memory_read` / `memory_search` / `memory_list` | 否 | 讀全文／關鍵字搜尋／列索引 |
 | `memory_delete` | 是 | 刪除錯誤或過時的記憶 |
+| `memory_verify` | 是 | 確認一則「待確認」的記憶仍成立，重設確認日期 |
 | `memory_consolidate` | 是 | 整併一個主題：找重複／矛盾／過時並合併，不帶 `apply` 只回計畫 |
 | `security_scan` | 否 | 對目錄跑 bandit / pip-audit / gitleaks（未安裝的略過） |
 | `webfetch` | 是 | 抓取 http(s) 網頁並轉成可讀文字；**預設關閉**（`[tools] webfetch = true` 才開）——開了它才會有模型端點以外的對外連線，且每次抓取都走審批 |
@@ -207,7 +208,16 @@ xharness memory audit           # 誰在哪個 session 寫／刪／整併了什�
 xharness memory consolidate ops          # 主題 ops 的整併計畫（dry-run）
 xharness memory consolidate ops --llm    # 加上模型提案（重複、矛盾、過時）
 xharness memory consolidate all --apply  # 執行所有主題的計畫
+xharness memory stale                    # 列出待確認（久未確認／使用）的記憶
+xharness memory verify deploy-target     # 人工確認一則仍成立
+xharness memory verify ops --llm         # 用同主題較新的記憶當證據請模型判斷（dry-run）
+xharness memory verify all --llm --apply # 只把判定 verify 的標為已確認；矛盾的永遠不自動刪
+xharness memory expire --apply           # 超過 expire_days 的歸檔到 memory/archive/
 ```
+
+### 到期與重驗
+
+每則記憶的「新鮮度」取 `verified`／`updated`／最後一次被 `memory_read` 三者最晚者。超過 `stale_days` 就是**待確認**：索引、`MEMORY.md`、Web 面板都會標記，system prompt 會提醒模型謹慎並在確認後呼叫 `memory_verify`。重驗有三條路：人工 `verify <name>`；模型輔助 `verify <topic> --llm`——只拿同主題**較新**的記憶當證據，回 `verify`／`contradicted`／`unknown`，`--apply` 只套用 `verify`，矛盾的只列出讓人決定；再久到 `expire_days`（預設關）就 `expire --apply` 歸檔，**永遠不刪**，稽核記 `expire`。
 
 ### 主題與彙整
 
@@ -220,6 +230,8 @@ xharness memory consolidate all --apply  # 執行所有主題的計畫
 # enabled = true
 # dir = "/path/to/memory"    # 預設 ~/.xharness/memory；指到專案目錄就變成專案記憶
 # max_index_chars = 6000
+# stale_days = 90             # 幾天未確認／未使用就標「待確認」
+# expire_days = 0             # 幾天後可歸檔（0 = 關）
 ```
 
 治理：寫入與刪除都是有副作用的工具（互動模式會問你）；每次異動記錄 agent 名稱與 session 到 `audit.jsonl`；記憶是模型寫的內容、會回到未來的 prompt，所以它跟 AGENTS.md 一樣是信任決定——用 `xharness memory audit` 定期看，不對就 `memory_delete` 或直接刪檔。Web UI 的側面板也列出目前的記憶。
@@ -323,7 +335,6 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ## 藍圖
 
 - 艦隊視圖的歷史趨勢（每節點用量隨時間）
-- 記憶的到期與重驗（久未引用的記憶標示待確認）
 
 ## 安全
 

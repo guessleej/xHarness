@@ -212,3 +212,67 @@ def apply_plan(store: MemoryStore, plan: Plan, actor: dict[str, Any] | None = No
         if store.delete(name, actor=actor, action="consolidate"):
             done.append(f"deleted {name}")
     return done
+
+
+VERIFY_INSTRUCTIONS = (
+    "你是記憶稽核員。下面第一段是一則久未確認的記憶，第二段是同主題較新的記憶（證據）。"
+    "只根據證據判斷這則記憶是否仍然成立：若證據沒有與它矛盾，回 verify；若證據明確與它矛盾，回 contradicted；"
+    "若證據不足以判斷，回 unknown。只回覆一個 JSON 物件：{\"verdict\":\"verify|contradicted|unknown\",\"reason\":\"一句話\"}"
+)
+
+
+@dataclass
+class Verdict:
+    name: str
+    age_days: int
+    verdict: str
+    reason: str
+
+
+def verify_plan(store: MemoryStore, topic: str, llm: Any | None = None) -> list[Verdict]:
+    """Re-check the stale memories of a topic against its newer memories.
+
+    Without a model every stale memory is reported as "unknown" (a human
+    decides). With a model, newer memories in the topic serve as evidence;
+    nothing is changed here, the caller applies verdicts explicitly.
+    """
+    memories = store.topics().get(topic, [])
+    stale = [(memory, age) for memory, age in store.stale() if memory.topic == topic]
+    verdicts: list[Verdict] = []
+    for memory, age in stale:
+        if llm is None:
+            verdicts.append(Verdict(memory.name, age, "unknown", "no model; confirm by hand"))
+            continue
+        evidence = [other for other in memories if other.name != memory.name and not store.is_stale(other)]
+        if not evidence:
+            verdicts.append(Verdict(memory.name, age, "unknown", "no newer memories in this topic to check against"))
+            continue
+        prompt = (
+            f"{VERIFY_INSTRUCTIONS}\n\n## 待確認的記憶\n### {memory.name}\n{memory.description}\n{memory.body.strip()}"
+            f"\n\n## 證據（較新的記憶）\n{_topic_dump(evidence)}"
+        )
+        turn = llm.stream([{"role": "user", "content": prompt}], [])
+        match = re.search(r"\{.*\}", turn.content, re.S)
+        verdict, reason = "unknown", "model returned no JSON"
+        if match:
+            try:
+                data = json.loads(match.group(0))
+                candidate = str(data.get("verdict") or "").strip().lower()
+                if candidate in ("verify", "contradicted", "unknown"):
+                    verdict = candidate
+                    reason = str(data.get("reason") or "")[:200]
+                else:
+                    reason = f"unrecognised verdict {candidate!r}"
+            except json.JSONDecodeError:
+                reason = "model returned invalid JSON"
+        verdicts.append(Verdict(memory.name, age, verdict, reason))
+    return verdicts
+
+
+def apply_verdicts(store: MemoryStore, verdicts: list[Verdict], actor: dict[str, Any] | None = None) -> list[str]:
+    """Only "verify" verdicts change anything; contradictions are reported, never auto-deleted."""
+    done: list[str] = []
+    for verdict in verdicts:
+        if verdict.verdict == "verify" and store.verify(verdict.name, actor=actor):
+            done.append(f"verified {verdict.name}")
+    return done

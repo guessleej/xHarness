@@ -47,6 +47,7 @@
 | 被下毒的記憶讓提示注入跨 session 持續 | 記憶是模型寫的內容、會回到未來的 system prompt，因此與 `AGENTS.md` 一樣是信任決定：寫入與刪除走審批策略；只注入有大小上限的索引，全文要明確 `memory_read` 才載入；每次異動都稽核（`audit.jsonl`：agent、session、動作），`xharness memory audit` 與 Web UI 都看得到；檔案是人能直接刪的純 Markdown；`[memory] enabled = false` 可整個關閉 | 已緩解；`auto` 模式仍有殘餘風險 |
 | 多節點 hub 被入侵或節點 token 外洩 | 節點 token 以環境變數名稱參照（`token_env`）、絕不寫進設定檔；hub 只轉發 `approvals` 與 `stop` 且驗證 id；節點被 hub 詢問時不再輪詢自己的節點（不遞迴）；節點綁非 loopback 必須有 token，`XHARNESS_WEB_TOKEN_FILE` 讓 token 不出現在命令列；純 http 僅限信任的 LAN——跨網段前面放 TLS | 已緩解；殘餘：無 TLS 的 LAN 竊聽 |
 | 彙整讓模型大幅改寫或刪除記憶 | 計畫只是提案：CLI 預設 dry-run，agent 工具不帶 `apply` 只回計畫、帶了要過審批；模型提案只能引用主題內存在的名稱，其餘丟棄；確定性層只把近乎重複者併入較新那則；每筆合併／刪除都以 `consolidate` 稽核 | 已緩解；`auto` 模式仍有殘餘風險 |
+| 過時的記憶在現實已改變後仍引導 agent | 新鮮度取 verified／updated／最後一次讀取三者最晚者；超過 `stale_days` 在注入的索引標「待確認」並告知模型謹慎；重驗是明確動作（`memory_verify` 走審批、`xharness memory verify`），模型輔助判定只拿同主題較新記憶當證據、且只套用 `verify` 判定；到期只歸檔不刪、稽核記 `expire` | 已緩解 |
 | 模型把檔案內容外送到端點 | 設計本質：模型必須看到檔案內容才能工作。請把 xHarness 指向你信任的端點（本設計對地端友善） | 接受並揭露 |
 
 ### 殘餘風險（接受並揭露）

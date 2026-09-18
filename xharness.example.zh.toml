@@ -24,6 +24,8 @@ max_turns = 40
 # enabled = true
 # dir = "/path/to/memory"   # 預設 ~/.xharness/memory
 # max_index_chars = 6000
+# stale_days = 90             # 幾天未確認／未使用就標「待確認」
+# expire_days = 0             # 幾天後可歸檔（0 = 關）
 
 # [fleet]
 # name = "hub-office"          # 本機在艦隊視圖的名稱

@@ -23,6 +23,8 @@ max_turns = 40
 # enabled = true
 # dir = "/path/to/memory"   # default ~/.xharness/memory
 # max_index_chars = 6000
+# stale_days = 90             # flag memories not confirmed or used for this long
+# expire_days = 0             # archive after this long (0 = off)
 
 # [fleet]
 # name = "hub-office"

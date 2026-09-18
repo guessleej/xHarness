@@ -31,7 +31,10 @@ DEFAULT_MAX_INDEX_CHARS = 6_000
 DEFAULT_SEARCH_LIMIT = 8
 INDEX_FILE = "MEMORY.md"
 TOPICS_DIR = "topics"
+ARCHIVE_DIR = "archive"
 AUDIT_FILE = "audit.jsonl"
+USAGE_FILE = "usage.json"
+DEFAULT_STALE_DAYS = 90
 
 
 @dataclass
@@ -42,6 +45,7 @@ class Memory:
     updated: str
     body: str
     topic: str = ""
+    verified: str = ""
 
     def __post_init__(self) -> None:
         self.topic = _slugify(self.topic) or _slugify(self.kind) or "note"
@@ -54,7 +58,8 @@ class Memory:
             f"kind: {self.kind}\n"
             f"topic: {self.topic}\n"
             f"updated: {self.updated}\n"
-            "---\n\n"
+            + (f"verified: {self.verified}\n" if self.verified else "")
+            + "---\n\n"
             f"{self.body.rstrip()}\n"
         )
 
@@ -86,13 +91,30 @@ def parse_memory(name: str, text: str) -> Memory:
         updated=meta.get("updated", ""),
         body=body,
         topic=meta.get("topic", ""),
+        verified=meta.get("verified", ""),
     )
 
 
+def _parse_time(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 class MemoryStore:
-    def __init__(self, directory: str, max_index_chars: int = DEFAULT_MAX_INDEX_CHARS) -> None:
+    def __init__(
+        self,
+        directory: str,
+        max_index_chars: int = DEFAULT_MAX_INDEX_CHARS,
+        stale_days: int = DEFAULT_STALE_DAYS,
+        expire_days: int = 0,
+    ) -> None:
         self.directory = directory
         self.max_index_chars = max_index_chars
+        self.stale_days = stale_days
+        self.expire_days = expire_days  # 0 = never archive automatically
         self._lock = threading.Lock()
         os.makedirs(directory, exist_ok=True)
 
@@ -140,7 +162,7 @@ class MemoryStore:
         if len(body) > MAX_MEMORY_CHARS:
             raise ValueError(f"content exceeds {MAX_MEMORY_CHARS} characters")
         kind = " ".join(kind.split())[:32] or "note"
-        memory = Memory(name=name, description=description, kind=kind, updated=_now(), body=body, topic=topic)
+        memory = Memory(name=name, description=description, kind=kind, updated=_now(), body=body, topic=topic, verified=_now())
         with self._lock:
             existed = os.path.exists(self._path(name))
             with open(self._path(name), "w", encoding="utf-8") as handle:
@@ -171,12 +193,93 @@ class MemoryStore:
     def recent(self, limit: int = 10) -> list[dict[str, Any]]:
         return list(reversed(self.audit(limit)))
 
+    # --- freshness: usage, staleness, verification, expiry -----------------
+    def _usage_path(self) -> str:
+        return os.path.join(self.directory, USAGE_FILE)
+
+    def usage(self) -> dict[str, dict[str, Any]]:
+        try:
+            with open(self._usage_path(), encoding="utf-8") as handle:
+                data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def touch(self, name: str) -> None:
+        """Record that a memory was actually used (read in full)."""
+        with self._lock:
+            data = self.usage()
+            entry = data.get(name) or {"uses": 0}
+            entry["uses"] = int(entry.get("uses", 0)) + 1
+            entry["last_used"] = _now()
+            data[name] = entry
+            with open(self._usage_path(), "w", encoding="utf-8") as handle:
+                json.dump(data, handle, ensure_ascii=False, indent=1)
+
+    def freshness(self, memory: Memory, now: datetime | None = None) -> tuple[int, str]:
+        """(age in days since last confirmation or use, source of that date)."""
+        now = now or datetime.now(timezone.utc)
+        candidates: list[tuple[datetime, str]] = []
+        for value, label in ((memory.verified, "verified"), (memory.updated, "updated")):
+            parsed = _parse_time(value)
+            if parsed:
+                candidates.append((parsed, label))
+        used = self.usage().get(memory.name, {}).get("last_used")
+        parsed = _parse_time(str(used)) if used else None
+        if parsed:
+            candidates.append((parsed, "used"))
+        if not candidates:
+            return 10**6, "never"
+        latest, label = max(candidates)
+        return max(0, (now - latest).days), label
+
+    def is_stale(self, memory: Memory, now: datetime | None = None) -> bool:
+        return self.stale_days > 0 and self.freshness(memory, now)[0] >= self.stale_days
+
+    def stale(self, now: datetime | None = None) -> list[tuple[Memory, int]]:
+        found = [(memory, self.freshness(memory, now)[0]) for memory in self.list()]
+        return sorted([(m, age) for m, age in found if self.is_stale(m, now)], key=lambda item: -item[1])
+
+    def verify(self, name: str, actor: dict[str, Any] | None = None) -> Memory | None:
+        """A human (or an approved agent) confirms the memory is still true."""
+        memory = self.read(name)
+        if memory is None:
+            return None
+        memory.verified = _now()
+        with self._lock:
+            with open(self._path(name), "w", encoding="utf-8") as handle:
+                handle.write(memory.to_text())
+            self._rebuild_index()
+            self._audit("verify", name, actor)
+        return memory
+
+    def expired(self, now: datetime | None = None) -> list[tuple[Memory, int]]:
+        if self.expire_days <= 0:
+            return []
+        return [(m, age) for m, age in self.stale(now) if age >= self.expire_days]
+
+    def archive(self, name: str, actor: dict[str, Any] | None = None) -> bool:
+        """Move an expired memory out of the index; nothing is ever deleted by expiry."""
+        if not SLUG.match(name) or not os.path.exists(self._path(name)):
+            return False
+        archive_dir = os.path.join(self.directory, ARCHIVE_DIR)
+        os.makedirs(archive_dir, exist_ok=True)
+        with self._lock:
+            os.replace(self._path(name), os.path.join(archive_dir, f"{name}.md"))
+            self._rebuild_index()
+            self._audit("expire", name, actor)
+        return True
+
     # --- index and search ----------------------------------------------
     def index_lines(self) -> list[str]:
         lines: list[str] = []
+        now = datetime.now(timezone.utc)
         for topic, memories in self.topics().items():
             lines.append(f"[{topic}]")
-            lines.extend(f"- {memory.name} ({memory.kind}): {memory.description}" for memory in memories)
+            for memory in memories:
+                age, _source = self.freshness(memory, now)
+                flag = f", 待確認 {age} 天未確認" if self.is_stale(memory, now) else ""
+                lines.append(f"- {memory.name} ({memory.kind}{flag}): {memory.description}")
         return lines
 
     def index_text(self) -> str:
@@ -203,9 +306,9 @@ class MemoryStore:
             content += "\n(no memories yet)\n"
         for topic, memories in topics.items():
             content += f"\n## {topic} ({len(memories)})\n\n"
-            content += "".join(
-                f"- [{memory.name}]({memory.name}.md) ({memory.kind}): {memory.description}\n" for memory in memories
-            )
+            for memory in memories:
+                flag = " **待確認**" if self.is_stale(memory) else ""
+                content += f"- [{memory.name}]({memory.name}.md) ({memory.kind}){flag}: {memory.description}\n"
         with open(os.path.join(self.directory, INDEX_FILE), "w", encoding="utf-8") as handle:
             handle.write(content)
         # Topic pages: one generated Markdown page per topic with every memory in full,
@@ -274,6 +377,8 @@ def memory_plugin(config: dict[str, Any] | None = None) -> Plugin:
         store = MemoryStore(
             str(settings.get("dir") or default_memory_dir()),
             max_index_chars=int(settings.get("max_index_chars", DEFAULT_MAX_INDEX_CHARS)),
+            stale_days=int(settings.get("stale_days", DEFAULT_STALE_DAYS)),
+            expire_days=int(settings.get("expire_days", 0)),
         )
         ctx.provide("memory", store)
 
@@ -296,7 +401,9 @@ def memory_plugin(config: dict[str, Any] | None = None) -> Plugin:
                 head["content"] = (
                     f"{head['content']}\n\n## Memory index\n"
                     "Facts you saved earlier (name: description). Call memory_read for the full "
-                    "text, memory_search to find more, memory_write to save something worth keeping.\n"
+                    "text, memory_search to find more, memory_write to save something worth keeping. "
+                    "Entries marked 待確認 have not been confirmed or used for a long time: treat them "
+                    "with caution and call memory_verify once you confirm one is still true.\n"
                     f"{index}"
                 )
                 payload = {**payload, "messages": [head, *messages[1:]]}
@@ -328,6 +435,7 @@ def memory_plugin(config: dict[str, Any] | None = None) -> Plugin:
             memory = store.read(str(args.get("name") or "").strip().lower())
             if memory is None:
                 return ToolResult("no such memory", is_error=True)
+            store.touch(memory.name)
             return ToolResult(memory.to_text())
 
         def search(args: dict[str, Any], _tool_ctx: ToolContext) -> ToolResult:
@@ -342,6 +450,16 @@ def memory_plugin(config: dict[str, Any] | None = None) -> Plugin:
         def list_all(_args: dict[str, Any], _tool_ctx: ToolContext) -> ToolResult:
             lines = store.index_lines()
             return ToolResult("\n".join(lines) if lines else "no memories yet")
+
+        def verify(args: dict[str, Any], tool_ctx: ToolContext) -> ToolResult:
+            name = str(args.get("name") or "").strip().lower()
+            if not tool_ctx.approve(f"memory_verify: {name}"):
+                return ToolResult("denied by approval policy", is_error=True)
+            memory = store.verify(name, actor=actor(tool_ctx))
+            if memory is None:
+                return ToolResult("no such memory", is_error=True)
+            note_session("verify", name)
+            return ToolResult(f"verified memory {name} at {memory.verified}")
 
         def delete(args: dict[str, Any], tool_ctx: ToolContext) -> ToolResult:
             name = str(args.get("name") or "").strip().lower()
@@ -416,6 +534,16 @@ def memory_plugin(config: dict[str, Any] | None = None) -> Plugin:
                     description="List every memory: name, kind, and description.",
                     parameters={"type": "object", "properties": {}},
                     execute=list_all,
+                ),
+                Tool(
+                    name="memory_verify",
+                    description=(
+                        "Confirm that a memory marked 待確認 is still true, after you have checked it "
+                        "against current facts. Resets its verification date."
+                    ),
+                    mutating=True,
+                    parameters={"type": "object", "properties": {"name": slug_param}, "required": ["name"]},
+                    execute=verify,
                 ),
                 Tool(
                     name="memory_consolidate",
