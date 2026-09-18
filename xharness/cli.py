@@ -173,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.task and args.task[0] == "sessions":
         _list_sessions()
         return 0
+    if args.task[:2] == ["providers", "presets"]:
+        return _run_providers(args, None)  # the catalog needs no config
 
     try:
         config = load_config(args.config_path, provider_override=args.provider, model_override=args.model)

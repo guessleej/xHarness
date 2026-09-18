@@ -65,3 +65,13 @@ def test_probe_lists_models_and_reports_failures(monkeypatch):
     assert not result.ok and "401" in result.detail
     assert not probe_provider("p", {"base_url": "file:///etc"}).ok
     assert not probe_provider("p", {}).ok
+
+
+def test_cli_presets_needs_no_config(tmp_path, monkeypatch, capsys):
+    from xharness.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("XHARNESS_BASE_URL", raising=False)
+    assert main(["providers", "presets"]) == 0
+    out = capsys.readouterr().out
+    assert "ollama" in out and "hosted" in out and "OPENAI_API_KEY" in out
