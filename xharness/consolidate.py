@@ -89,7 +89,10 @@ def deterministic_plan(topic: str, memories: list[Memory]) -> Plan:
             keep, drop = right, left
         body = keep.body.rstrip()
         if drop.body.strip() and drop.body.strip() not in body:
-            body += f"\n\n{drop.body.strip()}"
+            # Similar text is not the same fact: keep the older wording, but
+            # labelled with its source and date so a contradiction stays visible.
+            stamp = drop.updated[:10] or "unknown date"
+            body += f"\n\n---\n併入自 {drop.name}（{stamp}，較舊）：\n{drop.body.strip()}"
         plan.merges.append(
             Merge(
                 into=keep.name,

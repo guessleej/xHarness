@@ -48,6 +48,7 @@ def test_apply_plan_merges_and_audits(tmp_path):
     assert store.read("deploy-a") is None
     merged = store.read("deploy-b")
     assert merged is not None and "xcloud user" in merged.body and merged.topic == "ops"
+    assert "併入自 deploy-a" in merged.body and "較舊" in merged.body
     actions = [record["action"] for record in store.audit()]
     assert actions[-2:] == ["consolidate", "consolidate"]
     assert build_plan(store, "ops").empty
