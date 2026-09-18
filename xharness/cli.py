@@ -13,6 +13,7 @@ from .agent import Agent, AgentOptions, default_system_prompt
 from .config import load_config
 from .evals import format_report, load_cases, run_suite, write_results
 from .fleet import format_table, load_nodes, poll_all
+from .consolidate import apply_plan, build_plan
 from .memory import MemoryStore, default_memory_dir
 from .providers import PRESETS, probe_provider
 from .web import serve
@@ -34,7 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|show <name>|search <q>|audit]" inspects memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|topics|show <name>|search <q>|audit|consolidate <topic|all> [--apply] [--llm]]" inspects and tidies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -52,6 +53,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=3080, help="web: port (default 3080)")
     parser.add_argument("--token", help="web: bearer token for the API (or XHARNESS_WEB_TOKEN / XHARNESS_WEB_TOKEN_FILE)")
     parser.add_argument("--no-open", action="store_true", dest="no_open", help="web: do not open a browser")
+    parser.add_argument("--apply", action="store_true", help="memory consolidate: execute the plan (default: dry run)")
+    parser.add_argument("--llm", action="store_true", dest="use_llm", help="memory consolidate: also ask the model for proposals")
     parser.add_argument("--repeat", type=int, default=1, help="eval: run each case N times")
     parser.add_argument("--json", dest="json_out", help="eval: write per-attempt results as JSONL")
     parser.add_argument("-V", "--version", action="version", version=__version__)
@@ -144,6 +147,40 @@ def _run_memory(args: argparse.Namespace, config: Any) -> int:
         if not hits:
             print("no matching memories")
         return 0
+    if action == "topics":
+        topics = store.topics()
+        if not topics:
+            print("no memories")
+            return 0
+        for topic, memories in topics.items():
+            print(f"{topic} ({len(memories)})")
+            for memory in memories:
+                print(f"    {memory.name}: {memory.description}")
+        return 0
+    if action == "consolidate":
+        targets = words[1:2] or ["all"]
+        topics = list(store.topics()) if targets[0] == "all" else [targets[0]]
+        if not topics:
+            print("no memories to consolidate")
+            return 0
+        llm = None
+        if args.use_llm:
+            from .llm import OpenAIAdapter
+
+            llm = OpenAIAdapter(**config.provider)
+        changed = 0
+        for topic in topics:
+            plan = build_plan(store, topic, llm=llm)
+            print(plan.describe())
+            if plan.empty:
+                continue
+            if args.apply:
+                for line in apply_plan(store, plan, actor={"agent": "operator", "session": None}):
+                    print(f"  applied: {line}")
+                    changed += 1
+            else:
+                print("  (dry run; add --apply to execute)")
+        return 0
     if action == "audit":
         records = store.audit()
         for record in records:
@@ -151,7 +188,7 @@ def _run_memory(args: argparse.Namespace, config: Any) -> int:
         if not records:
             print("no audit records")
         return 0
-    print("usage: xharness memory [list | show <name> | search <words> | audit]", file=sys.stderr)
+    print("usage: xharness memory [list | topics | show <name> | search <words> | audit | consolidate <topic|all> [--apply] [--llm]]", file=sys.stderr)
     return 2
 
 

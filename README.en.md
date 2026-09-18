@@ -27,7 +27,7 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Web UI and fleet view.** `xharness web` serves a local interface: streaming transcript, tool cards, approval buttons, conversation, session, and memory lists, usage chips, light/dark theme. The fleet view shows every conversation and subagent on one page — state, usage, pending approvals — with inline approve/deny and a **stop** button per agent. Binds 127.0.0.1 by default; binding elsewhere requires `--token`.
 - **Multi-node fleet.** Every machine runs its own `xharness web` as a node; any machine whose config lists the nodes becomes a hub: its fleet view merges local and remote conversations, and approve / deny / stop are proxied through the hub. Node tokens live only in the hub's environment; the browser never sees them. `xharness fleet` prints the whole fleet in the terminal.
 - **Provider catalog presets.** `preset = "ollama"` wires up llama.cpp, Ollama, vLLM, LM Studio, LiteLLM, or OpenAI, OpenRouter, Groq, Mistral, Together in one line; `xharness providers probe` checks each endpoint and lists the models it serves.
-- **Memory layer.** Persistent memory across sessions: one Markdown file per fact under `~/.xharness/memory/` with a generated `MEMORY.md` index. The model sees the index (names and one-line descriptions) on every call and loads a memory in full only when it asks; `memory_write`/`memory_delete` go through approval and every change is recorded in `audit.jsonl` with the agent and session. `xharness memory` shows a human exactly what the agent remembers.
+- **Memory layer.** Persistent memory across sessions: one Markdown file per fact under `~/.xharness/memory/` with a generated `MEMORY.md` index. The model sees the index (names and one-line descriptions) on every call and loads a memory in full only when it asks; `memory_write`/`memory_delete` go through approval and every change is recorded in `audit.jsonl` with the agent and session. `xharness memory` shows a human exactly what the agent remembers. Memories are grouped by **topic** with generated `topics/<topic>.md` pages; `xharness memory consolidate` finds duplicate, contradictory, or stale memories and proposes a merge plan — dry-run by default, `--apply` executes, `--llm` lets the model propose.
 - **Append-only session log.** Every message and tool result is recorded as JSONL under `~/.xharness/sessions/`; `--resume <id>` continues a session.
 - **Two run modes.** Headless one-shot (`xharness "task"`) and an interactive REPL.
 - **Extensible.** User plugin modules add tools and services from config; `llm/stream` middleware intercepts every model call for caching, logging, or routing.
@@ -88,6 +88,7 @@ xharness --resume 2026-08-22-ab12cd34   # continue a session
 | `memory_write` | yes | Save a cross-session memory (name, one-line description, content) |
 | `memory_read` / `memory_search` / `memory_list` | no | Read in full / keyword search / list the index |
 | `memory_delete` | yes | Remove a wrong or obsolete memory |
+| `memory_consolidate` | yes | Tidy one topic: find duplicates / contradictions / stale entries and merge; without `apply` it only returns the plan |
 | `security_scan` | no | Run bandit / pip-audit / gitleaks against a directory (missing scanners are skipped) |
 | `webfetch` | yes | Fetch an http(s) URL as readable text; **disabled by default** (`[tools] webfetch = true`) — enabling it is the only egress besides the model endpoint, and every fetch goes through approval |
 
@@ -198,11 +199,21 @@ Built in: `llama-cpp`, `ollama`, `vllm`, `lmstudio`, `litellm` (local); `openai`
 Memory is for humans to read: `~/.xharness/memory/<name>.md`, one fact per file with a small front matter (name, description, kind, updated) followed by the body; `MEMORY.md` is a generated index. The model sees the index in its system prompt on every call (size-capped; overflow says "use memory_search") and only loads a memory in full when it calls `memory_read` — memory never silently floods the context.
 
 ```sh
-xharness memory                 # the index: what the agent remembers
+xharness memory                 # the index: what the agent remembers, grouped by topic
+xharness memory topics          # topics and their memories
 xharness memory show fav-editor # one memory in full
 xharness memory search deploy   # keyword search
-xharness memory audit           # who wrote or deleted what, in which session
+xharness memory audit           # who wrote, deleted, or consolidated what, in which session
+xharness memory consolidate ops          # merge plan for topic ops (dry run)
+xharness memory consolidate ops --llm    # plus model proposals (duplicates, contradictions, stale)
+xharness memory consolidate all --apply  # execute the plans for every topic
 ```
+
+### Topics and consolidation
+
+Every memory has a `topic` (default: its `kind`). `MEMORY.md` is sectioned by topic and `topics/<topic>.md` are generated pages that concatenate a topic's memories in full, so a person reads one subject in one place instead of opening a dozen files.
+
+Consolidation has two layers: a **deterministic** one finds near-duplicate memories by text similarity and folds them into the newer (on a tie, fuller) one; a **model** layer (`--llm`, or the tool's `use_model`) reads the whole topic and proposes merges and deletions with reasons, but may only reference names that exist in the topic — anything else is dropped. A plan is always shown before it runs: the CLI is dry-run by default, the agent's `memory_consolidate` returns the plan unless `apply` is set and then goes through approval; every merge and delete is audited as `consolidate`.
 
 ```toml
 [memory]
@@ -332,8 +343,8 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 ## Roadmap
 
-- Memory consolidation (fold scattered memories into topic pages)
 - Usage history in the fleet view (per-node tokens over time)
+- Memory expiry and re-verification (flag memories not referenced for a long time)
 
 ## Security
 

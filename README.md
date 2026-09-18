@@ -27,7 +27,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：�
 - **Web UI 與艦隊視圖。** `xharness web` 起本機介面：串流逐字稿、工具卡片、審批按鈕、對話與歷史 session 清單、記憶清單、用量晶片、開燈關燈；「艦隊」視圖一頁看完所有對話與子代理的狀態、用量、等待中的許可，可就地審批或**停止**任何一個 agent。預設只綁 127.0.0.1，對外綁定必須帶 `--token`。
 - **多節點艦隊。** 每台機器跑自己的 `xharness web` 當節點，任一台在設定檔列出節點就成為 hub：艦隊視圖把本機與所有節點的對話合併呈現，允許／拒絕／停止透過 hub 代理到節點；節點 token 只存在 hub 的環境變數，瀏覽器永遠碰不到。`xharness fleet` 在終端機看整個艦隊。
 - **供應端型錄預設集。** `preset = "ollama"` 一行就接上 llama.cpp／Ollama／vLLM／LM Studio／LiteLLM 或 OpenAI／OpenRouter／Groq／Mistral／Together；`xharness providers probe` 探測每個端點並列出它提供的模型。
-- **記憶層。** 跨 session 的持久記憶，一則事實一個 Markdown 檔（`~/.xharness/memory/`），自動產生 `MEMORY.md` 索引；模型每次呼叫都看到索引（名稱＋一句描述），需要才 `memory_read` 全文；`memory_write`/`memory_delete` 走審批，每次異動寫入 `audit.jsonl`（哪個 agent、哪個 session）。`xharness memory` 讓人直接檢查 agent 到底記得什麼。
+- **記憶層。** 跨 session 的持久記憶，一則事實一個 Markdown 檔（`~/.xharness/memory/`），自動產生 `MEMORY.md` 索引；模型每次呼叫都看到索引（名稱＋一句描述），需要才 `memory_read` 全文；`memory_write`/`memory_delete` 走審批，每次異動寫入 `audit.jsonl`（哪個 agent、哪個 session）。`xharness memory` 讓人直接檢查 agent 到底記得什麼。記憶按 **主題** 分組並自動產生 `topics/<主題>.md` 主題頁；`xharness memory consolidate` 找出重複、矛盾、過時的記憶並提出合併計畫——預設 dry-run，`--apply` 才動手，`--llm` 可讓模型提案。
 - **只增不改的 session 記錄。** 每則訊息與工具結果都以 JSONL 記錄在 `~/.xharness/sessions/`；`--resume <id>` 可接續。
 - **兩種執行模式。** headless 一次性（`xharness "任務"`）與互動 REPL。
 - **可擴充。** 使用者插件模組可從設定檔加入工具與服務；`llm/stream` 中介層可攔截每次模型呼叫做快取、記錄或路由。
@@ -88,6 +88,7 @@ xharness --resume 2026-08-22-ab12cd34   # 接續 session
 | `memory_write` | 是 | 存一則跨 session 的記憶（名稱、一句描述、內容） |
 | `memory_read` / `memory_search` / `memory_list` | 否 | 讀全文／關鍵字搜尋／列索引 |
 | `memory_delete` | 是 | 刪除錯誤或過時的記憶 |
+| `memory_consolidate` | 是 | 整併一個主題：找重複／矛盾／過時並合併，不帶 `apply` 只回計畫 |
 | `security_scan` | 否 | 對目錄跑 bandit / pip-audit / gitleaks（未安裝的略過） |
 | `webfetch` | 是 | 抓取 http(s) 網頁並轉成可讀文字；**預設關閉**（`[tools] webfetch = true` 才開）——開了它才會有模型端點以外的對外連線，且每次抓取都走審批 |
 
@@ -198,11 +199,21 @@ xharness providers probe cloud
 記憶是給人看的：`~/.xharness/memory/<名稱>.md`，一則事實一個檔，前段是 name／description／kind／updated，後面是內容；`MEMORY.md` 是自動產生的索引。模型每次呼叫都在 system prompt 看到索引（有大小上限，超過會提示用 `memory_search`），只有它主動 `memory_read` 才載入全文——記憶不會悄悄塞爆 context。
 
 ```sh
-xharness memory                 # 列索引：agent 記得什麼
+xharness memory                 # 列索引：agent 記得什麼（按主題分組）
+xharness memory topics          # 主題與各自的記憶
 xharness memory show fav-editor # 看一則全文
 xharness memory search 部署     # 關鍵字搜尋
-xharness memory audit           # 誰在哪個 session 寫／刪了什麼
+xharness memory audit           # 誰在哪個 session 寫／刪／整併了什麼
+xharness memory consolidate ops          # 主題 ops 的整併計畫（dry-run）
+xharness memory consolidate ops --llm    # 加上模型提案（重複、矛盾、過時）
+xharness memory consolidate all --apply  # 執行所有主題的計畫
 ```
+
+### 主題與彙整
+
+每則記憶有 `topic`（預設等於 `kind`）。`MEMORY.md` 索引按主題分節，`topics/<主題>.md` 是自動產生的主題頁——一個主題的所有記憶全文接在一起，人一次讀完一個題目，不用開十幾個檔。
+
+彙整分兩層：**確定性**的一層用文字相似度找近乎重複的記憶，併入較新（平手則較完整）的那則；**模型**的一層（`--llm` 或工具的 `use_model`）讀整個主題，提出合併、刪除與理由，但只能引用主題內存在的名稱，其他一律丟棄。計畫永遠先給人看：CLI 預設 dry-run，agent 的 `memory_consolidate` 不帶 `apply` 只回計畫、帶了要過審批；每筆合併與刪除都以 `consolidate` 動作進稽核。
 
 ```toml
 [memory]
@@ -311,8 +322,8 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 ## 藍圖
 
-- 記憶層的主題彙整（把零散記憶整理成主題頁）
 - 艦隊視圖的歷史趨勢（每節點用量隨時間）
+- 記憶的到期與重驗（久未引用的記憶標示待確認）
 
 ## 安全
 

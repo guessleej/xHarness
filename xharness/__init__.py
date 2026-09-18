@@ -1,11 +1,12 @@
 """xHarness: a plugin-based AI agent harness by xCloudinfo."""
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 from .agent import Agent, AgentOptions, default_system_prompt, load_project_instructions
 from .config import ResolvedConfig, load_config
 from .fleet import Node, format_table, load_nodes, poll_all, poll_node
 from .evals import AttemptResult, CaseReport, CheckResult, format_report, load_cases, run_case, run_suite, write_results
+from .consolidate import Plan, apply_plan, build_plan, find_duplicates
 from .context import Context, Harness, Plugin
 from .llm import AssistantTurn, OpenAIAdapter, Usage, llm_plugin
 from .mcp import McpClient, McpError, mcp_plugin
@@ -42,6 +43,7 @@ __all__ = [
     "McpError",
     "OpenAIAdapter",
     "PRESETS",
+    "Plan",
     "Plugin",
     "ProbeResult",
     "ResolvedConfig",
@@ -57,10 +59,13 @@ __all__ = [
     "Telemetry",
     "bash_tool",
     "bash_tool_plugin",
+    "apply_plan",
     "apply_preset",
+    "build_plan",
     "build_harness",
     "default_system_prompt",
     "edit_tool",
+    "find_duplicates",
     "format_report",
     "format_table",
     "load_nodes",

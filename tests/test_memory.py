@@ -16,8 +16,10 @@ def test_store_write_read_index_and_audit(tmp_path):
     assert memory.updated
     again = store.read("user-role")
     assert again is not None and again.kind == "user" and "concise" in again.body
-    assert (tmp_path / "MEMORY.md").read_text(encoding="utf-8").count("user-role") == 1
-    assert store.index_lines() == ["- user-role (user): Jeff is the CTO"]
+    index = (tmp_path / "MEMORY.md").read_text(encoding="utf-8")
+    assert "## user (1)" in index and "[user-role](user-role.md)" in index
+    assert store.index_lines() == ["[user]", "- user-role (user): Jeff is the CTO"]
+    assert (tmp_path / "topics" / "user.md").read_text(encoding="utf-8").count("## user-role") == 1
 
     store.write("user-role", "Jeff is the CTO (updated)", "new body", kind="user")
     records = store.audit()
@@ -29,6 +31,7 @@ def test_store_write_read_index_and_audit(tmp_path):
     assert store.delete("user-role") is False
     assert store.audit()[-1]["action"] == "delete"
     assert "(no memories yet)" in (tmp_path / "MEMORY.md").read_text(encoding="utf-8")
+    assert not (tmp_path / "topics" / "user.md").exists()  # stale topic pages are removed
 
 
 def test_store_validation(tmp_path):

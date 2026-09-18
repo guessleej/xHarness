@@ -277,7 +277,7 @@ class WebApp:
             return []
         store = MemoryStore(directory)
         return [
-            {"name": memory.name, "kind": memory.kind, "description": memory.description, "updated": memory.updated}
+            {"name": memory.name, "kind": memory.kind, "topic": memory.topic, "description": memory.description, "updated": memory.updated}
             for memory in store.list()
         ]
 
@@ -810,7 +810,9 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
         d.querySelector('.m span').textContent=new Date(s.mtime*1000).toLocaleString('zh-TW');d.onclick=()=>newConversation(s.id);sb.appendChild(d);});
       const mem=await api('/api/memory');const mb=$('#memory');mb.innerHTML='';
       if(!mem.length)mb.innerHTML='<div class="item"><div class="m">還沒有記憶</div></div>';
-      mem.forEach(m=>{const d=document.createElement('div');d.className='item';d.style.cursor='default';
+      let lastTopic=null;
+      mem.forEach(m=>{if(m.topic!==lastTopic){lastTopic=m.topic;const h=document.createElement('div');h.className='sec';h.textContent='主題：'+m.topic;mb.appendChild(h);}
+        const d=document.createElement('div');d.className='item';d.style.cursor='default';
         d.innerHTML='<div class="t"></div><div class="m"><span></span></div>';d.querySelector('.t').textContent=m.name+' · '+m.description;
         d.querySelector('.m span').textContent=m.kind+(m.updated?' · '+m.updated.slice(0,10):'');mb.appendChild(d);});
     }catch(e){console.error(e)}
