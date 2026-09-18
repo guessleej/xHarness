@@ -10,6 +10,7 @@ from datetime import datetime
 from . import __version__
 from .agent import Agent, AgentOptions, default_system_prompt
 from .config import load_config
+from .evals import format_report, load_cases, run_suite, write_results
 from .presets import build_harness
 from .session import SessionLog, messages_from_events
 from .tools import ToolRegistry
@@ -25,7 +26,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "(provider when no config file exists)"
         ),
     )
-    parser.add_argument("task", nargs="*", help='the task; "sessions" lists saved sessions; empty starts a REPL')
+    parser.add_argument(
+        "task",
+        nargs="*",
+        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; empty starts a REPL',
+    )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
     parser.add_argument("--model", help="override the provider's model")
@@ -38,6 +43,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not read AGENTS.md / CLAUDE.md from the working directory",
     )
+    parser.add_argument("--repeat", type=int, default=1, help="eval: run each case N times")
+    parser.add_argument("--json", dest="json_out", help="eval: write per-attempt results as JSONL")
     parser.add_argument("-V", "--version", action="version", version=__version__)
     return parser
 
@@ -50,6 +57,31 @@ def _list_sessions() -> None:
     for entry in sessions:
         stamp = datetime.fromtimestamp(entry["mtime"]).astimezone().isoformat(timespec="seconds")
         print(f"{entry['id']}\t{stamp}")
+
+
+def _run_eval(args: argparse.Namespace, config: Any) -> int:
+    paths = args.task[1:]
+    if not paths:
+        print("xharness: eval needs a case file or directory, e.g. xharness eval evals/basic", file=sys.stderr)
+        return 2
+    try:
+        cases = [case for path in paths for case in load_cases(path)]
+    except (OSError, ValueError) as error:
+        print(f"xharness: {error}", file=sys.stderr)
+        return 2
+    model = str(config.provider["model"])
+    print(f"running {len(cases)} cases x{max(1, args.repeat)} against {model} ...", file=sys.stderr)
+
+    def progress(case_id: str, index: int, attempt: Any) -> None:
+        status = "PASS" if attempt.passed else ("ERROR" if attempt.error else "FAIL")
+        print(f"  {case_id} [{index + 1}] {status} ({attempt.seconds:.1f}s)", file=sys.stderr)
+
+    reports = run_suite(cases, config, repeat=args.repeat, on_attempt=progress)
+    print(format_report(reports, model))
+    if args.json_out:
+        write_results(reports, model, args.json_out)
+        print(f"results written to {args.json_out}", file=sys.stderr)
+    return 0 if all(report.passed for report in reports) else 1
 
 
 def _print_usage(harness: Any) -> None:
@@ -77,6 +109,9 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:  # noqa: BLE001 - config errors are user-facing
         print(f"xharness: {error}", file=sys.stderr)
         return 1
+
+    if args.task and args.task[0] == "eval":
+        return _run_eval(args, config)
 
     task = " ".join(args.task).strip()
     interactive = not task

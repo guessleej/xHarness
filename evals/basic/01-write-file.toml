@@ -1,0 +1,16 @@
+# 最基本的工具使用：模型必須真的呼叫 write 工具建立檔案。
+prompt = "在目前目錄建立 hello.txt，內容只寫一行：xharness eval。完成後回覆「完成」。"
+max_turns = 8
+
+[[checks]]
+kind = "file_contains"
+path = "hello.txt"
+pattern = "xharness eval"
+
+[[checks]]
+kind = "tool_called"
+name = "write"
+
+[[checks]]
+kind = "answer_contains"
+text = "完成"

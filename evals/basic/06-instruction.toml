@@ -1,0 +1,12 @@
+# 指示遵循：回答格式的硬性約束，量化「模型會不會照規矩來」。
+prompt = "用一句話說明什麼是單元測試。回答的最後一行必須只有 EVAL-OK 這個字串。"
+max_turns = 4
+
+[[checks]]
+kind = "answer_regex"
+pattern = "EVAL-OK\\s*$"
+
+[[checks]]
+kind = "tool_called"
+name = "bash"
+absent = true

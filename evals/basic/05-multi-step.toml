@@ -1,0 +1,18 @@
+# 多步驟：寫程式、執行、回報結果，三步都要對。
+prompt = "寫一個 sum.py，讀取 data.csv（第一欄是數字，無標題列），印出所有數字的總和。執行它並把總和告訴我。"
+max_turns = 12
+
+[setup]
+"data.csv" = "10\n20\n30\n40\n"
+
+[[checks]]
+kind = "file_exists"
+path = "sum.py"
+
+[[checks]]
+kind = "command"
+run = "python3 sum.py | grep -q 100"
+
+[[checks]]
+kind = "answer_regex"
+pattern = "\\b100\\b"

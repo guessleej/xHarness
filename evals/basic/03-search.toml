@@ -1,0 +1,13 @@
+# 搜尋：在多個檔案裡找到含關鍵字的那一個，回答路徑。
+prompt = "目前目錄底下有幾個文字檔，其中一個含有字串 NEEDLE-7731。找出是哪個檔案，只回答該檔案的相對路徑。"
+max_turns = 8
+
+[setup]
+"docs/a.txt" = "nothing here\n"
+"docs/b.txt" = "still nothing\n"
+"src/deep/target.txt" = "the NEEDLE-7731 is here\n"
+"README.md" = "readme\n"
+
+[[checks]]
+kind = "answer_contains"
+text = "src/deep/target.txt"

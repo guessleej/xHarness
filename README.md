@@ -22,6 +22,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness。�
 - **審批策略。** 有副作用的工具（`bash`、`write`、`edit`、`webfetch`、MCP 工具）在互動模式會先詢問；`--yes` 或 `approval = "auto"` 可關閉。
 - **專案指示檔。** 工作目錄的 `AGENTS.md`（或 `CLAUDE.md`）會自動讀入 system prompt，agent 進到哪個 repo 就遵守哪個 repo 的慣例；`--no-instructions` 或 `project_instructions = false` 可關閉。
 - **成本煞車（telemetry）。** `llm/stream` 中介層統計每次模型呼叫的 token、工具呼叫數與延遲；設定 `max_total_tokens` / `max_llm_calls` 超額即硬停整個任務，用量摘要同步寫入 session 記錄，REPL 用 `/usage` 查。
+- **Eval 子系統。** `xharness eval <目錄>` 對任何模型跑評測套件：每個案例在乾淨的暫存工作區執行任務，用確定性檢查（檔案內容、回答、指令結果、有沒有真的呼叫工具）加可選的 LLM 評審計分，輸出通過率、每案 token 與耗時，可寫 JSONL。內建 `evals/basic` 六個案例，直接量化「這顆模型會不會用工具、守不守規矩」。
 - **只增不改的 session 記錄。** 每則訊息與工具結果都以 JSONL 記錄在 `~/.xharness/sessions/`；`--resume <id>` 可接續。
 - **兩種執行模式。** headless 一次性（`xharness "任務"`）與互動 REPL。
 - **可擴充。** 使用者插件模組可從設定檔加入工具與服務；`llm/stream` 中介層可攔截每次模型呼叫做快取、記錄或路由。
@@ -107,6 +108,37 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
 ```
 
 工具以 `mcp__fs__read_file` 這類名稱出現在 `/tools` 清單。沒有宣告 `readOnlyHint` 的 MCP 工具一律視為有副作用、受審批策略管；起不來的 server 會被略過並警告，不會拖垮整個 harness。
+
+## 評測模型（eval）
+
+```sh
+xharness eval evals/basic                       # 內建六案例：寫檔、改檔、搜尋、bash、多步驟、指示遵循
+xharness eval evals/basic --repeat 3 --json out.jsonl
+xharness eval my-cases/ --model 另一顆模型      # 同一套案例換模型比較
+```
+
+案例是一個 TOML 檔：`prompt` 給任務、`[setup]` 預先放檔案、`[[checks]]` 逐條計分，全部通過才算過：
+
+```toml
+prompt = "把 config.ini 裡的 port = 8080 改成 9090，其他不要動。"
+max_turns = 8
+
+[setup]
+"config.ini" = "[server]\nport = 8080\nworkers = 4\n"
+
+[[checks]]
+kind = "file_contains"
+path = "config.ini"
+pattern = "port = 9090"
+
+[[checks]]
+kind = "file_contains"
+path = "config.ini"
+pattern = "port = 8080"
+absent = true
+```
+
+檢查種類：`answer_contains`、`answer_regex`、`file_exists`、`file_contains`、`command`（在工作區跑指令，exit 0 為過）、`tool_called`（模型有沒有真的呼叫某工具）、`judge`（用同一顆模型依 `rubric` 評 PASS/FAIL）。任一種加 `absent = true` 反向。每個案例都用全新 harness 執行，token 與耗時逐案獨立；`--repeat N` 量測穩定度。
 
 ## 寫一個插件
 

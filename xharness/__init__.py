@@ -2,6 +2,7 @@
 
 from .agent import Agent, AgentOptions, default_system_prompt, load_project_instructions
 from .config import ResolvedConfig, load_config
+from .evals import AttemptResult, CaseReport, CheckResult, format_report, load_cases, run_case, run_suite, write_results
 from .context import Context, Harness, Plugin
 from .llm import AssistantTurn, OpenAIAdapter, Usage, llm_plugin
 from .mcp import McpClient, McpError, mcp_plugin
@@ -17,10 +18,13 @@ from .tools.security import security_scan_tool, security_tool_plugin
 from .tools.todo import todo_tool_plugin
 from .tools.webfetch import webfetch_tool, webfetch_tool_plugin
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "Agent",
+    "AttemptResult",
+    "CaseReport",
+    "CheckResult",
     "AgentOptions",
     "AssistantTurn",
     "Context",
@@ -45,6 +49,7 @@ __all__ = [
     "build_harness",
     "default_system_prompt",
     "edit_tool",
+    "format_report",
     "fs_tools_plugin",
     "glob_to_regex",
     "glob_tool",
@@ -52,11 +57,14 @@ __all__ = [
     "harness_home",
     "load_project_instructions",
     "llm_plugin",
+    "load_cases",
     "load_config",
     "mcp_plugin",
     "messages_from_events",
     "read_tool",
     "register_tools",
+    "run_case",
+    "run_suite",
     "resolve_sandbox",
     "sandbox_plugin",
     "search_tools_plugin",
@@ -69,5 +77,6 @@ __all__ = [
     "tools_plugin",
     "webfetch_tool",
     "webfetch_tool_plugin",
+    "write_results",
     "write_tool",
 ]

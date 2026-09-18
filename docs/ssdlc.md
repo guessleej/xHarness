@@ -131,6 +131,10 @@ validation, widening a permission) must say so explicitly in its description.
 - Security fixes land on `main` and are called out in the release notes with
   affected versions.
 
+### Eval subsystem
+
+Eval cases run the agent with automatic approval in a throwaway temp workspace, because a benchmark cannot pause for a human. Case files (prompts, setup files, `command` checks) are author-trusted, like test code; the model output they exercise is not. Evaluate untrusted models with the sandbox enabled, and never point a suite at a workspace you care about — the runner only ever creates and deletes its own temp directories.
+
 ## 3. Secure-usage guidance for deployers
 
 - Interactive work: keep `approval = "prompt"`.

@@ -22,6 +22,7 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Approval policy.** Mutating tools (`bash`, `write`, `edit`, `webfetch`, MCP tools) ask before acting in interactive mode; `--yes` or `approval = "auto"` opts out.
 - **Project instructions.** `AGENTS.md` (or `CLAUDE.md`) in the working directory is read into the system prompt automatically, so the agent follows each repo's own conventions; disable with `--no-instructions` or `project_instructions = false`.
 - **Cost brakes (telemetry).** An `llm/stream` middleware counts tokens, tool calls, and latency per model call; `max_total_tokens` / `max_llm_calls` hard-stop a runaway task, the usage summary lands in the session log, and `/usage` shows it in the REPL.
+- **Eval subsystem.** `xharness eval <dir>` runs a scored suite against any model: each case executes in a clean temp workspace and is graded by deterministic checks (files, answers, command results, whether tools were actually called) plus an optional LLM judge, reporting pass rate, per-case tokens and time, with JSONL output. The bundled `evals/basic` suite quantifies whether a model uses tools and follows instructions.
 - **Append-only session log.** Every message and tool result is recorded as JSONL under `~/.xharness/sessions/`; `--resume <id>` continues a session.
 - **Two run modes.** Headless one-shot (`xharness "task"`) and an interactive REPL.
 - **Extensible.** User plugin modules add tools and services from config; `llm/stream` middleware intercepts every model call for caching, logging, or routing.
@@ -107,6 +108,37 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
 ```
 
 Tools appear in `/tools` as `mcp__fs__read_file` and the like. MCP tools without a declared `readOnlyHint` are treated as side-effectful and gated by the approval policy; a server that fails to start is skipped with a warning instead of taking the harness down.
+
+## Evaluating models (eval)
+
+```sh
+xharness eval evals/basic                       # bundled: write, edit, search, bash, multi-step, instruction following
+xharness eval evals/basic --repeat 3 --json out.jsonl
+xharness eval my-cases/ --model other-model      # same suite, different model
+```
+
+A case is one TOML file: `prompt` gives the task, `[setup]` pre-creates files, `[[checks]]` score it; every check must pass:
+
+```toml
+prompt = "Change port = 8080 to 9090 in config.ini; touch nothing else."
+max_turns = 8
+
+[setup]
+"config.ini" = "[server]\nport = 8080\nworkers = 4\n"
+
+[[checks]]
+kind = "file_contains"
+path = "config.ini"
+pattern = "port = 9090"
+
+[[checks]]
+kind = "file_contains"
+path = "config.ini"
+pattern = "port = 8080"
+absent = true
+```
+
+Check kinds: `answer_contains`, `answer_regex`, `file_exists`, `file_contains`, `command` (runs in the workspace, exit 0 passes), `tool_called` (did the model really call a tool), `judge` (the same model grades PASS/FAIL against a `rubric`). Any check takes `absent = true` to invert. Each case gets a fresh harness, so tokens and time are per case; `--repeat N` measures stability.
 
 ## Writing a plugin
 

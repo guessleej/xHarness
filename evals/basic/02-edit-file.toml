@@ -1,0 +1,22 @@
+# 精確編輯：把既有檔案裡的字串換掉，不能動到其他行。
+prompt = "把 config.ini 裡的 port = 8080 改成 port = 9090，其他內容不要動。完成後回覆「完成」。"
+max_turns = 8
+
+[setup]
+"config.ini" = "[server]\nhost = 127.0.0.1\nport = 8080\nworkers = 4\n"
+
+[[checks]]
+kind = "file_contains"
+path = "config.ini"
+pattern = "port = 9090"
+
+[[checks]]
+kind = "file_contains"
+path = "config.ini"
+pattern = "port = 8080"
+absent = true
+
+[[checks]]
+kind = "file_contains"
+path = "config.ini"
+pattern = "workers = 4"
