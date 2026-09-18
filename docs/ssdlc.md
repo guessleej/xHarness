@@ -46,7 +46,7 @@ the threat model in the same pull request.
 | Secrets committed to the repo | `xharness.toml` is gitignored; gitleaks scans every push and PR in CI | Mitigated |
 | Supply-chain compromise | Zero runtime dependencies (standard library only); dev-only dependencies audited by pip-audit in CI weekly and on every push | Mitigated |
 | Malicious or vulnerable session resume data | JSONL parsed line-by-line; corrupt lines skipped; content is data, never executed | Mitigated |
-| Runaway agent (cost / DoS) | `max_turns` bound, per-command timeouts, output size caps on every tool | Mitigated |
+| Runaway agent (cost / DoS) | `max_turns` bound, per-command timeouts, output size caps on every tool, and the telemetry budget middleware (`max_total_tokens` / `max_llm_calls`) hard-stops the loop before the next model call | Mitigated |
 | Malicious `AGENTS.md`/`CLAUDE.md` in an untrusted repo steers the agent (system-prompt injection) | Instruction files are repo content: loading them is a trust decision. Size-capped (24k chars), disabled with `--no-instructions` / `project_instructions = false`; the approval policy still gates mutating tools | Mitigated; residual in `auto` mode on untrusted repos |
 | Model exfiltrates file contents to the endpoint | Inherent to the design: the model must see file contents to work. Point xHarness at an endpoint you trust (on-prem friendly by construction) | Accepted, disclosed |
 
@@ -99,7 +99,8 @@ Rules the architecture enforces:
 - Every `# nosec` suppression carries a justification comment at the site and
   a corresponding entry in this document (current: `B404`/`B603`/`B607` in
   `tools/bash.py` — running commands is that tool's purpose; `B310` in
-  `llm.py` — scheme validated at construction).
+  `llm.py` — scheme validated at construction; `B404`/`B603` in `tools/security.py` —
+  invoking the scanners is that tool's purpose, with fixed argv and timeouts).
 
 ### Phase 4 — Verification
 

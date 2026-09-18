@@ -11,10 +11,12 @@ from .llm import llm_plugin
 from .mcp import mcp_plugin
 from .sandbox import sandbox_plugin
 from .session import session_plugin
+from .telemetry import telemetry_plugin
 from .tools import tools_plugin
 from .tools.bash import bash_tool_plugin
 from .tools.fs import fs_tools_plugin
 from .tools.search import search_tools_plugin
+from .tools.security import security_tool_plugin
 from .tools.todo import todo_tool_plugin
 from .tools.webfetch import webfetch_tool_plugin
 
@@ -44,6 +46,8 @@ def build_harness(
     harness.use("tool-search", search_tools_plugin)
     harness.use("tool-bash", bash_tool_plugin)
     harness.use("tool-todo", todo_tool_plugin)
+    harness.use("tool-security", security_tool_plugin)
+    harness.use("telemetry", telemetry_plugin(config.telemetry))
     if config.webfetch:
         harness.use("tool-webfetch", webfetch_tool_plugin)
     if config.mcp_servers:

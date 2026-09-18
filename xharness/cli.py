@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import Any
 from datetime import datetime
 
 from . import __version__
@@ -49,6 +50,12 @@ def _list_sessions() -> None:
     for entry in sessions:
         stamp = datetime.fromtimestamp(entry["mtime"]).astimezone().isoformat(timespec="seconds")
         print(f"{entry['id']}\t{stamp}")
+
+
+def _print_usage(harness: Any) -> None:
+    telemetry = harness.ctx.optional("telemetry")
+    if telemetry and telemetry.calls:
+        print(telemetry.summary(), file=sys.stderr)
 
 
 def _prompt_approval(summary: str) -> bool:
@@ -102,8 +109,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if not interactive:
-            agent.run(task)
+            try:
+                agent.run(task)
+            except Exception as error:  # noqa: BLE001 - budget stops and LLM errors exit cleanly
+                print(f"\nxharness: {error}", file=sys.stderr)
+                _print_usage(harness)
+                print(f"session: {session.id}", file=sys.stderr)
+                return 1
             print()
+            _print_usage(harness)
             print(f"session: {session.id}", file=sys.stderr)
             return 0
 
@@ -111,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"xHarness {__version__} — session {session.id}")
         print(f"model: {config.provider['model']} @ {config.provider['base_url']}")
         print(f"sandbox: {sandbox.name if sandbox else 'off'}")
-        print("commands: /tools /session /clear /exit")
+        print("commands: /tools /usage /session /clear /exit")
         while True:
             try:
                 line = input("\nxharness> ").strip()
@@ -122,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if line in ("/exit", "/quit"):
                 break
+            if line == "/usage":
+                telemetry = harness.ctx.optional("telemetry")
+                print(telemetry.summary() if telemetry else "telemetry not mounted")
+                continue
             if line == "/session":
                 print(session.id)
                 continue

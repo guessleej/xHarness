@@ -39,7 +39,7 @@
 | 密鑰誤入 repo | `xharness.toml` 列入 gitignore；CI 以 gitleaks 掃描每次 push 與 PR | 已緩解 |
 | 供應鏈入侵 | 零執行期相依（純標準函式庫）；僅開發用相依由 CI 的 pip-audit 每週與每次 push 稽核 | 已緩解 |
 | 惡意或損毀的 session resume 資料 | JSONL 逐行解析；損毀行跳過；內容是資料，永不執行 | 已緩解 |
-| Agent 失控（成本 / DoS） | `max_turns` 上限、逐指令逾時、每個工具的輸出大小上限 | 已緩解 |
+| Agent 失控（成本 / DoS） | `max_turns` 上限、逐指令逾時、每個工具的輸出大小上限，加上 telemetry 預算中介層（`max_total_tokens` / `max_llm_calls`）在下一次模型呼叫前硬停迴圈 | 已緩解 |
 | 不受信任 repo 的惡意 `AGENTS.md`/`CLAUDE.md` 引導 agent（system prompt 注入） | 指示檔是 repo 內容：載入它是信任決定。有大小上限（24k 字元）、可用 `--no-instructions` / `project_instructions = false` 關閉；有副作用的工具仍受審批策略把關 | 已緩解；不受信任 repo 配 `auto` 模式仍有殘餘風險 |
 | 模型把檔案內容外送到端點 | 設計本質：模型必須看到檔案內容才能工作。請把 xHarness 指向你信任的端點（本設計對地端友善） | 接受並揭露 |
 
@@ -82,7 +82,7 @@
   輸出上限與逾時。
 - 每個 `# nosec` 抑制都要在現場附理由註解，並在本文件登錄
   （現有：`tools/bash.py` 的 `B404`/`B603`/`B607`——執行指令就是該工具的本職；
-  `llm.py` 的 `B310`——scheme 已在建構時驗證）。
+  `llm.py` 的 `B310`——scheme 已在建構時驗證；`tools/security.py` 的 `B404`/`B603`——呼叫掃描器是該工具本職，argv 固定且有逾時）。
 
 ### 階段四：驗證
 

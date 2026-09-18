@@ -9,6 +9,12 @@ approval = "prompt"
 
 max_turns = 40
 
+# Cost brakes: omit the table for unlimited usage.
+# [telemetry]
+# max_total_tokens = 500000
+# max_llm_calls = 100
+# cost_per_1k_tokens = 0.0   # optional; adds a cost line to reports
+
 # project_instructions = true  # read AGENTS.md / CLAUDE.md from cwd into the system prompt
 
 # system_prompt = """

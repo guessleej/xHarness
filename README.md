@@ -21,6 +21,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness。�
 - **MCP client。** `[mcp.servers.*]` 設定 stdio MCP server，其工具以 `mcp__{server}__{tool}` 名稱進工具清單；沒有標 `readOnlyHint` 的一律視為有副作用、走審批策略。
 - **審批策略。** 有副作用的工具（`bash`、`write`、`edit`、`webfetch`、MCP 工具）在互動模式會先詢問；`--yes` 或 `approval = "auto"` 可關閉。
 - **專案指示檔。** 工作目錄的 `AGENTS.md`（或 `CLAUDE.md`）會自動讀入 system prompt，agent 進到哪個 repo 就遵守哪個 repo 的慣例；`--no-instructions` 或 `project_instructions = false` 可關閉。
+- **成本煞車（telemetry）。** `llm/stream` 中介層統計每次模型呼叫的 token、工具呼叫數與延遲；設定 `max_total_tokens` / `max_llm_calls` 超額即硬停整個任務，用量摘要同步寫入 session 記錄，REPL 用 `/usage` 查。
 - **只增不改的 session 記錄。** 每則訊息與工具結果都以 JSONL 記錄在 `~/.xharness/sessions/`；`--resume <id>` 可接續。
 - **兩種執行模式。** headless 一次性（`xharness "任務"`）與互動 REPL。
 - **可擴充。** 使用者插件模組可從設定檔加入工具與服務；`llm/stream` 中介層可攔截每次模型呼叫做快取、記錄或路由。
@@ -76,6 +77,7 @@ xharness --resume 2026-08-22-ab12cd34   # 接續 session
 | `glob` | 否 | 以 glob 樣式（`**`、`*`、`?`）找檔案 |
 | `grep` | 否 | 以正規表示式搜尋檔案內容 |
 | `todo_write` | 否 | 維護多步驟任務的工作清單 |
+| `security_scan` | 否 | 對目錄跑 bandit / pip-audit / gitleaks（未安裝的略過） |
 | `webfetch` | 是 | 抓取 http(s) 網頁並轉成可讀文字；**預設關閉**（`[tools] webfetch = true` 才開）——開了它才會有模型端點以外的對外連線，且每次抓取都走審批 |
 
 審批只作用於有副作用的工具。headless 模式預設 `auto`（沒有人盯著管線）；互動模式預設 `prompt`。明確指定 `--approve prompt|auto` 一律優先。

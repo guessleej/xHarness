@@ -10,6 +10,12 @@ approval = "prompt"
 
 max_turns = 40
 
+# 成本煞車：不寫這個表＝不設限。
+# [telemetry]
+# max_total_tokens = 500000
+# max_llm_calls = 100
+# cost_per_1k_tokens = 0.0   # 選填；報表加一行成本
+
 # project_instructions = true  # 自動讀工作目錄的 AGENTS.md / CLAUDE.md 進 system prompt
 
 # system_prompt = """

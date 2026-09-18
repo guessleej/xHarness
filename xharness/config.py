@@ -18,6 +18,7 @@ class ResolvedConfig:
     max_turns: int | None = None
     approval: str = "prompt"
     project_instructions: bool = True
+    telemetry: dict[str, Any] = field(default_factory=dict)
     plugins: list[dict[str, Any]] = field(default_factory=list)
     sandbox: dict[str, Any] = field(default_factory=dict)
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -73,6 +74,7 @@ def load_config(
         max_turns=raw.get("max_turns"),
         approval=approval,
         project_instructions=bool(raw.get("project_instructions", True)),
+        telemetry=raw.get("telemetry", {}) or {},
         plugins=raw.get("plugins", []),
         sandbox=raw.get("sandbox", {}),
         mcp_servers=raw.get("mcp", {}).get("servers", {}),
