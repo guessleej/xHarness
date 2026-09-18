@@ -12,6 +12,7 @@ from .agent import Agent, AgentOptions, default_system_prompt
 from .config import load_config
 from .evals import format_report, load_cases, run_suite, write_results
 from .memory import MemoryStore, default_memory_dir
+from .providers import PRESETS, probe_provider
 from .web import serve
 from .presets import build_harness
 from .session import SessionLog, messages_from_events
@@ -31,7 +32,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|show <name>|search <q>|audit]" inspects memory; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|show <name>|search <q>|audit]" inspects memory; "providers [presets|probe]" lists and probes endpoints; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -63,6 +64,36 @@ def _list_sessions() -> None:
     for entry in sessions:
         stamp = datetime.fromtimestamp(entry["mtime"]).astimezone().isoformat(timespec="seconds")
         print(f"{entry['id']}\t{stamp}")
+
+
+def _run_providers(args: argparse.Namespace, config: Any) -> int:
+    action = args.task[1] if len(args.task) > 1 else "probe"
+    if action == "presets":
+        width = max(len(name) for name in PRESETS)
+        for name, preset in PRESETS.items():
+            scope = "local" if preset.get("local") else "hosted"
+            key = preset.get("api_key_env", "-")
+            print(f"{name.ljust(width)}  {scope:6}  {preset['base_url']:36}  key env: {key}")
+        return 0
+    if action == "probe":
+        names = args.task[2:] or list(config.providers) or [config.provider_name]
+        failures = 0
+        for name in names:
+            provider = config.providers.get(name) or (config.provider if name == config.provider_name else None)
+            if provider is None:
+                print(f"{name}: not in config", file=sys.stderr)
+                failures += 1
+                continue
+            result = probe_provider(name, provider)
+            if result.ok:
+                shown = ", ".join(result.models[:12]) + (" ..." if len(result.models) > 12 else "")
+                print(f"{name}: ok  {result.base_url}  models: {shown or '(none advertised)'}")
+            else:
+                failures += 1
+                print(f"{name}: unreachable  {result.base_url}  {result.detail}")
+        return 1 if failures else 0
+    print("usage: xharness providers [presets | probe [name ...]]", file=sys.stderr)
+    return 2
 
 
 def _run_memory(args: argparse.Namespace, config: Any) -> int:
@@ -153,6 +184,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_eval(args, config)
     if args.task and args.task[0] == "memory":
         return _run_memory(args, config)
+    if args.task and args.task[0] == "providers":
+        return _run_providers(args, config)
     if args.task and args.task[0] == "web":
         approval_mode = "auto" if args.yes else (args.approve or config.approval)
         return serve(

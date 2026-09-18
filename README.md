@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
-xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness。架構取法 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的「一切皆插件」，重新實作為精簡的 Python 套件，可對接**任何 OpenAI 相容端點**——llama.cpp（`llama-server`）、vLLM、Ollama、LiteLLM 或企業閘道。完全適合地端部署：除了你設定的模型端點之外，不會對外傳送任何資料。
+xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：治理優先、零相依的精簡 Python 套件，「一切皆插件」，可對接**任何 OpenAI 相容端點**——llama.cpp（`llama-server`）、vLLM、Ollama、LiteLLM 或企業閘道。完全適合地端部署：除了你設定的模型端點之外，不會對外傳送任何資料。
 
 ## 為什麼做這個
 
@@ -24,7 +24,8 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness。�
 - **成本煞車（telemetry）。** `llm/stream` 中介層統計每次模型呼叫的 token、工具呼叫數與延遲；設定 `max_total_tokens` / `max_llm_calls` 超額即硬停整個任務，用量摘要同步寫入 session 記錄，REPL 用 `/usage` 查。
 - **Eval 子系統。** `xharness eval <目錄>` 對任何模型跑評測套件：每個案例在乾淨的暫存工作區執行任務，用確定性檢查（檔案內容、回答、指令結果、有沒有真的呼叫工具）加可選的 LLM 評審計分，輸出通過率、每案 token 與耗時，可寫 JSONL。內建 `evals/basic` 六個案例，直接量化「這顆模型會不會用工具、守不守規矩」。
 - **子代理（subagent）。** `subagent` 把一個有界的子任務交給全新的子代理、`subagent_batch` 平行分派多個獨立任務；子代理共用工具與模型、不能再生子代理，每個有副作用的動作都回流父代理的審批策略。
-- **Web UI。** `xharness web` 起本機介面：串流逐字稿、工具卡片、審批按鈕、對話與歷史 session 清單、用量晶片、開燈關燈；預設只綁 127.0.0.1，對外綁定必須帶 `--token`。
+- **Web UI 與艦隊視圖。** `xharness web` 起本機介面：串流逐字稿、工具卡片、審批按鈕、對話與歷史 session 清單、記憶清單、用量晶片、開燈關燈；「艦隊」視圖一頁看完所有對話與子代理的狀態、用量、等待中的許可，可就地審批或**停止**任何一個 agent。預設只綁 127.0.0.1，對外綁定必須帶 `--token`。
+- **供應端型錄預設集。** `preset = "ollama"` 一行就接上 llama.cpp／Ollama／vLLM／LM Studio／LiteLLM 或 OpenAI／OpenRouter／Groq／Mistral／Together；`xharness providers probe` 探測每個端點並列出它提供的模型。
 - **記憶層。** 跨 session 的持久記憶，一則事實一個 Markdown 檔（`~/.xharness/memory/`），自動產生 `MEMORY.md` 索引；模型每次呼叫都看到索引（名稱＋一句描述），需要才 `memory_read` 全文；`memory_write`/`memory_delete` 走審批，每次異動寫入 `audit.jsonl`（哪個 agent、哪個 session）。`xharness memory` 讓人直接檢查 agent 到底記得什麼。
 - **只增不改的 session 記錄。** 每則訊息與工具結果都以 JSONL 記錄在 `~/.xharness/sessions/`；`--resume <id>` 可接續。
 - **兩種執行模式。** headless 一次性（`xharness "任務"`）與互動 REPL。
@@ -117,7 +118,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
 
 工具以 `mcp__fs__read_file` 這類名稱出現在 `/tools` 清單。沒有宣告 `readOnlyHint` 的 MCP 工具一律視為有副作用、受審批策略管；起不來的 server 會被略過並警告，不會拖垮整個 harness。
 
-## Web UI
+## Web UI 與艦隊視圖
 
 ```sh
 xharness web                          # http://127.0.0.1:3080，自動開瀏覽器
@@ -125,7 +126,9 @@ xharness web --port 8090 --no-open
 xharness web --host 0.0.0.0 --token 一串長隨機字串   # 對外綁定必須帶 token
 ```
 
-介面是一個零相依的單檔頁面：頂部玻璃導覽列顯示模型、用量與狀態；逐字稿即時串流，工具呼叫收成可展開的卡片；有副作用的動作出現「允許／拒絕」卡片（`-y` 可改全自動）；右側滑出面板列出進行中的對話與磁碟上的 session（可接續）。輸入框有中文輸入法 Enter 三重防護（組字中不會誤送）。
+介面是一個零相依的單檔頁面：頂部玻璃導覽列顯示模型、用量與狀態；逐字稿即時串流，工具呼叫收成可展開的卡片；有副作用的動作出現「允許／拒絕」卡片（`-y` 可改全自動）；右側滑出面板列出進行中的對話、磁碟上的 session（可接續）與目前的記憶。輸入框有中文輸入法 Enter 三重防護（組字中不會誤送）。
+
+**艦隊視圖**（導覽列「艦隊」）：每個對話一張卡——狀態（執行中／等待許可／閒置）、任務預覽、tokens／呼叫／工具數、執行秒數、正在跑的子代理——上方是總覽數字；等待中的許可可以直接在卡片上允許或拒絕，執行中的 agent 可以按「停止」：它會在下一次模型呼叫前停下、待決的許可一律視為拒絕（進行中的那一次模型請求無法中斷，回來就停）。
 
 安全設計：預設只綁 loopback、拒絕非 loopback 的 `Host`（防 DNS rebinding）、所有 POST 需自訂標頭（防跨站表單）、token 只走 `Authorization` 標頭、SSE 用 60 秒一次性票證。細節見 [docs/ssdlc.zh.md](docs/ssdlc.zh.md)。
 
@@ -140,6 +143,27 @@ max_turns = 20    # 每個子代理的回合上限
 ```
 
 子代理與父代理共用工具、模型、telemetry 與 session 記錄（事件標記 `agent` 名稱，`--resume` 只重建主線）；子代理看不到 `subagent` 工具，所以不會無限遞迴；它的每個有副作用動作都經父代理的審批策略——父代理是 `prompt` 模式就仍會問你。
+
+## 供應端型錄預設集（providers）
+
+```toml
+[providers.local]
+preset = "ollama"          # 只填預設值：base_url 與 api_key_env；model 永遠由你決定
+model = "your-model"
+
+[providers.cloud]
+preset = "groq"            # hosted 預設集會把提示送出機器，屬選擇性啟用
+model = "llama-3.3-70b-versatile"
+# base_url / api_key_env 明寫就覆蓋預設集
+```
+
+```sh
+xharness providers presets   # 列出內建預設集（local / hosted、base_url、金鑰環境變數）
+xharness providers probe     # 對設定檔裡每個供應端 GET /models，列出可用模型
+xharness providers probe cloud
+```
+
+內建：`llama-cpp`、`ollama`、`vllm`、`lmstudio`、`litellm`（本機）；`openai`、`openrouter`、`groq`、`mistral`、`together`（hosted）。
 
 ## 記憶層（memory）
 
@@ -248,7 +272,7 @@ answer = agent.run("pyproject.toml 宣告的測試相依是什麼？")
 
 ## 架構
 
-架構圖與設計說明（接縫、與 DeepSeek Harness 的對照）見 [docs/architecture.zh.md](docs/architecture.zh.md)。
+架構圖與設計說明（接縫、與大型 harness 的對照）見 [docs/architecture.zh.md](docs/architecture.zh.md)。
 
 ## 開發
 
@@ -259,8 +283,8 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 ## 藍圖
 
-- Web UI 的艦隊視圖（多 agent 同時監看）
-- 供應端型錄預設集
+- 多節點：讓艦隊視圖同時監看多台機器上的 harness
+- 記憶層的主題彙整（把零散記憶整理成主題頁）
 
 ## 安全
 

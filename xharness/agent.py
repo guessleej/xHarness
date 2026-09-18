@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -81,6 +82,7 @@ class Agent:
         self.options = options or AgentOptions()
         self.messages: list[dict[str, Any]] = []
         self.total_usage = Usage()
+        self._stop = threading.Event()
         cwd = self.options.cwd or os.getcwd()
         if self.options.initial_messages:
             self.messages.extend(self.options.initial_messages)
@@ -92,7 +94,20 @@ class Agent:
                     system = f"{system}\n\n{instructions}"
             self.messages.insert(0, {"role": "system", "content": system})
 
+    def stop(self) -> None:
+        """Ask a running task to stop before its next model call or tool.
+
+        An in-flight model request cannot be interrupted; the loop exits as
+        soon as it returns.
+        """
+        self._stop.set()
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._stop.is_set()
+
     def run(self, task: str) -> str:
+        self._stop.clear()
         llm = self.ctx.get("llm")
         registry: ToolRegistry = self.ctx.get("tools")
         session: SessionLog | None = self.ctx.optional("session")
@@ -103,6 +118,9 @@ class Agent:
         self.ctx.emit("agent/task-start", {"task": task})
 
         for turn in range(self.options.max_turns):
+            if self._stop.is_set():
+                self.ctx.emit("agent/task-end", {"turns": turn, "usage": self.total_usage, "stopped": True})
+                return "[stopped by operator]"
             schemas = [
                 {"name": tool.name, "description": tool.description, "parameters": tool.parameters}
                 for tool in registry.list()
@@ -141,7 +159,10 @@ class Agent:
                 return reply.content
 
             for call in reply.tool_calls:
-                result = self._execute_call(registry, call)
+                if self._stop.is_set():
+                    result = ToolResult("skipped: stopped by operator", is_error=True)
+                else:
+                    result = self._execute_call(registry, call)
                 self.messages.append(
                     {"role": "tool", "content": result.output, "tool_call_id": call["id"]}
                 )

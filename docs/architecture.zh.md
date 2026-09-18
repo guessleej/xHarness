@@ -38,9 +38,9 @@
 
 `OpenAIAdapter` 講 OpenAI chat-completions 線上格式（`stream: true`），用標準函式庫（`urllib` + 逐行迭代）解析 SSE。tool-call 增量依 index 累積；伺服器送 `stream_options.include_usage` 時從最後一個 chunk 取得用量。憑證每次請求時才從設定檔指名的環境變數（`api_key_env`）解析，設定檔裡不放任何密鑰。
 
-## 與 DeepSeek Harness 的對照
+## 與大型 harness 的對照
 
-xHarness 借用 DeepSeek Harness（dsh）的組合思想，並刻意捨棄其規模：
+拿一個大型插件式 harness（DeepSeek 的 dsh，2026-08 快照）當尺，看 xHarness 的規模定位：
 
 | | dsh | xHarness |
 |---|---|---|

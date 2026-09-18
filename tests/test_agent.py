@@ -133,3 +133,27 @@ def test_no_instruction_file_leaves_prompt_unchanged(tmp_path):
     harness, _adapter = build([AssistantTurn(content="ok")])
     agent = Agent(harness.ctx, AgentOptions(approval_mode="auto", cwd=str(tmp_path)))
     assert "Project instructions" not in agent.messages[0]["content"]
+
+
+def test_operator_stop_ends_loop_and_skips_tools():
+    harness, adapter = build(
+        [
+            AssistantTurn(content="", tool_calls=[{"id": "c1", "name": "echo", "arguments": '{"text": "a"}'}, {"id": "c2", "name": "echo", "arguments": '{"text": "b"}'}]),
+            AssistantTurn(content="should not be reached"),
+        ]
+    )
+    agent = Agent(harness.ctx, AgentOptions(approval_mode="auto"))
+    registry = harness.ctx.get("tools")
+    original = registry.get("echo").execute
+
+    def stopping_execute(args, ctx):
+        agent.stop()  # the operator presses stop while the first tool runs
+        return original(args, ctx)
+
+    registry.get("echo").execute = stopping_execute
+    answer = agent.run("go")
+    assert answer == "[stopped by operator]"
+    tool_messages = [m for m in agent.messages if m["role"] == "tool"]
+    assert tool_messages[0]["content"] == "echo:a"
+    assert "stopped by operator" in tool_messages[1]["content"]
+    assert len(adapter.seen) == 1

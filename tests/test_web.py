@@ -207,3 +207,25 @@ def test_memory_endpoint_lists_memories(server_factory, tmp_path, monkeypatch):
     client, _app = server_factory([])
     status, payload = client.request("GET", "/api/memory")
     assert status == 200 and payload[0]["name"] == "fav-editor" and payload[0]["description"] == "User prefers vim"
+
+
+def test_fleet_view_and_stop(server_factory):
+    turns = [AssistantTurn(content="", tool_calls=[{"id": "m1", "name": "mutate", "arguments": "{}"}]), AssistantTurn(content="ok")]
+    client, _app = server_factory(turns, approval_mode="prompt")
+    _, conv = client.request("POST", "/api/conversations", body={})
+    client.request("POST", f"/api/conversations/{conv['id']}/messages", body={"text": "fleet me"})
+    client.events(conv["id"], until_types=("approval_request",))
+    status, fleet = client.request("GET", "/api/fleet")
+    assert status == 200 and fleet["summary"]["waiting"] == 1 and fleet["summary"]["conversations"] == 1
+    item = fleet["items"][0]
+    assert item["state"] == "waiting" and item["pending_approvals"] and item["model"] == "fake"
+    status, payload = client.request("POST", f"/api/conversations/{conv['id']}/stop", body={})
+    assert status == 200 and payload["ok"] is True
+    events = client.events(conv["id"])
+    types = [e["type"] for e in events]
+    assert "stop_requested" in types and events[-1]["type"] == "done"
+    assert events[-1]["answer"] == "[stopped by operator]"
+    status, fleet = client.request("GET", "/api/fleet")
+    assert fleet["items"][0]["state"] == "idle"
+    status, payload = client.request("POST", f"/api/conversations/{conv['id']}/stop", body={})
+    assert status == 409

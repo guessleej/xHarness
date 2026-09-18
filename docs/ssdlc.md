@@ -139,6 +139,10 @@ validation, widening a permission) must say so explicitly in its description.
 
 The UI runs conversations with the configured approval policy; `prompt` mode surfaces an approval card and blocks the tool for up to ten minutes waiting for a human, then denies. There is no user model: whoever can reach the port and pass the guards above is the operator. Do not expose it beyond a trusted network even with a token; put a reverse proxy with real authentication in front for anything shared.
 
+The fleet view adds an operator brake: stopping a conversation sets the agent's stop flag (honoured before the next model call and before each remaining tool call) and denies every pending approval. An in-flight model request completes; nothing else runs after it.
+
+Provider presets change no network posture by themselves: local presets stay on loopback, hosted presets are explicit opt-ins whose endpoints receive prompts and tool output. `xharness providers probe` only issues `GET /models` over http(s).
+
 ### Eval subsystem
 
 Eval cases run the agent with automatic approval in a throwaway temp workspace, because a benchmark cannot pause for a human. Case files (prompts, setup files, `command` checks) are author-trusted, like test code; the model output they exercise is not. Evaluate untrusted models with the sandbox enabled, and never point a suite at a workspace you care about — the runner only ever creates and deletes its own temp directories.

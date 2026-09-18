@@ -6,7 +6,7 @@ English | [中文](README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
-xHarness is a plugin-based AI agent harness by xCloudinfo. It is inspired by the "everything is a plugin" architecture of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), rebuilt as a compact Python package that runs against **any OpenAI-compatible endpoint** — llama.cpp (`llama-server`), vLLM, Ollama, LiteLLM, or a company gateway. Fully on-prem friendly: nothing leaves your machine except requests to the model endpoint you configure.
+xHarness is a plugin-based AI agent harness by xCloudinfo: governance-first, zero-dependency, "everything is a plugin", a compact Python package that runs against **any OpenAI-compatible endpoint** — llama.cpp (`llama-server`), vLLM, Ollama, LiteLLM, or a company gateway. Fully on-prem friendly: nothing leaves your machine except requests to the model endpoint you configure.
 
 ## Why
 
@@ -24,7 +24,8 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Cost brakes (telemetry).** An `llm/stream` middleware counts tokens, tool calls, and latency per model call; `max_total_tokens` / `max_llm_calls` hard-stop a runaway task, the usage summary lands in the session log, and `/usage` shows it in the REPL.
 - **Eval subsystem.** `xharness eval <dir>` runs a scored suite against any model: each case executes in a clean temp workspace and is graded by deterministic checks (files, answers, command results, whether tools were actually called) plus an optional LLM judge, reporting pass rate, per-case tokens and time, with JSONL output. The bundled `evals/basic` suite quantifies whether a model uses tools and follows instructions.
 - **Subagents.** `subagent` delegates one bounded task to a fresh child agent; `subagent_batch` fans independent tasks out in parallel. Children share tools and model, cannot spawn children, and route every side effect through the parent's approval policy.
-- **Web UI.** `xharness web` serves a local interface: streaming transcript, tool cards, approval buttons, conversation and session lists, usage chips, light/dark theme. Binds 127.0.0.1 by default; binding elsewhere requires `--token`.
+- **Web UI and fleet view.** `xharness web` serves a local interface: streaming transcript, tool cards, approval buttons, conversation, session, and memory lists, usage chips, light/dark theme. The fleet view shows every conversation and subagent on one page — state, usage, pending approvals — with inline approve/deny and a **stop** button per agent. Binds 127.0.0.1 by default; binding elsewhere requires `--token`.
+- **Provider catalog presets.** `preset = "ollama"` wires up llama.cpp, Ollama, vLLM, LM Studio, LiteLLM, or OpenAI, OpenRouter, Groq, Mistral, Together in one line; `xharness providers probe` checks each endpoint and lists the models it serves.
 - **Memory layer.** Persistent memory across sessions: one Markdown file per fact under `~/.xharness/memory/` with a generated `MEMORY.md` index. The model sees the index (names and one-line descriptions) on every call and loads a memory in full only when it asks; `memory_write`/`memory_delete` go through approval and every change is recorded in `audit.jsonl` with the agent and session. `xharness memory` shows a human exactly what the agent remembers.
 - **Append-only session log.** Every message and tool result is recorded as JSONL under `~/.xharness/sessions/`; `--resume <id>` continues a session.
 - **Two run modes.** Headless one-shot (`xharness "task"`) and an interactive REPL.
@@ -117,7 +118,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
 
 Tools appear in `/tools` as `mcp__fs__read_file` and the like. MCP tools without a declared `readOnlyHint` are treated as side-effectful and gated by the approval policy; a server that fails to start is skipped with a warning instead of taking the harness down.
 
-## Web UI
+## Web UI and fleet view
 
 ```sh
 xharness web                          # http://127.0.0.1:3080, opens a browser
@@ -125,7 +126,9 @@ xharness web --port 8090 --no-open
 xharness web --host 0.0.0.0 --token <long-random-string>   # non-loopback binding requires a token
 ```
 
-The UI is one zero-dependency page: a glass top bar with model, usage, and status; a live streaming transcript with tool calls folded into cards; approval cards with allow/deny for side effects (`-y` makes it fully automatic); a slide-over listing running conversations and on-disk sessions (resumable). The composer guards against IME Enter (no accidental sends mid-composition).
+The UI is one zero-dependency page: a glass top bar with model, usage, and status; a live streaming transcript with tool calls folded into cards; approval cards with allow/deny for side effects (`-y` makes it fully automatic); a slide-over listing running conversations, on-disk sessions (resumable), and current memories. The composer guards against IME Enter (no accidental sends mid-composition).
+
+**Fleet view** (top bar, "艦隊"): one card per conversation — state (running / waiting for approval / idle), task preview, tokens, calls, tool count, elapsed seconds, active subagents — under a row of totals. Pending approvals can be allowed or denied right on the card, and any running agent can be stopped: it halts before its next model call and pending approvals are denied (an in-flight model request cannot be interrupted; the loop exits when it returns).
 
 Security: loopback by default, non-loopback `Host` headers rejected (DNS rebinding), every POST needs a custom header (cross-site form posts), tokens only in `Authorization`, SSE authenticated with 60-second single-use tickets. Details in [docs/ssdlc.md](docs/ssdlc.md).
 
@@ -140,6 +143,27 @@ max_turns = 20    # per-child turn limit
 ```
 
 Children share tools, model, telemetry, and the session log (events tagged with the `agent` name; `--resume` rebuilds only the main line). Children cannot see the `subagent` tools, so there is no unbounded recursion, and every side effect goes through the parent's approval policy — a `prompt`-mode parent still asks you.
+
+## Provider catalog presets
+
+```toml
+[providers.local]
+preset = "ollama"          # fills defaults only: base_url and api_key_env; the model is always yours
+model = "your-model"
+
+[providers.cloud]
+preset = "groq"            # hosted presets send prompts off-machine; opt-in by nature
+model = "llama-3.3-70b-versatile"
+# explicit base_url / api_key_env override the preset
+```
+
+```sh
+xharness providers presets   # built-in presets (local / hosted, base_url, key env var)
+xharness providers probe     # GET /models on every configured provider, list what it serves
+xharness providers probe cloud
+```
+
+Built in: `llama-cpp`, `ollama`, `vllm`, `lmstudio`, `litellm` (local); `openai`, `openrouter`, `groq`, `mistral`, `together` (hosted).
 
 ## Memory
 
@@ -269,7 +293,7 @@ llama.cpp / vLLM / gateway"]
   CTX --- SESSION
 ```
 
-Design notes, seams, and the comparison with DeepSeek Harness are in [docs/architecture.md](docs/architecture.md).
+Design notes, seams, and a comparison with larger harnesses are in [docs/architecture.md](docs/architecture.md).
 
 ## Development
 
@@ -280,8 +304,8 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 ## Roadmap
 
-- Fleet view in the Web UI (watch many agents at once)
-- Provider catalog presets
+- Multi-node: let the fleet view watch harnesses on several machines
+- Memory consolidation (fold scattered memories into topic pages)
 
 ## Security
 

@@ -60,11 +60,18 @@ class Conversation:
         self.approvals: dict[str, Approval] = {}
         self.preview = ""
         self.created = time.time()
+        self.started_at: float | None = None
+        self.last_activity = time.time()
+        self.children: dict[str, str] = {}  # active subagents: name -> task
+        self.turns = 0
 
     def push(self, event: dict[str, Any]) -> None:
         with self.cond:
             event["seq"] = len(self.events) + 1
             self.events.append(event)
+            self.last_activity = time.time()
+            if event.get("type") == "tool_start":
+                self.turns += 1
             self.cond.notify_all()
 
     def wait(self, after: int, timeout: float) -> list[dict[str, Any]]:
@@ -78,18 +85,29 @@ class Conversation:
         return telemetry.report() if telemetry else None
 
     def summary(self) -> dict[str, Any]:
+        pending = [
+            {"id": key, "summary": approval.summary}
+            for key, approval in self.approvals.items()
+            if approval.decision is None
+        ]
+        if self.running:
+            state = "waiting" if pending else "running"
+        else:
+            state = "idle"
         return {
             "id": self.id,
             "session": self.session_id,
             "running": self.running,
+            "state": state,
             "preview": self.preview,
             "usage": self.usage(),
             "created": self.created,
-            "pending_approvals": [
-                {"id": key, "summary": approval.summary}
-                for key, approval in self.approvals.items()
-                if approval.decision is None
-            ],
+            "started_at": self.started_at,
+            "last_activity": self.last_activity,
+            "elapsed": round(time.time() - self.started_at, 1) if self.running and self.started_at else None,
+            "children": [{"name": name, "task": task[:120]} for name, task in self.children.items()],
+            "tool_calls": self.turns,
+            "pending_approvals": pending,
         }
 
 
@@ -148,6 +166,17 @@ class WebApp:
         )
         conv = Conversation(conv_id, harness, agent, session_id)
         holder["conv"] = conv
+
+        def child_start(payload: Any) -> None:
+            conv.children[str(payload.get("name"))] = str(payload.get("task") or "")
+            conv.push({"type": "subagent_start", "name": payload.get("name"), "task": str(payload.get("task") or "")[:200]})
+
+        def child_end(payload: Any) -> None:
+            conv.children.pop(str(payload.get("name")), None)
+            conv.push({"type": "subagent_end", "name": payload.get("name"), "ok": bool(payload.get("ok"))})
+
+        harness.ctx.on("subagent/start", child_start)
+        harness.ctx.on("subagent/end", child_end)
         if initial:
             for message in initial:
                 if message["role"] in ("user", "assistant") and message.get("content"):
@@ -170,6 +199,7 @@ class WebApp:
             if conv.running:
                 return False
             conv.running = True
+            conv.started_at = time.time()
         conv.preview = text[:80]
         conv.push({"type": "user", "text": text})
 
@@ -182,6 +212,7 @@ class WebApp:
             finally:
                 with conv.cond:
                     conv.running = False
+                    conv.children.clear()
                     conv.cond.notify_all()
 
         threading.Thread(target=run, name=f"xharness-web-{conv.id}", daemon=True).start()
@@ -194,6 +225,35 @@ class WebApp:
         approval.decision = allow
         approval.event.set()
         return True
+
+    def stop(self, conv: Conversation) -> bool:
+        """Operator brake: stop before the next model call and deny pending approvals."""
+        if not conv.running:
+            return False
+        conv.agent.stop()
+        for approval in conv.approvals.values():
+            if approval.decision is None:
+                approval.decision = False
+                approval.event.set()
+        conv.push({"type": "stop_requested"})
+        return True
+
+    def fleet(self) -> dict[str, Any]:
+        items = self.list()
+        model = str(self.config.provider["model"])
+        for item in items:
+            item["model"] = model
+        usage_total = sum((item["usage"] or {}).get("total_tokens", 0) for item in items)
+        return {
+            "summary": {
+                "conversations": len(items),
+                "running": sum(1 for item in items if item["state"] == "running"),
+                "waiting": sum(1 for item in items if item["state"] == "waiting"),
+                "children": sum(len(item["children"]) for item in items),
+                "total_tokens": usage_total,
+            },
+            "items": items,
+        }
 
     def memory_index(self) -> list[dict[str, Any]]:
         """Read-only view of what the agent remembers, straight from disk."""
@@ -331,6 +391,9 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             if parts[1:] == ["memory"]:
                 self._json(200, app.memory_index())
                 return
+            if parts[1:] == ["fleet"]:
+                self._json(200, app.fleet())
+                return
             if len(parts) == 4 and parts[1] == "conversations" and parts[3] == "events":
                 conv = app.get(parts[2])
                 if conv is None:
@@ -408,6 +471,10 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 if parts[3] == "approvals":
                     ok = app.approve(conv, str(body.get("id") or ""), bool(body.get("allow")))
                     self._json(200 if ok else 404, {"ok": ok})
+                    return
+                if parts[3] == "stop":
+                    ok = app.stop(conv)
+                    self._json(200 if ok else 409, {"ok": ok})
                     return
             self._json(404, {"error": "not found"})
 
@@ -529,6 +596,29 @@ textarea:focus{box-shadow:0 0 0 3px rgba(191,24,31,.18),var(--shadow-sm)}
 .backdrop{position:fixed;inset:0;background:rgba(22,32,42,.35);z-index:25;opacity:0;pointer-events:none;transition:opacity .3s}
 .backdrop.open{opacity:1;pointer-events:auto}
 .sec{font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-3);padding:12px 12px 4px}
+#fleet{display:none}
+body.fleet #fleet{display:block}
+body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0}
+.kpi{background:var(--card);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow-sm)}
+.kpi .n{font-size:28px;font-weight:800;line-height:1.1}
+.kpi .l{font-size:12px;color:var(--ink-3);letter-spacing:.5px;text-transform:uppercase;margin-top:4px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.fc{background:var(--card);border-radius:16px;padding:16px 18px;box-shadow:var(--shadow-sm);position:relative;display:flex;flex-direction:column;gap:8px}
+.fc.running:before,.fc.waiting:before{content:"";position:absolute;left:18px;right:18px;top:0;height:3px;border-radius:0 0 3px 3px;background:var(--brand)}
+.fc.waiting:before{background:#d97706}
+.fc .head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.fc .state{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--tint);color:var(--ink-2)}
+.fc .state.running{color:var(--brand)}.fc .state.waiting{color:#d97706}.fc .state.idle{color:#2e7d32}
+.fc .prev{font-size:15px;line-height:1.45;max-height:4.3em;overflow:hidden}
+.fc .meta{font-size:12px;color:var(--ink-3);display:flex;flex-wrap:wrap;gap:6px 12px}
+.fc .kids{font-size:12px;color:var(--ink-2)}
+.fc .kids span{display:inline-block;background:var(--tint);border-radius:999px;padding:2px 8px;margin:2px 4px 0 0}
+.fc .appr{font-size:13px;background:var(--tint);border-radius:10px;padding:8px 10px}
+.fc .acts{display:flex;gap:8px;margin-top:auto;flex-wrap:wrap}
+.btn.sm{padding:6px 10px;font-size:13px}
+.btn.ghost{background:transparent;box-shadow:none;color:var(--brand)}
+.empty{color:var(--ink-3);padding:40px 0;text-align:center}
 @media (max-width:640px){.hero h1{font-size:24px}.chip{max-width:160px}}
 </style>
 </head>
@@ -541,6 +631,7 @@ textarea:focus{box-shadow:0 0 0 3px rgba(191,24,31,.18),var(--shadow-sm)}
     <span class="chip" id="chip-status">閒置</span>
   </div>
   <button class="btn" id="btn-new">新對話</button>
+  <button class="btn" id="btn-fleet">艦隊</button>
   <button class="btn" id="btn-list">對話與紀錄</button>
   <button class="btn" id="btn-theme" aria-label="切換主題">主題</button>
 </div></nav>
@@ -551,6 +642,11 @@ textarea:focus{box-shadow:0 0 0 3px rgba(191,24,31,.18),var(--shadow-sm)}
     <p>輸入任務，模型會用工具讀寫檔案與執行指令；有副作用的動作會先問你。</p>
   </section>
   <div id="transcript"></div>
+  <section id="fleet">
+    <div class="hero"><h1>艦隊視圖</h1><p>所有進行中的對話與子代理，一眼看完狀態、用量與等待中的許可；可就地審批或停止。</p></div>
+    <div class="kpis" id="kpis"></div>
+    <div class="grid" id="fleet-grid"></div>
+  </section>
 </main>
 
 <div class="composer">
@@ -623,6 +719,9 @@ textarea:focus{box-shadow:0 0 0 3px rgba(191,24,31,.18),var(--shadow-sm)}
       const decide=async allow=>{ok.disabled=no.disabled=true;await api('/api/conversations/'+conv+'/approvals',{method:'POST',body:{id:ev.id,allow}});d.querySelector('.who').textContent=allow?'已允許':'已拒絕';};
       ok.onclick=()=>decide(true);no.onclick=()=>decide(false);a.append(ok,no);d.appendChild(a);}
     else if(ev.type==='approval_resolved'){}
+    else if(ev.type==='subagent_start'){finishAssistant();const d=el('tool','子代理啟動',ev.name+'：'+ev.task);}
+    else if(ev.type==='subagent_end'){el('tool','子代理結束',ev.name+'：'+(ev.ok?'完成':'失敗'));}
+    else if(ev.type==='stop_requested'){el('error','操作者要求停止','將在下一次模型呼叫前停止；等待中的許可一律拒絕。');}
     else if(ev.type==='done'){finishAssistant();if(!ev.answer&&assistantText==='')el('assistant','xHarness','(沒有文字回覆)');setStatus('閒置',false);setUsage(ev.usage);refreshList();}
     else if(ev.type==='error'){finishAssistant();el('error','錯誤',ev.message);setStatus('閒置',false);setUsage(ev.usage);refreshList();}
   }
@@ -689,6 +788,44 @@ textarea:focus{box-shadow:0 0 0 3px rgba(191,24,31,.18),var(--shadow-sm)}
         d.querySelector('.m span').textContent=m.kind+(m.updated?' · '+m.updated.slice(0,10):'');mb.appendChild(d);});
     }catch(e){console.error(e)}
   }
+
+  // fleet view
+  let fleetTimer=null,fleetOn=false;
+  function fmtState(s){return s==='running'?'執行中':s==='waiting'?'等待許可':'閒置';}
+  async function renderFleet(){
+    try{
+      const f=await api('/api/fleet');const k=f.summary;
+      $('#kpis').innerHTML=[['對話',k.conversations],['執行中',k.running],['等待許可',k.waiting],['子代理',k.children],['總 tokens',k.total_tokens]]
+        .map(([l,n])=>'<div class="kpi"><div class="n">'+n+'</div><div class="l">'+l+'</div></div>').join('');
+      const g=$('#fleet-grid');g.innerHTML='';
+      if(!f.items.length){g.innerHTML='<div class="empty">還沒有對話。按「新對話」開始。</div>';return;}
+      f.items.forEach(it=>{const c=document.createElement('div');c.className='fc '+it.state;
+        const u=it.usage||{};
+        c.innerHTML='<div class="head"><span class="state '+it.state+'">'+fmtState(it.state)+'</span><span class="meta">'+(it.elapsed!=null?it.elapsed+'s':'')+'</span></div>'
+          +'<div class="prev"></div>'
+          +'<div class="meta"><span>'+(u.total_tokens||0)+' tokens</span><span>'+(u.calls||0)+' calls</span><span>'+(it.tool_calls||0)+' tools</span><span>'+it.model+'</span><span>session '+it.session+'</span></div>'
+          +(it.children.length?'<div class="kids">子代理：'+it.children.map(ch=>'<span title="'+ch.task.replace(/"/g,'')+'">'+ch.name+'</span>').join('')+'</div>':'')
+          +'<div class="apprs"></div><div class="acts"></div>';
+        c.querySelector('.prev').textContent=it.preview||'(尚未送出訊息)';
+        const ap=c.querySelector('.apprs');
+        it.pending_approvals.forEach(a=>{const d=document.createElement('div');d.className='appr';d.textContent=a.summary;
+          const ok=document.createElement('button');ok.className='btn primary sm';ok.textContent='允許';ok.style.marginLeft='8px';
+          const no=document.createElement('button');no.className='btn sm';no.textContent='拒絕';no.style.marginLeft='6px';
+          ok.onclick=()=>api('/api/conversations/'+it.id+'/approvals',{method:'POST',body:{id:a.id,allow:true}}).then(renderFleet);
+          no.onclick=()=>api('/api/conversations/'+it.id+'/approvals',{method:'POST',body:{id:a.id,allow:false}}).then(renderFleet);
+          d.append(ok,no);ap.appendChild(d);});
+        const acts=c.querySelector('.acts');
+        const open=document.createElement('button');open.className='btn sm';open.textContent='開啟';
+        open.onclick=async()=>{conv=it.id;transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display='none';hint.textContent='對話 '+it.id+' · session '+it.session;await connect(conv,0);toggleFleet(false);};
+        acts.appendChild(open);
+        if(it.running){const st=document.createElement('button');st.className='btn ghost sm';st.textContent='停止';st.onclick=()=>api('/api/conversations/'+it.id+'/stop',{method:'POST',body:{}}).then(renderFleet);acts.appendChild(st);}
+        g.appendChild(c);});
+    }catch(e){console.error(e)}
+  }
+  function toggleFleet(on){fleetOn=on;document.body.classList.toggle('fleet',on);$('#btn-fleet').textContent=on?'回到對話':'艦隊';
+    if(fleetTimer){clearInterval(fleetTimer);fleetTimer=null;}
+    if(on){renderFleet();fleetTimer=setInterval(renderFleet,2000);}}
+  $('#btn-fleet').onclick=()=>toggleFleet(!fleetOn);
 
   (async function init(){
     try{const m=await api('/api/meta');$('#chip-model').textContent='model: '+m.model+(m.sandbox?' · sandbox '+m.sandbox:'')+' · approval '+m.approval;}

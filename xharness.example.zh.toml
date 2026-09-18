@@ -32,6 +32,7 @@ max_turns = 40
 # """
 
 [providers.local]
+# preset = "llama-cpp"   # 或 ollama、vllm、lmstudio、litellm、openai、openrouter、groq、mistral、together
 base_url = "http://localhost:8080/v1"
 model = "your-model-id"
 # api_key_env = "XHARNESS_API_KEY"   # 開放的本機端點可省略

@@ -38,9 +38,9 @@ Approval is policy, not tool logic: mutating tools call `tool_ctx.approve(summar
 
 `OpenAIAdapter` speaks the OpenAI chat-completions wire format with `stream: true`, parsing SSE with the standard library (`urllib` + line iteration). Tool-call deltas are accumulated by index; usage comes from the final chunk when the server sends `stream_options.include_usage`. Credentials resolve per request from an environment variable named in config (`api_key_env`), so no secret lives in the config file.
 
-## Comparison with DeepSeek Harness
+## Comparison with a large harness
 
-xHarness borrows the composition idea from DeepSeek Harness (dsh) and deliberately drops the scale:
+For scale, here is xHarness next to a large plugin-based harness (DeepSeek's dsh, 2026-08 snapshot):
 
 | | dsh | xHarness |
 |---|---|---|

@@ -7,6 +7,7 @@ import tomllib
 from dataclasses import dataclass, field
 from typing import Any
 
+from .providers import apply_preset
 from .session import harness_home
 
 
@@ -17,6 +18,7 @@ class ResolvedConfig:
     system_prompt: str | None = None
     max_turns: int | None = None
     approval: str = "prompt"
+    providers: dict[str, dict[str, Any]] = field(default_factory=dict)
     project_instructions: bool = True
     telemetry: dict[str, Any] = field(default_factory=dict)
     subagent: dict[str, Any] = field(default_factory=dict)
@@ -64,8 +66,11 @@ def load_config(
             "no provider configured: create xharness.toml (see xharness.example.toml) "
             "or set XHARNESS_BASE_URL and XHARNESS_MODEL"
         )
+    provider = apply_preset(provider)
     if model_override:
         provider = {**provider, "model": model_override}
+    if not provider.get("model"):
+        raise ValueError(f"provider {provider_name!r} has no model; set model = \"...\" (presets never choose a model for you)")
     approval = raw.get("approval", "prompt")
     if approval not in ("prompt", "auto"):
         raise ValueError("approval must be prompt or auto")
@@ -75,6 +80,7 @@ def load_config(
         system_prompt=raw.get("system_prompt"),
         max_turns=raw.get("max_turns"),
         approval=approval,
+        providers={name: apply_preset(entry) for name, entry in providers.items()},
         project_instructions=bool(raw.get("project_instructions", True)),
         telemetry=raw.get("telemetry", {}) or {},
         subagent=raw.get("subagent", {}) or {},

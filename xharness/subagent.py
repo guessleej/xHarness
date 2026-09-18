@@ -64,10 +64,13 @@ def run_child(
             project_instructions=False,
         ),
     )
+    ctx.emit("subagent/start", {"name": name, "task": task, "parent": tool_ctx.agent})
     try:
         answer = agent.run(task)
     except Exception as error:  # noqa: BLE001 - a failed child is a result, not a crash
+        ctx.emit("subagent/end", {"name": name, "ok": False})
         return ToolResult(f"[{name}] failed: {error}", is_error=True)
+    ctx.emit("subagent/end", {"name": name, "ok": True})
     if len(answer) > MAX_CHILD_OUTPUT:
         answer = answer[:MAX_CHILD_OUTPUT] + "\n[truncated]"
     return ToolResult(answer or "(child returned no answer)")
