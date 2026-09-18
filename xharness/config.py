@@ -23,6 +23,7 @@ class ResolvedConfig:
     telemetry: dict[str, Any] = field(default_factory=dict)
     subagent: dict[str, Any] = field(default_factory=dict)
     memory: dict[str, Any] = field(default_factory=dict)
+    fleet: dict[str, Any] = field(default_factory=dict)
     plugins: list[dict[str, Any]] = field(default_factory=list)
     sandbox: dict[str, Any] = field(default_factory=dict)
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -85,6 +86,7 @@ def load_config(
         telemetry=raw.get("telemetry", {}) or {},
         subagent=raw.get("subagent", {}) or {},
         memory=raw.get("memory", {}) or {},
+        fleet=raw.get("fleet", {}) or {},
         plugins=raw.get("plugins", []),
         sandbox=raw.get("sandbox", {}),
         mcp_servers=raw.get("mcp", {}).get("servers", {}),

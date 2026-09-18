@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import Any
 from datetime import datetime
@@ -11,6 +12,7 @@ from . import __version__
 from .agent import Agent, AgentOptions, default_system_prompt
 from .config import load_config
 from .evals import format_report, load_cases, run_suite, write_results
+from .fleet import format_table, load_nodes, poll_all
 from .memory import MemoryStore, default_memory_dir
 from .providers import PRESETS, probe_provider
 from .web import serve
@@ -32,7 +34,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|show <name>|search <q>|audit]" inspects memory; "providers [presets|probe]" lists and probes endpoints; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|show <name>|search <q>|audit]" inspects memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -48,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--host", default="127.0.0.1", help="web: bind address (non-loopback requires --token)")
     parser.add_argument("--port", type=int, default=3080, help="web: port (default 3080)")
-    parser.add_argument("--token", help="web: bearer token required for the API")
+    parser.add_argument("--token", help="web: bearer token for the API (or XHARNESS_WEB_TOKEN / XHARNESS_WEB_TOKEN_FILE)")
     parser.add_argument("--no-open", action="store_true", dest="no_open", help="web: do not open a browser")
     parser.add_argument("--repeat", type=int, default=1, help="eval: run each case N times")
     parser.add_argument("--json", dest="json_out", help="eval: write per-attempt results as JSONL")
@@ -64,6 +66,30 @@ def _list_sessions() -> None:
     for entry in sessions:
         stamp = datetime.fromtimestamp(entry["mtime"]).astimezone().isoformat(timespec="seconds")
         print(f"{entry['id']}\t{stamp}")
+
+
+def _web_token(explicit: str | None) -> str | None:
+    """--token, else XHARNESS_WEB_TOKEN, else the contents of XHARNESS_WEB_TOKEN_FILE."""
+    if explicit:
+        return explicit
+    from_env = os.environ.get("XHARNESS_WEB_TOKEN")
+    if from_env:
+        return from_env
+    path = os.environ.get("XHARNESS_WEB_TOKEN_FILE")
+    if path:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip() or None
+    return None
+
+
+def _run_fleet(config: Any) -> int:
+    nodes = load_nodes(config.fleet)
+    if not nodes:
+        print("no fleet nodes configured; add [fleet.nodes.<name>] url = ... to xharness.toml", file=sys.stderr)
+        return 2
+    reports = poll_all(nodes)
+    print(format_table(reports))
+    return 0 if all(report["ok"] for report in reports) else 1
 
 
 def _run_providers(args: argparse.Namespace, config: Any) -> int:
@@ -188,13 +214,15 @@ def main(argv: list[str] | None = None) -> int:
         return _run_memory(args, config)
     if args.task and args.task[0] == "providers":
         return _run_providers(args, config)
+    if args.task and args.task[0] == "fleet":
+        return _run_fleet(config)
     if args.task and args.task[0] == "web":
         approval_mode = "auto" if args.yes else (args.approve or config.approval)
         return serve(
             config,
             host=args.host,
             port=args.port,
-            token=args.token,
+            token=_web_token(args.token),
             approval_mode=approval_mode,
             open_browser=not args.no_open,
         )

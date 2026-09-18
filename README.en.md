@@ -25,6 +25,7 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Eval subsystem.** `xharness eval <dir>` runs a scored suite against any model: each case executes in a clean temp workspace and is graded by deterministic checks (files, answers, command results, whether tools were actually called) plus an optional LLM judge, reporting pass rate, per-case tokens and time, with JSONL output. The bundled `evals/basic` suite quantifies whether a model uses tools and follows instructions.
 - **Subagents.** `subagent` delegates one bounded task to a fresh child agent; `subagent_batch` fans independent tasks out in parallel. Children share tools and model, cannot spawn children, and route every side effect through the parent's approval policy.
 - **Web UI and fleet view.** `xharness web` serves a local interface: streaming transcript, tool cards, approval buttons, conversation, session, and memory lists, usage chips, light/dark theme. The fleet view shows every conversation and subagent on one page — state, usage, pending approvals — with inline approve/deny and a **stop** button per agent. Binds 127.0.0.1 by default; binding elsewhere requires `--token`.
+- **Multi-node fleet.** Every machine runs its own `xharness web` as a node; any machine whose config lists the nodes becomes a hub: its fleet view merges local and remote conversations, and approve / deny / stop are proxied through the hub. Node tokens live only in the hub's environment; the browser never sees them. `xharness fleet` prints the whole fleet in the terminal.
 - **Provider catalog presets.** `preset = "ollama"` wires up llama.cpp, Ollama, vLLM, LM Studio, LiteLLM, or OpenAI, OpenRouter, Groq, Mistral, Together in one line; `xharness providers probe` checks each endpoint and lists the models it serves.
 - **Memory layer.** Persistent memory across sessions: one Markdown file per fact under `~/.xharness/memory/` with a generated `MEMORY.md` index. The model sees the index (names and one-line descriptions) on every call and loads a memory in full only when it asks; `memory_write`/`memory_delete` go through approval and every change is recorded in `audit.jsonl` with the agent and session. `xharness memory` shows a human exactly what the agent remembers.
 - **Append-only session log.** Every message and tool result is recorded as JSONL under `~/.xharness/sessions/`; `--resume <id>` continues a session.
@@ -143,6 +144,33 @@ max_turns = 20    # per-child turn limit
 ```
 
 Children share tools, model, telemetry, and the session log (events tagged with the `agent` name; `--resume` rebuilds only the main line). Children cannot see the `subagent` tools, so there is no unbounded recursion, and every side effect goes through the parent's approval policy — a `prompt`-mode parent still asks you.
+
+## Multi-node fleet
+
+On each node (a machine you want to watch) — non-loopback binding requires a token, which need not appear on the command line:
+
+```sh
+XHARNESS_WEB_TOKEN_FILE=/run/secrets/xharness-node xharness web --host 0.0.0.0 --port 3080 --no-open
+```
+
+On the hub (any machine) — list the nodes in `xharness.toml`, referencing tokens by environment variable name:
+
+```toml
+[fleet]
+name = "hub-office"                 # this machine's label in the fleet view (default: hostname)
+
+[fleet.nodes.farm]
+url = "http://10.0.0.5:3080"
+token_env = "XHARNESS_NODE_FARM_TOKEN"
+# timeout_seconds = 3
+```
+
+```sh
+xharness fleet                      # terminal: per node up/DOWN, latency, conversations, running, waiting, tokens
+xharness web                        # the fleet view gains a "節點: farm" section; cards approve / deny / stop in place
+```
+
+Trust model: the hub forwards exactly two actions (approvals, stop) on an allow-list with validated conversation ids; a node answering a hub does not poll its own nodes (no recursion); "open on node" opens that node's own UI, which has its own authentication. Plain http is acceptable inside a LAN; put a TLS reverse proxy in front of nodes across network boundaries.
 
 ## Provider catalog presets
 
@@ -304,8 +332,8 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 ## Roadmap
 
-- Multi-node: let the fleet view watch harnesses on several machines
 - Memory consolidation (fold scattered memories into topic pages)
+- Usage history in the fleet view (per-node tokens over time)
 
 ## Security
 

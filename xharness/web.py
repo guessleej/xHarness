@@ -29,6 +29,7 @@ from . import __version__
 from .agent import Agent, AgentOptions
 from .config import ResolvedConfig
 from .context import Harness
+from .fleet import forward, load_nodes, node_name, poll_all
 from .memory import MemoryStore, default_memory_dir
 from .presets import build_harness
 from .sandbox import resolve_sandbox
@@ -126,6 +127,8 @@ class WebApp:
         self.conversations: dict[str, Conversation] = {}
         self.lock = threading.Lock()
         self.tickets: dict[str, float] = {}
+        self.node_name = node_name(config.fleet)
+        self.nodes = {node.name: node for node in load_nodes(config.fleet)}
 
     def create(self, resume: str | None = None) -> Conversation:
         harness = self.harness_factory(resume)
@@ -238,13 +241,16 @@ class WebApp:
         conv.push({"type": "stop_requested"})
         return True
 
-    def fleet(self) -> dict[str, Any]:
+    def fleet(self, include_nodes: bool = True) -> dict[str, Any]:
         items = self.list()
         model = str(self.config.provider["model"])
         for item in items:
             item["model"] = model
         usage_total = sum((item["usage"] or {}).get("total_tokens", 0) for item in items)
-        return {
+        report: dict[str, Any] = {
+            "node": self.node_name,
+            "version": __version__,
+            "model": model,
             "summary": {
                 "conversations": len(items),
                 "running": sum(1 for item in items if item["state"] == "running"),
@@ -254,6 +260,15 @@ class WebApp:
             },
             "items": items,
         }
+        if include_nodes and self.nodes:
+            report["nodes"] = poll_all(list(self.nodes.values()))
+        return report
+
+    def forward_action(self, node: str, conv_id: str, action: str, body: dict[str, Any]) -> tuple[int, Any]:
+        target = self.nodes.get(node)
+        if target is None:
+            return 404, {"error": "no such node"}
+        return forward(target, conv_id, action, body)
 
     def memory_index(self) -> list[dict[str, Any]]:
         """Read-only view of what the agent remembers, straight from disk."""
@@ -392,7 +407,9 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 self._json(200, app.memory_index())
                 return
             if parts[1:] == ["fleet"]:
-                self._json(200, app.fleet())
+                # A hub asking us for our snapshot must not make us poll our own nodes
+                # (X-XHarness-Client: hub), which would fan out recursively.
+                self._json(200, app.fleet(include_nodes=self.headers.get(CSRF_HEADER) != "hub"))
                 return
             if len(parts) == 4 and parts[1] == "conversations" and parts[3] == "events":
                 conv = app.get(parts[2])
@@ -476,6 +493,10 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     ok = app.stop(conv)
                     self._json(200 if ok else 409, {"ok": ok})
                     return
+            if len(parts) == 6 and parts[1] == "nodes" and parts[3] == "conversations":
+                status, payload = app.forward_action(parts[2], parts[4], parts[5], body)
+                self._json(status, payload if payload is not None else {})
+                return
             self._json(404, {"error": "not found"})
 
     return Handler
@@ -619,6 +640,10 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
 .btn.sm{padding:6px 10px;font-size:13px}
 .btn.ghost{background:transparent;box-shadow:none;color:var(--brand)}
 .empty{color:var(--ink-3);padding:40px 0;text-align:center}
+.nodehead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:22px 0 10px}
+.nodehead h2{margin:0;font-size:20px}
+.nodehead .m{font-size:12px;color:var(--ink-3)}
+.nodehead .down{color:var(--brand);font-size:13px}
 @media (max-width:640px){.hero h1{font-size:24px}.chip{max-width:160px}}
 </style>
 </head>
@@ -645,7 +670,9 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   <section id="fleet">
     <div class="hero"><h1>艦隊視圖</h1><p>所有進行中的對話與子代理，一眼看完狀態、用量與等待中的許可；可就地審批或停止。</p></div>
     <div class="kpis" id="kpis"></div>
+    <div class="nodehead" id="local-head"></div>
     <div class="grid" id="fleet-grid"></div>
+    <div id="nodes"></div>
   </section>
 </main>
 
@@ -797,9 +824,20 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
       const f=await api('/api/fleet');const k=f.summary;
       $('#kpis').innerHTML=[['對話',k.conversations],['執行中',k.running],['等待許可',k.waiting],['子代理',k.children],['總 tokens',k.total_tokens]]
         .map(([l,n])=>'<div class="kpi"><div class="n">'+n+'</div><div class="l">'+l+'</div></div>').join('');
+      $('#local-head').innerHTML='<h2>本機：'+f.node+'</h2><span class="m">v'+f.version+' · '+f.model+'</span>';
       const g=$('#fleet-grid');g.innerHTML='';
-      if(!f.items.length){g.innerHTML='<div class="empty">還沒有對話。按「新對話」開始。</div>';return;}
-      f.items.forEach(it=>{const c=document.createElement('div');c.className='fc '+it.state;
+      if(!f.items.length){g.innerHTML='<div class="empty">本機還沒有對話。按「新對話」開始。</div>';}
+      f.items.forEach(it=>g.appendChild(card(it,null)));
+      const nb=$('#nodes');nb.innerHTML='';
+      (f.nodes||[]).forEach(n=>{const h=document.createElement('div');h.className='nodehead';
+        h.innerHTML='<h2>節點：'+n.name+'</h2><span class="m">'+n.url+(n.ok?' · v'+(n.version||'?')+' · '+(n.model||'')+' · '+n.latency_ms+'ms':'')+'</span>'+(n.ok?'':'<span class="down">離線：'+(n.error||'')+'</span>');
+        nb.appendChild(h);const gg=document.createElement('div');gg.className='grid';
+        if(n.ok&&!n.items.length)gg.innerHTML='<div class="empty">此節點沒有對話。</div>';
+        (n.items||[]).forEach(it=>gg.appendChild(card(it,n)));nb.appendChild(gg);});
+    }catch(e){console.error(e)}
+  }
+  function card(it,node){const c=document.createElement('div');c.className='fc '+it.state;
+        const base=node?'/api/nodes/'+encodeURIComponent(node.name)+'/conversations/'+it.id:'/api/conversations/'+it.id;
         const u=it.usage||{};
         c.innerHTML='<div class="head"><span class="state '+it.state+'">'+fmtState(it.state)+'</span><span class="meta">'+(it.elapsed!=null?it.elapsed+'s':'')+'</span></div>'
           +'<div class="prev"></div>'
@@ -811,17 +849,16 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
         it.pending_approvals.forEach(a=>{const d=document.createElement('div');d.className='appr';d.textContent=a.summary;
           const ok=document.createElement('button');ok.className='btn primary sm';ok.textContent='允許';ok.style.marginLeft='8px';
           const no=document.createElement('button');no.className='btn sm';no.textContent='拒絕';no.style.marginLeft='6px';
-          ok.onclick=()=>api('/api/conversations/'+it.id+'/approvals',{method:'POST',body:{id:a.id,allow:true}}).then(renderFleet);
-          no.onclick=()=>api('/api/conversations/'+it.id+'/approvals',{method:'POST',body:{id:a.id,allow:false}}).then(renderFleet);
+          ok.onclick=()=>api(base+'/approvals',{method:'POST',body:{id:a.id,allow:true}}).then(renderFleet);
+          no.onclick=()=>api(base+'/approvals',{method:'POST',body:{id:a.id,allow:false}}).then(renderFleet);
           d.append(ok,no);ap.appendChild(d);});
         const acts=c.querySelector('.acts');
-        const open=document.createElement('button');open.className='btn sm';open.textContent='開啟';
-        open.onclick=async()=>{conv=it.id;transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display='none';hint.textContent='對話 '+it.id+' · session '+it.session;await connect(conv,0);toggleFleet(false);};
+        const open=document.createElement('button');open.className='btn sm';open.textContent=node?'在節點開啟':'開啟';
+        if(node){open.onclick=()=>window.open(node.url,'_blank','noopener');}
+        else{open.onclick=async()=>{conv=it.id;transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display='none';hint.textContent='對話 '+it.id+' · session '+it.session;await connect(conv,0);toggleFleet(false);};}
         acts.appendChild(open);
-        if(it.running){const st=document.createElement('button');st.className='btn ghost sm';st.textContent='停止';st.onclick=()=>api('/api/conversations/'+it.id+'/stop',{method:'POST',body:{}}).then(renderFleet);acts.appendChild(st);}
-        g.appendChild(c);});
-    }catch(e){console.error(e)}
-  }
+        if(it.running){const st=document.createElement('button');st.className='btn ghost sm';st.textContent='停止';st.onclick=()=>api(base+'/stop',{method:'POST',body:{}}).then(renderFleet);acts.appendChild(st);}
+        return c;}
   function toggleFleet(on){fleetOn=on;document.body.classList.toggle('fleet',on);$('#btn-fleet').textContent=on?'回到對話':'艦隊';
     if(fleetTimer){clearInterval(fleetTimer);fleetTimer=null;}
     if(on){renderFleet();fleetTimer=setInterval(renderFleet,2000);}}

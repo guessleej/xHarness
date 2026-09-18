@@ -25,6 +25,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：�
 - **Eval 子系統。** `xharness eval <目錄>` 對任何模型跑評測套件：每個案例在乾淨的暫存工作區執行任務，用確定性檢查（檔案內容、回答、指令結果、有沒有真的呼叫工具）加可選的 LLM 評審計分，輸出通過率、每案 token 與耗時，可寫 JSONL。內建 `evals/basic` 六個案例，直接量化「這顆模型會不會用工具、守不守規矩」。
 - **子代理（subagent）。** `subagent` 把一個有界的子任務交給全新的子代理、`subagent_batch` 平行分派多個獨立任務；子代理共用工具與模型、不能再生子代理，每個有副作用的動作都回流父代理的審批策略。
 - **Web UI 與艦隊視圖。** `xharness web` 起本機介面：串流逐字稿、工具卡片、審批按鈕、對話與歷史 session 清單、記憶清單、用量晶片、開燈關燈；「艦隊」視圖一頁看完所有對話與子代理的狀態、用量、等待中的許可，可就地審批或**停止**任何一個 agent。預設只綁 127.0.0.1，對外綁定必須帶 `--token`。
+- **多節點艦隊。** 每台機器跑自己的 `xharness web` 當節點，任一台在設定檔列出節點就成為 hub：艦隊視圖把本機與所有節點的對話合併呈現，允許／拒絕／停止透過 hub 代理到節點；節點 token 只存在 hub 的環境變數，瀏覽器永遠碰不到。`xharness fleet` 在終端機看整個艦隊。
 - **供應端型錄預設集。** `preset = "ollama"` 一行就接上 llama.cpp／Ollama／vLLM／LM Studio／LiteLLM 或 OpenAI／OpenRouter／Groq／Mistral／Together；`xharness providers probe` 探測每個端點並列出它提供的模型。
 - **記憶層。** 跨 session 的持久記憶，一則事實一個 Markdown 檔（`~/.xharness/memory/`），自動產生 `MEMORY.md` 索引；模型每次呼叫都看到索引（名稱＋一句描述），需要才 `memory_read` 全文；`memory_write`/`memory_delete` 走審批，每次異動寫入 `audit.jsonl`（哪個 agent、哪個 session）。`xharness memory` 讓人直接檢查 agent 到底記得什麼。
 - **只增不改的 session 記錄。** 每則訊息與工具結果都以 JSONL 記錄在 `~/.xharness/sessions/`；`--resume <id>` 可接續。
@@ -143,6 +144,33 @@ max_turns = 20    # 每個子代理的回合上限
 ```
 
 子代理與父代理共用工具、模型、telemetry 與 session 記錄（事件標記 `agent` 名稱，`--resume` 只重建主線）；子代理看不到 `subagent` 工具，所以不會無限遞迴；它的每個有副作用動作都經父代理的審批策略——父代理是 `prompt` 模式就仍會問你。
+
+## 多節點艦隊
+
+節點端（每台要被監看的機器）——非 loopback 綁定必須有 token，token 不必出現在命令列：
+
+```sh
+XHARNESS_WEB_TOKEN_FILE=/run/secrets/xharness-node xharness web --host 0.0.0.0 --port 3080 --no-open
+```
+
+Hub 端（任一台）——在 `xharness.toml` 列出節點，token 以環境變數名稱參照：
+
+```toml
+[fleet]
+name = "hub-office"                 # 本機在艦隊視圖的顯示名稱（預設主機名）
+
+[fleet.nodes.farm]
+url = "http://10.0.0.5:3080"
+token_env = "XHARNESS_NODE_FARM_TOKEN"
+# timeout_seconds = 3
+```
+
+```sh
+xharness fleet                      # 終端機：每個節點 up/DOWN、延遲、對話數、執行中、等待許可、tokens
+xharness web                        # 艦隊視圖多出「節點：farm」區段，卡片可就地允許／拒絕／停止
+```
+
+信任模型：hub 只代理兩種動作（審批、停止）到節點，路徑白名單、對話 id 驗證；節點被 hub 詢問時不會再去輪詢自己的節點（避免遞迴）；「在節點開啟」會另開該節點的 UI（它有自己的認證）。LAN 內走 http 可接受，跨網段請在節點前放 TLS 反向代理。
 
 ## 供應端型錄預設集（providers）
 
@@ -283,8 +311,8 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 ## 藍圖
 
-- 多節點：讓艦隊視圖同時監看多台機器上的 harness
 - 記憶層的主題彙整（把零散記憶整理成主題頁）
+- 艦隊視圖的歷史趨勢（每節點用量隨時間）
 
 ## 安全
 

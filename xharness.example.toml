@@ -24,6 +24,12 @@ max_turns = 40
 # dir = "/path/to/memory"   # default ~/.xharness/memory
 # max_index_chars = 6000
 
+# [fleet]
+# name = "hub-office"
+# [fleet.nodes.farm]
+# url = "http://10.0.0.5:3080"
+# token_env = "XHARNESS_NODE_FARM_TOKEN"
+
 # project_instructions = true  # read AGENTS.md / CLAUDE.md from cwd into the system prompt
 
 # system_prompt = """
