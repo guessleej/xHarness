@@ -48,7 +48,20 @@ def test_apply_plan_merges_and_audits(tmp_path):
     assert store.read("deploy-a") is None
     merged = store.read("deploy-b")
     assert merged is not None and "xcloud user" in merged.body and merged.topic == "ops"
-    assert "併入自 deploy-a" in merged.body and "較舊" in merged.body
+    assert "併入自" not in merged.body  # deploy-a's text was already contained in deploy-b
+
+
+def test_merge_labels_differing_older_text_with_provenance(tmp_path):
+    store = MemoryStore(str(tmp_path))
+    store.write("port-old", "Service port is 8080", "The node service listens on port 8080.", topic="ops")
+    store.write("port-new", "Service port is 3080", "The node service listens on port 3080.", topic="ops")
+    plan = build_plan(store, "ops")
+    assert plan.merges and plan.merges[0].from_names == ["port-old"]
+    apply_plan(store, plan)
+    merged = store.read("port-new")
+    assert merged is not None
+    assert "port 3080" in merged.body and "併入自 port-old" in merged.body and "較舊" in merged.body
+    assert merged.body.index("port 3080") < merged.body.index("port 8080")  # newer fact stays first
     actions = [record["action"] for record in store.audit()]
     assert actions[-2:] == ["consolidate", "consolidate"]
     assert build_plan(store, "ops").empty
