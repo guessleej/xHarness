@@ -11,6 +11,7 @@ from . import __version__
 from .agent import Agent, AgentOptions, default_system_prompt
 from .config import load_config
 from .evals import format_report, load_cases, run_suite, write_results
+from .memory import MemoryStore, default_memory_dir
 from .web import serve
 from .presets import build_harness
 from .session import SessionLog, messages_from_events
@@ -30,7 +31,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|show <name>|search <q>|audit]" inspects memory; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -62,6 +63,39 @@ def _list_sessions() -> None:
     for entry in sessions:
         stamp = datetime.fromtimestamp(entry["mtime"]).astimezone().isoformat(timespec="seconds")
         print(f"{entry['id']}\t{stamp}")
+
+
+def _run_memory(args: argparse.Namespace, config: Any) -> int:
+    store = MemoryStore(str(config.memory.get("dir") or default_memory_dir()))
+    words = args.task[1:]
+    action = words[0] if words else "list"
+    if action == "list":
+        lines = store.index_lines()
+        print("\n".join(lines) if lines else f"no memories in {store.directory}")
+        return 0
+    if action == "show" and len(words) > 1:
+        memory = store.read(words[1].lower())
+        if memory is None:
+            print(f"xharness: no such memory: {words[1]}", file=sys.stderr)
+            return 1
+        print(memory.to_text())
+        return 0
+    if action == "search" and len(words) > 1:
+        hits = store.search(" ".join(words[1:]))
+        for memory, score, snippet in hits:
+            print(f"{memory.name} ({memory.kind}, score {score}): {memory.description}\n    {snippet}")
+        if not hits:
+            print("no matching memories")
+        return 0
+    if action == "audit":
+        records = store.audit()
+        for record in records:
+            print(f"{record.get('ts')}  {record.get('action'):7}  {record.get('name'):32}  agent={record.get('agent')}  session={record.get('session')}")
+        if not records:
+            print("no audit records")
+        return 0
+    print("usage: xharness memory [list | show <name> | search <words> | audit]", file=sys.stderr)
+    return 2
 
 
 def _run_eval(args: argparse.Namespace, config: Any) -> int:
@@ -117,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.task and args.task[0] == "eval":
         return _run_eval(args, config)
+    if args.task and args.task[0] == "memory":
+        return _run_memory(args, config)
     if args.task and args.task[0] == "web":
         approval_mode = "auto" if args.yes else (args.approve or config.approval)
         return serve(
@@ -175,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"xHarness {__version__} — session {session.id}")
         print(f"model: {config.provider['model']} @ {config.provider['base_url']}")
         print(f"sandbox: {sandbox.name if sandbox else 'off'}")
-        print("commands: /tools /usage /session /clear /exit")
+        print("commands: /tools /usage /memory /session /clear /exit")
         while True:
             try:
                 line = input("\nxharness> ").strip()
@@ -192,6 +228,11 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if line == "/session":
                 print(session.id)
+                continue
+            if line == "/memory":
+                store = harness.ctx.optional("memory")
+                lines = store.index_lines() if store else []
+                print("\n".join(lines) if lines else "no memories")
                 continue
             if line == "/tools":
                 registry: ToolRegistry = harness.ctx.get("tools")

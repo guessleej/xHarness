@@ -20,6 +20,8 @@ class ToolContext:
     #: Ask the approval policy whether a side-effectful action may run.
     #: Mutating tools call this before acting; the policy is owned by the agent.
     approve: Callable[[str], bool]
+    #: Name of the agent making the call, for audit trails.
+    agent: str = "main"
 
 
 @dataclass

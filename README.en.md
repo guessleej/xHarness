@@ -25,6 +25,7 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Eval subsystem.** `xharness eval <dir>` runs a scored suite against any model: each case executes in a clean temp workspace and is graded by deterministic checks (files, answers, command results, whether tools were actually called) plus an optional LLM judge, reporting pass rate, per-case tokens and time, with JSONL output. The bundled `evals/basic` suite quantifies whether a model uses tools and follows instructions.
 - **Subagents.** `subagent` delegates one bounded task to a fresh child agent; `subagent_batch` fans independent tasks out in parallel. Children share tools and model, cannot spawn children, and route every side effect through the parent's approval policy.
 - **Web UI.** `xharness web` serves a local interface: streaming transcript, tool cards, approval buttons, conversation and session lists, usage chips, light/dark theme. Binds 127.0.0.1 by default; binding elsewhere requires `--token`.
+- **Memory layer.** Persistent memory across sessions: one Markdown file per fact under `~/.xharness/memory/` with a generated `MEMORY.md` index. The model sees the index (names and one-line descriptions) on every call and loads a memory in full only when it asks; `memory_write`/`memory_delete` go through approval and every change is recorded in `audit.jsonl` with the agent and session. `xharness memory` shows a human exactly what the agent remembers.
 - **Append-only session log.** Every message and tool result is recorded as JSONL under `~/.xharness/sessions/`; `--resume <id>` continues a session.
 - **Two run modes.** Headless one-shot (`xharness "task"`) and an interactive REPL.
 - **Extensible.** User plugin modules add tools and services from config; `llm/stream` middleware intercepts every model call for caching, logging, or routing.
@@ -82,6 +83,9 @@ xharness --resume 2026-08-22-ab12cd34   # continue a session
 | `todo_write` | no | Maintain a working todo list for multi-step tasks |
 | `subagent` | yes | Delegate a task to a fresh child agent and return its answer |
 | `subagent_batch` | yes | Run independent tasks in parallel children, one heading per task |
+| `memory_write` | yes | Save a cross-session memory (name, one-line description, content) |
+| `memory_read` / `memory_search` / `memory_list` | no | Read in full / keyword search / list the index |
+| `memory_delete` | yes | Remove a wrong or obsolete memory |
 | `security_scan` | no | Run bandit / pip-audit / gitleaks against a directory (missing scanners are skipped) |
 | `webfetch` | yes | Fetch an http(s) URL as readable text; **disabled by default** (`[tools] webfetch = true`) — enabling it is the only egress besides the model endpoint, and every fetch goes through approval |
 
@@ -136,6 +140,26 @@ max_turns = 20    # per-child turn limit
 ```
 
 Children share tools, model, telemetry, and the session log (events tagged with the `agent` name; `--resume` rebuilds only the main line). Children cannot see the `subagent` tools, so there is no unbounded recursion, and every side effect goes through the parent's approval policy — a `prompt`-mode parent still asks you.
+
+## Memory
+
+Memory is for humans to read: `~/.xharness/memory/<name>.md`, one fact per file with a small front matter (name, description, kind, updated) followed by the body; `MEMORY.md` is a generated index. The model sees the index in its system prompt on every call (size-capped; overflow says "use memory_search") and only loads a memory in full when it calls `memory_read` — memory never silently floods the context.
+
+```sh
+xharness memory                 # the index: what the agent remembers
+xharness memory show fav-editor # one memory in full
+xharness memory search deploy   # keyword search
+xharness memory audit           # who wrote or deleted what, in which session
+```
+
+```toml
+[memory]
+# enabled = true
+# dir = "/path/to/memory"    # default ~/.xharness/memory; point it at a project for project memory
+# max_index_chars = 6000
+```
+
+Governance: writes and deletes are mutating tools (interactive mode asks you); every change is audited with the agent name and session; memory is model-written content that feeds future prompts, so like `AGENTS.md` it is a trust decision — review `xharness memory audit` periodically and `memory_delete` (or delete the file) when something is wrong. The Web UI side panel lists current memories.
 
 ## Evaluating models (eval)
 
@@ -256,7 +280,6 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 ## Roadmap
 
-- Memory layer (auditable cross-session memory)
 - Fleet view in the Web UI (watch many agents at once)
 - Provider catalog presets
 

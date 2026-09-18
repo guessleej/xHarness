@@ -19,6 +19,11 @@ max_turns = 40
 # max_workers = 4   # parallelism for subagent_batch
 # max_turns = 20    # per-child turn limit
 
+# [memory]
+# enabled = true
+# dir = "/path/to/memory"   # default ~/.xharness/memory
+# max_index_chars = 6000
+
 # project_instructions = true  # read AGENTS.md / CLAUDE.md from cwd into the system prompt
 
 # system_prompt = """

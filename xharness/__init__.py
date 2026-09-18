@@ -1,6 +1,6 @@
 """xHarness: a plugin-based AI agent harness by xCloudinfo."""
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from .agent import Agent, AgentOptions, default_system_prompt, load_project_instructions
 from .config import ResolvedConfig, load_config
@@ -8,6 +8,7 @@ from .evals import AttemptResult, CaseReport, CheckResult, format_report, load_c
 from .context import Context, Harness, Plugin
 from .llm import AssistantTurn, OpenAIAdapter, Usage, llm_plugin
 from .mcp import McpClient, McpError, mcp_plugin
+from .memory import Memory, MemoryStore, default_memory_dir, memory_plugin
 from .presets import build_harness
 from .sandbox import Sandbox, resolve_sandbox, sandbox_plugin
 from .subagent import run_child, subagent_plugin
@@ -33,6 +34,8 @@ __all__ = [
     "Context",
     "Harness",
     "McpClient",
+    "Memory",
+    "MemoryStore",
     "McpError",
     "OpenAIAdapter",
     "Plugin",
@@ -63,6 +66,8 @@ __all__ = [
     "load_cases",
     "load_config",
     "mcp_plugin",
+    "default_memory_dir",
+    "memory_plugin",
     "messages_from_events",
     "read_tool",
     "register_tools",

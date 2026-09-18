@@ -197,3 +197,13 @@ def test_serve_refuses_non_loopback_without_token(capsys):
 
     assert serve(CONFIG, host="0.0.0.0", port=0, open_browser=False) == 2
     assert "refusing to bind" in capsys.readouterr().err
+
+
+def test_memory_endpoint_lists_memories(server_factory, tmp_path, monkeypatch):
+    from xharness.memory import MemoryStore
+
+    monkeypatch.setitem(CONFIG.memory, "dir", str(tmp_path))
+    MemoryStore(str(tmp_path)).write("fav-editor", "User prefers vim", "vim")
+    client, _app = server_factory([])
+    status, payload = client.request("GET", "/api/memory")
+    assert status == 200 and payload[0]["name"] == "fav-editor" and payload[0]["description"] == "User prefers vim"

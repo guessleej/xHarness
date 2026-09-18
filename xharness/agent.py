@@ -184,7 +184,7 @@ class Agent:
                 return False
             return self.options.prompt(summary)
 
-        tool_ctx = ToolContext(cwd=self.options.cwd or os.getcwd(), approve=approve)
+        tool_ctx = ToolContext(cwd=self.options.cwd or os.getcwd(), approve=approve, agent=self.options.name)
         if self.options.on_tool_start:
             self.options.on_tool_start(call["name"], call["arguments"])
         try:

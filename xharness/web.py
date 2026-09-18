@@ -14,6 +14,7 @@ Security posture (see docs/ssdlc.md):
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import sys
 import threading
@@ -28,6 +29,7 @@ from . import __version__
 from .agent import Agent, AgentOptions
 from .config import ResolvedConfig
 from .context import Harness
+from .memory import MemoryStore, default_memory_dir
 from .presets import build_harness
 from .sandbox import resolve_sandbox
 from .session import SessionLog, messages_from_events
@@ -193,6 +195,17 @@ class WebApp:
         approval.event.set()
         return True
 
+    def memory_index(self) -> list[dict[str, Any]]:
+        """Read-only view of what the agent remembers, straight from disk."""
+        directory = str(self.config.memory.get("dir") or default_memory_dir())
+        if not os.path.isdir(directory):
+            return []
+        store = MemoryStore(directory)
+        return [
+            {"name": memory.name, "kind": memory.kind, "description": memory.description, "updated": memory.updated}
+            for memory in store.list()
+        ]
+
     def issue_ticket(self) -> str:
         ticket = secrets.token_urlsafe(24)
         now = time.time()
@@ -314,6 +327,9 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 return
             if parts[1:] == ["sessions"]:
                 self._json(200, SessionLog.list()[:50])
+                return
+            if parts[1:] == ["memory"]:
+                self._json(200, app.memory_index())
                 return
             if len(parts) == 4 and parts[1] == "conversations" and parts[3] == "events":
                 conv = app.get(parts[2])
@@ -553,6 +569,8 @@ textarea:focus{box-shadow:0 0 0 3px rgba(191,24,31,.18),var(--shadow-sm)}
     <div id="convs"></div>
     <div class="sec">磁碟上的 session（可接續）</div>
     <div id="sessions"></div>
+    <div class="sec">記憶（agent 記得什麼）</div>
+    <div id="memory"></div>
   </div>
 </aside>
 
@@ -664,6 +682,11 @@ textarea:focus{box-shadow:0 0 0 3px rgba(191,24,31,.18),var(--shadow-sm)}
       sessions.slice(0,30).forEach(s=>{const d=document.createElement('div');d.className='item';
         d.innerHTML='<div class="t"></div><div class="m"><span></span></div>';d.querySelector('.t').textContent=s.id;
         d.querySelector('.m span').textContent=new Date(s.mtime*1000).toLocaleString('zh-TW');d.onclick=()=>newConversation(s.id);sb.appendChild(d);});
+      const mem=await api('/api/memory');const mb=$('#memory');mb.innerHTML='';
+      if(!mem.length)mb.innerHTML='<div class="item"><div class="m">還沒有記憶</div></div>';
+      mem.forEach(m=>{const d=document.createElement('div');d.className='item';d.style.cursor='default';
+        d.innerHTML='<div class="t"></div><div class="m"><span></span></div>';d.querySelector('.t').textContent=m.name+' · '+m.description;
+        d.querySelector('.m span').textContent=m.kind+(m.updated?' · '+m.updated.slice(0,10):'');mb.appendChild(d);});
     }catch(e){console.error(e)}
   }
 

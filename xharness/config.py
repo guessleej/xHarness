@@ -20,6 +20,7 @@ class ResolvedConfig:
     project_instructions: bool = True
     telemetry: dict[str, Any] = field(default_factory=dict)
     subagent: dict[str, Any] = field(default_factory=dict)
+    memory: dict[str, Any] = field(default_factory=dict)
     plugins: list[dict[str, Any]] = field(default_factory=list)
     sandbox: dict[str, Any] = field(default_factory=dict)
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -77,6 +78,7 @@ def load_config(
         project_instructions=bool(raw.get("project_instructions", True)),
         telemetry=raw.get("telemetry", {}) or {},
         subagent=raw.get("subagent", {}) or {},
+        memory=raw.get("memory", {}) or {},
         plugins=raw.get("plugins", []),
         sandbox=raw.get("sandbox", {}),
         mcp_servers=raw.get("mcp", {}).get("servers", {}),

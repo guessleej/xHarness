@@ -9,6 +9,7 @@ from .config import ResolvedConfig
 from .context import Harness, Plugin
 from .llm import llm_plugin
 from .mcp import mcp_plugin
+from .memory import memory_plugin
 from .sandbox import sandbox_plugin
 from .session import session_plugin
 from .subagent import subagent_plugin
@@ -50,6 +51,8 @@ def build_harness(
     harness.use("tool-security", security_tool_plugin)
     harness.use("telemetry", telemetry_plugin(config.telemetry))
     harness.use("subagent", subagent_plugin(config.subagent))
+    if config.memory.get("enabled", True):
+        harness.use("memory", memory_plugin(config.memory))
     if config.webfetch:
         harness.use("tool-webfetch", webfetch_tool_plugin)
     if config.mcp_servers:

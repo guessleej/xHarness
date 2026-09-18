@@ -25,6 +25,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness。�
 - **Eval 子系統。** `xharness eval <目錄>` 對任何模型跑評測套件：每個案例在乾淨的暫存工作區執行任務，用確定性檢查（檔案內容、回答、指令結果、有沒有真的呼叫工具）加可選的 LLM 評審計分，輸出通過率、每案 token 與耗時，可寫 JSONL。內建 `evals/basic` 六個案例，直接量化「這顆模型會不會用工具、守不守規矩」。
 - **子代理（subagent）。** `subagent` 把一個有界的子任務交給全新的子代理、`subagent_batch` 平行分派多個獨立任務；子代理共用工具與模型、不能再生子代理，每個有副作用的動作都回流父代理的審批策略。
 - **Web UI。** `xharness web` 起本機介面：串流逐字稿、工具卡片、審批按鈕、對話與歷史 session 清單、用量晶片、開燈關燈；預設只綁 127.0.0.1，對外綁定必須帶 `--token`。
+- **記憶層。** 跨 session 的持久記憶，一則事實一個 Markdown 檔（`~/.xharness/memory/`），自動產生 `MEMORY.md` 索引；模型每次呼叫都看到索引（名稱＋一句描述），需要才 `memory_read` 全文；`memory_write`/`memory_delete` 走審批，每次異動寫入 `audit.jsonl`（哪個 agent、哪個 session）。`xharness memory` 讓人直接檢查 agent 到底記得什麼。
 - **只增不改的 session 記錄。** 每則訊息與工具結果都以 JSONL 記錄在 `~/.xharness/sessions/`；`--resume <id>` 可接續。
 - **兩種執行模式。** headless 一次性（`xharness "任務"`）與互動 REPL。
 - **可擴充。** 使用者插件模組可從設定檔加入工具與服務；`llm/stream` 中介層可攔截每次模型呼叫做快取、記錄或路由。
@@ -82,6 +83,9 @@ xharness --resume 2026-08-22-ab12cd34   # 接續 session
 | `todo_write` | 否 | 維護多步驟任務的工作清單 |
 | `subagent` | 是 | 把子任務交給全新的子代理，回傳它的最終答案 |
 | `subagent_batch` | 是 | 平行跑多個獨立子任務，逐一標題回傳 |
+| `memory_write` | 是 | 存一則跨 session 的記憶（名稱、一句描述、內容） |
+| `memory_read` / `memory_search` / `memory_list` | 否 | 讀全文／關鍵字搜尋／列索引 |
+| `memory_delete` | 是 | 刪除錯誤或過時的記憶 |
 | `security_scan` | 否 | 對目錄跑 bandit / pip-audit / gitleaks（未安裝的略過） |
 | `webfetch` | 是 | 抓取 http(s) 網頁並轉成可讀文字；**預設關閉**（`[tools] webfetch = true` 才開）——開了它才會有模型端點以外的對外連線，且每次抓取都走審批 |
 
@@ -136,6 +140,26 @@ max_turns = 20    # 每個子代理的回合上限
 ```
 
 子代理與父代理共用工具、模型、telemetry 與 session 記錄（事件標記 `agent` 名稱，`--resume` 只重建主線）；子代理看不到 `subagent` 工具，所以不會無限遞迴；它的每個有副作用動作都經父代理的審批策略——父代理是 `prompt` 模式就仍會問你。
+
+## 記憶層（memory）
+
+記憶是給人看的：`~/.xharness/memory/<名稱>.md`，一則事實一個檔，前段是 name／description／kind／updated，後面是內容；`MEMORY.md` 是自動產生的索引。模型每次呼叫都在 system prompt 看到索引（有大小上限，超過會提示用 `memory_search`），只有它主動 `memory_read` 才載入全文——記憶不會悄悄塞爆 context。
+
+```sh
+xharness memory                 # 列索引：agent 記得什麼
+xharness memory show fav-editor # 看一則全文
+xharness memory search 部署     # 關鍵字搜尋
+xharness memory audit           # 誰在哪個 session 寫／刪了什麼
+```
+
+```toml
+[memory]
+# enabled = true
+# dir = "/path/to/memory"    # 預設 ~/.xharness/memory；指到專案目錄就變成專案記憶
+# max_index_chars = 6000
+```
+
+治理：寫入與刪除都是有副作用的工具（互動模式會問你）；每次異動記錄 agent 名稱與 session 到 `audit.jsonl`；記憶是模型寫的內容、會回到未來的 prompt，所以它跟 AGENTS.md 一樣是信任決定——用 `xharness memory audit` 定期看，不對就 `memory_delete` 或直接刪檔。Web UI 的側面板也列出目前的記憶。
 
 ## 評測模型（eval）
 
@@ -235,7 +259,6 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 ## 藍圖
 
-- 記憶層（跨 session 的可稽核記憶）
 - Web UI 的艦隊視圖（多 agent 同時監看）
 - 供應端型錄預設集
 

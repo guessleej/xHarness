@@ -20,6 +20,11 @@ max_turns = 40
 # max_workers = 4   # subagent_batch 平行上限
 # max_turns = 20    # 每個子代理回合上限
 
+# [memory]
+# enabled = true
+# dir = "/path/to/memory"   # 預設 ~/.xharness/memory
+# max_index_chars = 6000
+
 # project_instructions = true  # 自動讀工作目錄的 AGENTS.md / CLAUDE.md 進 system prompt
 
 # system_prompt = """

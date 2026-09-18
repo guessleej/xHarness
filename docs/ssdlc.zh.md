@@ -44,6 +44,7 @@
 | Web UI 被其他網站觸發（CSRF）或 DNS rebinding | 預設只綁 loopback；未設 token 時拒絕非 loopback 的 `Host`；所有 POST 必須帶 `X-XHarness-Client` 標頭（自訂標頭會觸發永不放行的 CORS 預檢）；不送 CORS 標頭；頁面有 CSP | 已緩解 |
 | Web UI 暴露到網路 | 綁非 loopback 位址沒有 `--token` 就拒絕啟動；token 只走 `Authorization` 標頭；SSE 串流用 60 秒一次性票證；沒認證就不准對外綁 | 已緩解 |
 | 子代理遞迴／失控分派 | 子代理看不到 `subagent` 工具；`max_workers` 限制平行數；每個子代理有 `max_turns`；子代理的每個副作用都走父代理審批；telemetry 預算連子代理一起算 | 已緩解 |
+| 被下毒的記憶讓提示注入跨 session 持續 | 記憶是模型寫的內容、會回到未來的 system prompt，因此與 `AGENTS.md` 一樣是信任決定：寫入與刪除走審批策略；只注入有大小上限的索引，全文要明確 `memory_read` 才載入；每次異動都稽核（`audit.jsonl`：agent、session、動作），`xharness memory audit` 與 Web UI 都看得到；檔案是人能直接刪的純 Markdown；`[memory] enabled = false` 可整個關閉 | 已緩解；`auto` 模式仍有殘餘風險 |
 | 模型把檔案內容外送到端點 | 設計本質：模型必須看到檔案內容才能工作。請把 xHarness 指向你信任的端點（本設計對地端友善） | 接受並揭露 |
 
 ### 殘餘風險（接受並揭露）
