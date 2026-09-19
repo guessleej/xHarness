@@ -266,3 +266,12 @@ def test_favicon_is_served(server_factory):
         assert b"<svg" in body and b"#bf181f" in body
     status, page = client.request("GET", "/")
     assert 'rel="icon"' in page
+
+
+def test_tools_endpoint_lists_tools_and_flags_mutating(server_factory):
+    client, _app = server_factory([])
+    status, payload = client.request("GET", "/api/tools")
+    assert status == 200
+    names = {tool["name"]: tool for tool in payload["tools"]}
+    assert "mutate" in names and names["mutate"]["mutating"] is True and names["mutate"]["source"] == "builtin"
+    assert payload["mcp_servers"] == []

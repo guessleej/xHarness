@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.0.6 — 2026-09-19
+
+- Web UI：側面板新增「工具」區——列出所有工具（標示有副作用）、沙箱狀態、MCP server 與各自貢獻的工具數；新增 `GET /api/tools`。
+- Web UI: a "工具" section in the side panel lists every tool (mutating flagged), the sandbox state, and each MCP server with its tool count; new `GET /api/tools`.
+
 ## 1.0.5 — 2026-09-19
 
 - Web：終端只記錄寫入與錯誤（艦隊輪詢的 GET 不再洗版）；分頁在背景時暫停艦隊輪詢。

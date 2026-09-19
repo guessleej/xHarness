@@ -277,6 +277,32 @@ class WebApp:
             return 404, {"error": "no such node"}
         return forward(target, conv_id, action, body)
 
+    def tools(self) -> dict[str, Any]:
+        """Every tool an agent here would get, grouped by source; the probe harness is built once."""
+        with self.lock:
+            convs = list(self.conversations.values())
+        harness = convs[0].harness if convs else getattr(self, "_probe", None)
+        if harness is None:
+            harness = self.harness_factory(None)
+            self._probe = harness
+        registry = harness.ctx.get("tools")
+        items = [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "mutating": bool(tool.mutating),
+                "source": "mcp" if tool.name.startswith("mcp__") else "builtin",
+                "server": tool.name.split("__")[1] if tool.name.startswith("mcp__") and tool.name.count("__") >= 2 else None,
+            }
+            for tool in registry.list()
+        ]
+        servers = []
+        for name in (getattr(self.config, "mcp_servers", None) or {}):
+            count = sum(1 for item in items if item["server"] == name)
+            servers.append({"name": name, "tools": count, "ok": count > 0})
+        sandbox = harness.ctx.optional("sandbox")
+        return {"tools": items, "mcp_servers": servers, "sandbox": sandbox.name if sandbox else None}
+
     def memory_index(self) -> list[dict[str, Any]]:
         """Read-only view of what the agent remembers, straight from disk."""
         directory = str(self.config.memory.get("dir") or default_memory_dir())
@@ -319,6 +345,9 @@ class WebApp:
             convs = list(self.conversations.values())
         for conv in convs:
             conv.harness.dispose()
+        probe = getattr(self, "_probe", None)
+        if probe is not None:
+            probe.dispose()
 
 
 def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]:
@@ -440,6 +469,9 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 return
             if parts[1:] == ["memory"]:
                 self._json(200, app.memory_index())
+                return
+            if parts[1:] == ["tools"]:
+                self._json(200, app.tools())
                 return
             if parts[1:] == ["usage"]:
                 since = (query.get("since") or ["7d"])[0]
@@ -782,6 +814,8 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
     <div id="convs"></div>
     <div class="sec">磁碟上的 session（可接續）</div>
     <div id="sessions"></div>
+    <div class="sec">工具（agent 能做什麼）</div>
+    <div id="tools"></div>
     <div class="sec">記憶（agent 記得什麼）</div>
     <div id="memory"></div>
   </div>
@@ -903,6 +937,15 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
       sessions.slice(0,30).forEach(s=>{const d=document.createElement('div');d.className='item';
         d.innerHTML='<div class="t"></div><div class="m"><span></span></div>';d.querySelector('.t').textContent=s.id;
         d.querySelector('.m span').textContent=new Date(s.mtime*1000).toLocaleString('zh-TW');d.onclick=()=>newConversation(s.id);sb.appendChild(d);});
+      const tl=await api('/api/tools');const tb=$('#tools');tb.innerHTML='';
+      const hdr=document.createElement('div');hdr.className='item';hdr.style.cursor='default';
+      hdr.innerHTML='<div class="m"><span></span></div>';
+      hdr.querySelector('span').textContent=tl.tools.length+' 個工具 · 沙箱 '+(tl.sandbox||'關')+(tl.mcp_servers.length?' · MCP server '+tl.mcp_servers.map(sv=>sv.name+'('+sv.tools+(sv.ok?'':'，未啟動')+')').join('、'):' · 未設定 MCP server');
+      tb.appendChild(hdr);
+      tl.tools.forEach(t=>{const d=document.createElement('div');d.className='item';d.style.cursor='default';
+        d.innerHTML='<div class="t"></div><div class="m"><span></span></div>';
+        d.querySelector('.t').textContent=t.name+(t.mutating?' · 有副作用（走審批）':'');d.querySelector('.t').title=t.description;
+        d.querySelector('.m span').textContent=(t.source==='mcp'?'MCP：'+t.server+' · ':'內建 · ')+t.description.slice(0,90);tb.appendChild(d);});
       const mem=await api('/api/memory');const mb=$('#memory');mb.innerHTML='';
       if(!mem.length)mb.innerHTML='<div class="item"><div class="m">還沒有記憶</div></div>';
       let lastTopic=null;
