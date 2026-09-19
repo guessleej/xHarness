@@ -24,9 +24,11 @@ MAX_CHILD_OUTPUT = 20_000
 CHILD_TOOLS = {"subagent", "subagent_batch"}
 
 
-def child_system_prompt(cwd: str, name: str, context: str) -> str:
+def child_system_prompt(cwd: str, name: str, context: str, model: str | None = None) -> str:
     lines = [
         f"You are a child agent named {name!r}, working for a parent agent.",
+        (f"You run on the model '{model}' on the operator's own infrastructure; never claim to be another vendor's model."
+         if model else "You run on the operator's own model; never claim to be another vendor's model."),
         f"Working directory: {cwd}",
         "Complete only the task you are given, using tools as needed, then reply with",
         "a concise, self-contained result the parent can use directly.",
@@ -56,7 +58,7 @@ def run_child(
         AgentOptions(
             name=name,
             cwd=tool_ctx.cwd,
-            system_prompt=child_system_prompt(tool_ctx.cwd, name, context),
+            system_prompt=child_system_prompt(tool_ctx.cwd, name, context, getattr(ctx.optional("llm"), "model", None)),
             max_turns=max_turns,
             approval_mode="prompt",
             prompt=approve,

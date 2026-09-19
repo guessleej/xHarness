@@ -364,9 +364,9 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m pytest -q
 ```
 
-## Roadmap
+## Versioning
 
-- 1.0 after a stabilisation period in real deployments; 1.x from there
+Current release: **1.0** (2026-09-19). 1.x carries compatible additions and fixes only; breaking changes wait for 2.0 and are recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ## Security
 

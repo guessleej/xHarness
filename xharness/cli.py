@@ -417,7 +417,7 @@ def main(argv: list[str] | None = None) -> int:
                 agent.messages[:] = [
                     {
                         "role": "system",
-                        "content": config.system_prompt or default_system_prompt(options.cwd or "."),
+                        "content": config.system_prompt or default_system_prompt(options.cwd or ".", str(config.provider["model"])),
                     }
                 ]
                 print("conversation cleared")

@@ -343,9 +343,9 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m pytest -q
 ```
 
-## 藍圖
+## 版本
 
-- 1.0：在實際部署跑過一段穩定期後定版；之後以 1.x 逐步演進
+目前為 **1.0**（2026-09-19 定版）。1.x 只做相容的增補與修正；破壞相容的變更留到 2.0，並在 [CHANGELOG.md](CHANGELOG.md) 記錄。
 
 ## 安全
 

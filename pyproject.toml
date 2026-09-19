@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xharness"
-version = "0.10.0"
+version = "1.0.0"
 description = "xHarness: a plugin-based AI agent harness by xCloudinfo. Standard library only; runs against any OpenAI-compatible endpoint."
 readme = "README.md"
 license = { text = "MIT" }
@@ -13,7 +13,7 @@ requires-python = ">=3.11"
 dependencies = []
 keywords = ["ai", "agent", "harness", "llm", "plugin", "openai-compatible"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",

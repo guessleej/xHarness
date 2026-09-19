@@ -157,3 +157,14 @@ def test_operator_stop_ends_loop_and_skips_tools():
     assert tool_messages[0]["content"] == "echo:a"
     assert "stopped by operator" in tool_messages[1]["content"]
     assert len(adapter.seen) == 1
+
+
+def test_system_prompt_states_the_real_model_identity():
+    harness, _adapter = build([AssistantTurn(content="ok")])
+    agent = Agent(harness.ctx, AgentOptions(approval_mode="auto"))
+    system = agent.messages[0]["content"]
+    assert "You run on the model 'fake'" in system
+    assert "never claim to be GPT" in system
+    from xharness.agent import default_system_prompt
+
+    assert "operator's own infrastructure" in default_system_prompt(".")

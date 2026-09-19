@@ -42,10 +42,19 @@ def load_project_instructions(cwd: str) -> str | None:
     return None
 
 
-def default_system_prompt(cwd: str) -> str:
+def default_system_prompt(cwd: str, model: str | None = None) -> str:
+    identity = (
+        f"You run on the model '{model}', an open-weight model served on the operator's own "
+        "infrastructure. If asked which model or vendor you are, state exactly that; never claim "
+        "to be GPT, Claude, Gemini, or any other vendor's model."
+        if model
+        else "You run on a model served on the operator's own infrastructure; never claim to be "
+        "GPT, Claude, Gemini, or any other vendor's model."
+    )
     return "\n".join(
         [
             "You are xHarness, a coding agent by xCloudinfo.",
+            identity,
             f"Working directory: {cwd}",
             "Use the available tools to inspect and change files and to run commands.",
             "Prefer small verified steps: read before you edit, run checks after you change.",
@@ -87,7 +96,8 @@ class Agent:
         if self.options.initial_messages:
             self.messages.extend(self.options.initial_messages)
         if not any(message.get("role") == "system" for message in self.messages):
-            system = self.options.system_prompt or default_system_prompt(cwd)
+            llm = ctx.optional("llm")
+            system = self.options.system_prompt or default_system_prompt(cwd, getattr(llm, "model", None))
             if self.options.project_instructions:
                 instructions = load_project_instructions(cwd)
                 if instructions:
