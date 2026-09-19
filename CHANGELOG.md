@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.0.4 — 2026-09-19
+
+- Web UI：加上瀏覽器分頁圖示（伺服器自帶的 SVG，品牌紅底白 X）。
+- Web UI: browser tab icon (server-provided SVG favicon).
+
 ## 1.0.3 — 2026-09-19
 
 - Web UI：艦隊視圖的「目前對話」卡片改用淡色底標示，不再用彩色描邊。

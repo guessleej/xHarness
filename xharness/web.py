@@ -41,6 +41,12 @@ APPROVAL_TIMEOUT_SECONDS = 600
 TICKET_TTL_SECONDS = 60
 MAX_BODY_BYTES = 1_000_000
 CSRF_HEADER = "X-XHarness-Client"
+FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+    '<rect width="64" height="64" rx="14" fill="#bf181f"/>'
+    '<path d="M19 19 L45 45 M45 19 L19 45" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>'
+    "</svg>"
+)
 
 
 @dataclass
@@ -338,7 +344,7 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'")
+            self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
@@ -389,6 +395,15 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     self._json(403, {"error": "forbidden host"})
                     return
                 self._html(INDEX_HTML)
+                return
+            if parts in (["favicon.svg"], ["favicon.ico"]):
+                data = FAVICON_SVG.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "image/svg+xml")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(data)
                 return
             if parts[:1] != ["api"]:
                 self._json(404, {"error": "not found"})
@@ -574,6 +589,7 @@ INDEX_HTML = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>xHarness</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
 :root{
   --brand:#bf181f;--brand-glow:#e0484f;--brand-dark:#9c1218;

@@ -250,3 +250,19 @@ def test_usage_endpoints_local_and_hub(server_factory, tmp_path, monkeypatch):
     status, merged = client.request("GET", "/api/fleet/usage?since=7d")
     assert status == 200 and merged["history"]["bucket"] == "day" and merged["nodes"] == []
     assert merged["history"]["totals"]["tasks"] == 1
+
+
+def test_favicon_is_served(server_factory):
+    client, _app = server_factory([])
+    import http.client
+
+    for path in ("/favicon.svg", "/favicon.ico"):
+        conn = http.client.HTTPConnection("127.0.0.1", client.port, timeout=5)
+        conn.request("GET", path, headers={"Host": f"127.0.0.1:{client.port}"})
+        response = conn.getresponse()
+        body = response.read()
+        conn.close()
+        assert response.status == 200 and response.getheader("Content-Type") == "image/svg+xml"
+        assert b"<svg" in body and b"#bf181f" in body
+    status, page = client.request("GET", "/")
+    assert 'rel="icon"' in page
