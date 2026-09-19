@@ -29,7 +29,8 @@ from . import __version__
 from .agent import Agent, AgentOptions
 from .config import ResolvedConfig
 from .context import Harness
-from .fleet import forward, load_nodes, node_name, poll_all
+from .fleet import forward, load_nodes, node_name, poll_all, poll_usage_all
+from .usage import choose_bucket, history, parse_since
 from .memory import MemoryStore, default_memory_dir
 from .presets import build_harness
 from .sandbox import resolve_sandbox
@@ -419,6 +420,20 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             if parts[1:] == ["memory"]:
                 self._json(200, app.memory_index())
                 return
+            if parts[1:] == ["usage"]:
+                since = (query.get("since") or ["7d"])[0]
+                bucket = (query.get("bucket") or [None])[0]
+                self._json(200, history(since=since, bucket=bucket))
+                return
+            if parts[1:] == ["fleet", "usage"]:
+                since = (query.get("since") or ["7d"])[0]
+                bucket = (query.get("bucket") or [None])[0] or choose_bucket(parse_since(since))
+                self._json(200, {
+                    "node": app.node_name,
+                    "history": history(since=since, bucket=bucket),
+                    "nodes": poll_usage_all(list(app.nodes.values()), since, bucket) if app.nodes else [],
+                })
+                return
             if parts[1:] == ["fleet"]:
                 # A hub asking us for our snapshot must not make us poll our own nodes
                 # (X-XHarness-Client: hub), which would fan out recursively.
@@ -653,6 +668,30 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
 .btn.sm{padding:6px 10px;font-size:13px}
 .btn.ghost{background:transparent;box-shadow:none;color:var(--brand)}
 .empty{color:var(--ink-3);padding:40px 0;text-align:center}
+/* usage chart: reference categorical palette, light and dark steps both validated */
+.viz-root{--surface-1:#ffffff;--text-primary:#16202a;--text-secondary:#6b7a85;--grid:rgba(22,32,42,.08);
+  --series-1:#2a78d6;--series-2:#eb6834;--series-3:#1baf7a;--series-4:#eda100;--series-5:#e87ba4;--series-6:#008300;--series-7:#4a3aa7;--series-8:#e34948;
+  background:var(--surface-1);border-radius:16px;padding:14px 16px 10px;box-shadow:var(--shadow-sm)}
+:root[data-theme="dark"] .viz-root{--surface-1:#13242f;--text-primary:#e8eef3;--text-secondary:#8593a0;--grid:rgba(255,255,255,.08);
+  --series-1:#3987e5;--series-2:#d95926;--series-3:#199e70;--series-4:#c98500;--series-5:#d55181;--series-6:#008300;--series-7:#9085e9;--series-8:#e66767}
+.viz-filters{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.viz-sp{flex:1}
+.viz-chart{position:relative;width:100%;height:260px}
+.viz-chart svg{width:100%;height:100%;display:block;font-family:var(--font)}
+.viz-chart .grid line{stroke:var(--grid);stroke-width:1}
+.viz-chart .axis text{fill:var(--text-secondary);font-size:12px}
+.viz-chart .series path{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.viz-chart .series circle{stroke:var(--surface-1);stroke-width:2}
+.viz-chart .crosshair{stroke:var(--text-secondary);stroke-width:1;stroke-dasharray:3 3;opacity:0}
+.viz-tip{position:absolute;pointer-events:none;background:var(--card);color:var(--ink);font-size:12px;line-height:1.5;padding:8px 10px;border-radius:10px;box-shadow:var(--shadow);opacity:0;transition:opacity .12s;min-width:140px}
+.viz-tip .t{color:var(--text-secondary);margin-bottom:2px}
+.viz-tip .r{display:flex;align-items:center;gap:6px}
+.viz-tip .sw{width:10px;height:10px;border-radius:3px;display:inline-block}
+.viz-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:6px;font-size:13px;color:var(--text-secondary)}
+.viz-legend .sw{width:12px;height:12px;border-radius:3px;display:inline-block;vertical-align:-1px;margin-right:6px}
+.viz-table table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+.viz-table th,.viz-table td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--grid);color:var(--text-primary)}
+.viz-table th:first-child,.viz-table td:first-child{text-align:left;color:var(--text-secondary)}
 .nodehead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:22px 0 10px}
 .nodehead h2{margin:0;font-size:20px}
 .nodehead .m{font-size:12px;color:var(--ink-3)}
@@ -686,6 +725,19 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
     <div class="nodehead" id="local-head"></div>
     <div class="grid" id="fleet-grid"></div>
     <div id="nodes"></div>
+    <div class="nodehead"><h2>用量趨勢</h2><span class="m">每個節點的 token 用量隨時間；資料來自各節點磁碟上的 session 記錄</span></div>
+    <div class="viz-root" id="usage">
+      <div class="viz-filters">
+        <button class="btn sm" data-since="24h">24 小時</button>
+        <button class="btn sm primary" data-since="7d">7 天</button>
+        <button class="btn sm" data-since="30d">30 天</button>
+        <span class="viz-sp"></span>
+        <button class="btn sm" id="usage-table-toggle">表格</button>
+      </div>
+      <div id="usage-chart" class="viz-chart"></div>
+      <div id="usage-legend" class="viz-legend"></div>
+      <div id="usage-table" class="viz-table" hidden></div>
+    </div>
   </section>
 </main>
 
@@ -877,9 +929,56 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
         acts.appendChild(open);
         if(it.running){const st=document.createElement('button');st.className='btn ghost sm';st.textContent='停止';st.onclick=()=>api(base+'/stop',{method:'POST',body:{}}).then(renderFleet);acts.appendChild(st);}
         return c;}
+  // usage trend: one axis, one fixed hue per node, crosshair tooltip, legend, table view
+  let usageSince='7d',usageData=null;
+  const SERIES=8;
+  function nodeColor(i){return 'var(--series-'+(Math.min(i,SERIES-1)+1)+')';}
+  async function loadUsage(){
+    try{
+      const u=await api('/api/fleet/usage?since='+usageSince);
+      const series=[{name:'本機：'+u.node,history:u.history}];
+      (u.nodes||[]).forEach(n=>{if(n.ok)series.push({name:n.name,history:n.history});else series.push({name:n.name+'（離線）',history:null});});
+      // more than 8 series fold into "其他" (never a generated hue)
+      let shown=series.slice(0,SERIES);
+      if(series.length>SERIES){const rest=series.slice(SERIES-1);const base=rest[0].history;shown=series.slice(0,SERIES-1);
+        const other={name:'其他（'+rest.length+'）',history:base?{bucket:base.bucket,series:base.series.map((b,i)=>({start:b.start,total_tokens:rest.reduce((a,r)=>a+((r.history&&r.history.series[i])?r.history.series[i].total_tokens:0),0),calls:0,tool_calls:0,tasks:0}))}:null};shown.push(other);}
+      usageData={bucket:(u.history||{}).bucket,series:shown};renderUsage();
+    }catch(e){console.error(e)}
+  }
+  function fmtBucket(iso,bucket){const d=new Date(iso);return bucket==='hour'?(d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':00':(d.getMonth()+1)+'/'+d.getDate();}
+  function renderUsage(){
+    const box=$('#usage-chart');box.innerHTML='';if(!usageData)return;
+    const ref=usageData.series.find(s=>s.history);if(!ref){box.innerHTML='<div class="empty">還沒有用量資料。</div>';return;}
+    const buckets=ref.history.series,n=buckets.length,W=box.clientWidth||800,H=260,padL=56,padR=16,padT=12,padB=28;
+    const max=Math.max(1,...usageData.series.flatMap(s=>s.history?s.history.series.map(b=>b.total_tokens):[0]));
+    const x=i=>padL+(n<=1?0:(W-padL-padR)*i/(n-1)),y=v=>padT+(H-padT-padB)*(1-v/max);
+    const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 '+W+' '+H);
+    const grid=document.createElementNS(ns,'g');grid.setAttribute('class','grid');const axis=document.createElementNS(ns,'g');axis.setAttribute('class','axis');
+    for(let t=0;t<=4;t++){const v=max*t/4,ln=document.createElementNS(ns,'line');ln.setAttribute('x1',padL);ln.setAttribute('x2',W-padR);ln.setAttribute('y1',y(v));ln.setAttribute('y2',y(v));grid.appendChild(ln);
+      const tx=document.createElementNS(ns,'text');tx.setAttribute('x',padL-8);tx.setAttribute('y',y(v)+4);tx.setAttribute('text-anchor','end');tx.textContent=v>=1000?(Math.round(v/100)/10)+'k':Math.round(v);axis.appendChild(tx);}
+    const ticks=Math.min(n,6);for(let k=0;k<ticks;k++){const i=Math.round(k*(n-1)/Math.max(1,ticks-1));const tx=document.createElementNS(ns,'text');tx.setAttribute('x',x(i));tx.setAttribute('y',H-8);tx.setAttribute('text-anchor',k===0?'start':k===ticks-1?'end':'middle');tx.textContent=fmtBucket(buckets[i].start,usageData.bucket);axis.appendChild(tx);}
+    svg.append(grid,axis);
+    usageData.series.forEach((s,si)=>{if(!s.history)return;const g=document.createElementNS(ns,'g');g.setAttribute('class','series');const p=document.createElementNS(ns,'path');
+      p.setAttribute('d',s.history.series.map((b,i)=>(i?'L':'M')+x(i)+' '+y(b.total_tokens)).join(' '));p.setAttribute('stroke',nodeColor(si));g.appendChild(p);
+      // 8px markers only where a bucket has activity, so the line stays thin
+      s.history.series.forEach((b,i)=>{if(!b.total_tokens)return;const c=document.createElementNS(ns,'circle');c.setAttribute('cx',x(i));c.setAttribute('cy',y(b.total_tokens));c.setAttribute('r',4);c.setAttribute('fill',nodeColor(si));g.appendChild(c);});
+      svg.appendChild(g);});
+    const cross=document.createElementNS(ns,'line');cross.setAttribute('class','crosshair');cross.setAttribute('y1',padT);cross.setAttribute('y2',H-padB);svg.appendChild(cross);
+    const tip=document.createElement('div');tip.className='viz-tip';box.append(svg,tip);
+    svg.addEventListener('mousemove',ev=>{const r=svg.getBoundingClientRect();const px=(ev.clientX-r.left)*W/r.width;let i=0,best=1e9;for(let k=0;k<n;k++){const d=Math.abs(x(k)-px);if(d<best){best=d;i=k;}}
+      cross.setAttribute('x1',x(i));cross.setAttribute('x2',x(i));cross.style.opacity=1;
+      tip.innerHTML='<div class="t">'+fmtBucket(buckets[i].start,usageData.bucket)+'</div>'+usageData.series.map((s,si)=>{const b=s.history?s.history.series[i]:null;return '<div class="r"><span class="sw" style="background:'+nodeColor(si)+'"></span>'+s.name+'：'+(b?b.total_tokens+' tokens · '+b.calls+' calls':'—')+'</div>';}).join('');
+      const left=Math.min(r.width-160,Math.max(0,(x(i)*r.width/W)+12));tip.style.left=left+'px';tip.style.top='8px';tip.style.opacity=1;});
+    svg.addEventListener('mouseleave',()=>{cross.style.opacity=0;tip.style.opacity=0;});
+    $('#usage-legend').innerHTML=usageData.series.map((s,si)=>'<span><span class="sw" style="background:'+nodeColor(si)+'"></span>'+s.name+'</span>').join('');
+    const tb=$('#usage-table');tb.innerHTML='<table><thead><tr><th>時段</th>'+usageData.series.map(s=>'<th>'+s.name+'</th>').join('')+'</tr></thead><tbody>'+buckets.map((b,i)=>'<tr><td>'+fmtBucket(b.start,usageData.bucket)+'</td>'+usageData.series.map(s=>'<td>'+(s.history?s.history.series[i].total_tokens:'—')+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+  }
+  document.querySelectorAll('#usage [data-since]').forEach(b=>b.onclick=()=>{usageSince=b.dataset.since;document.querySelectorAll('#usage [data-since]').forEach(o=>o.classList.toggle('primary',o===b));loadUsage();});
+  $('#usage-table-toggle').onclick=()=>{const t=$('#usage-table');t.hidden=!t.hidden;$('#usage-table-toggle').textContent=t.hidden?'表格':'圖表';$('#usage-chart').style.display=t.hidden?'':'none';};
+  window.addEventListener('resize',()=>{if(fleetOn)renderUsage();});
   function toggleFleet(on){fleetOn=on;document.body.classList.toggle('fleet',on);$('#btn-fleet').textContent=on?'回到對話':'艦隊';
     if(fleetTimer){clearInterval(fleetTimer);fleetTimer=null;}
-    if(on){renderFleet();fleetTimer=setInterval(renderFleet,2000);}}
+    if(on){renderFleet();loadUsage();fleetTimer=setInterval(renderFleet,2000);}}
   $('#btn-fleet').onclick=()=>toggleFleet(!fleetOn);
 
   (async function init(){

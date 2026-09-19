@@ -1,6 +1,6 @@
 """xHarness: a plugin-based AI agent harness by xCloudinfo."""
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 from .agent import Agent, AgentOptions, default_system_prompt, load_project_instructions
 from .config import ResolvedConfig, load_config
@@ -17,6 +17,7 @@ from .sandbox import Sandbox, resolve_sandbox, sandbox_plugin
 from .subagent import run_child, subagent_plugin
 from .telemetry import BudgetExceeded, Telemetry, telemetry_plugin
 from .session import SessionLog, harness_home, messages_from_events, session_plugin, sessions_dir
+from .usage import format_history, history, task_records
 from .web import WebApp, serve
 from .tools import Tool, ToolContext, ToolRegistry, ToolResult, register_tools, tools_plugin
 from .tools.bash import bash_tool, bash_tool_plugin
@@ -69,7 +70,9 @@ __all__ = [
     "edit_tool",
     "find_duplicates",
     "format_report",
+    "format_history",
     "format_table",
+    "history",
     "load_nodes",
     "poll_all",
     "poll_node",
@@ -102,6 +105,7 @@ __all__ = [
     "session_plugin",
     "telemetry_plugin",
     "sessions_dir",
+    "task_records",
     "todo_tool_plugin",
     "tools_plugin",
     "webfetch_tool",

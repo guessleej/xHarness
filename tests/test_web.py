@@ -229,3 +229,24 @@ def test_fleet_view_and_stop(server_factory):
     assert fleet["items"][0]["state"] == "idle"
     status, payload = client.request("POST", f"/api/conversations/{conv['id']}/stop", body={})
     assert status == 409
+
+
+def test_usage_endpoints_local_and_hub(server_factory, tmp_path, monkeypatch):
+    import json as _json
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setenv("XHARNESS_HOME", str(tmp_path))
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    stamp = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    (sessions / "s1.jsonl").write_text(
+        _json.dumps({"ts": stamp, "type": "telemetry", "total_tokens": 1234, "prompt_tokens": 1200, "completion_tokens": 34, "calls": 3, "tool_calls": 2}) + "\n",
+        encoding="utf-8",
+    )
+    client, _app = server_factory([])
+    status, report = client.request("GET", "/api/usage?since=24h")
+    assert status == 200 and report["bucket"] == "hour" and report["totals"]["total_tokens"] == 1234
+    assert sum(slot["total_tokens"] for slot in report["series"]) == 1234
+    status, merged = client.request("GET", "/api/fleet/usage?since=7d")
+    assert status == 200 and merged["history"]["bucket"] == "day" and merged["nodes"] == []
+    assert merged["history"]["totals"]["tasks"] == 1

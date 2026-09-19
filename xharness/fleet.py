@@ -145,3 +145,22 @@ def format_table(node_reports: list[dict[str, Any]]) -> str:
                 f"{'pending=' + str(pending) + '  ' if pending else ''}{(item.get('preview') or '(no message)')[:60]}"
             )
     return "\n".join(lines) if lines else "no fleet nodes configured"
+
+
+def poll_usage(node: Node, since: str = "7d", bucket: str | None = None) -> dict[str, Any]:
+    """One node's usage history, or why it could not be read."""
+    query = f"/api/usage?since={since}" + (f"&bucket={bucket}" if bucket else "")
+    try:
+        status, payload = _request(node, "GET", query)
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        return {"name": node.name, "url": node.url, "ok": False, "error": str(getattr(error, "reason", error))[:160]}
+    if status != 200 or not isinstance(payload, dict):
+        return {"name": node.name, "url": node.url, "ok": False, "error": f"HTTP {status}"}
+    return {"name": node.name, "url": node.url, "ok": True, "history": payload}
+
+
+def poll_usage_all(nodes: list[Node], since: str = "7d", bucket: str | None = None) -> list[dict[str, Any]]:
+    if not nodes:
+        return []
+    with ThreadPoolExecutor(max_workers=min(8, len(nodes))) as pool:
+        return list(pool.map(lambda node: poll_usage(node, since, bucket), nodes))

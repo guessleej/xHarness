@@ -26,6 +26,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：�
 - **子代理（subagent）。** `subagent` 把一個有界的子任務交給全新的子代理、`subagent_batch` 平行分派多個獨立任務；子代理共用工具與模型、不能再生子代理，每個有副作用的動作都回流父代理的審批策略。
 - **Web UI 與艦隊視圖。** `xharness web` 起本機介面：串流逐字稿、工具卡片、審批按鈕、對話與歷史 session 清單、記憶清單、用量晶片、開燈關燈；「艦隊」視圖一頁看完所有對話與子代理的狀態、用量、等待中的許可，可就地審批或**停止**任何一個 agent。預設只綁 127.0.0.1，對外綁定必須帶 `--token`。
 - **多節點艦隊。** 每台機器跑自己的 `xharness web` 當節點，任一台在設定檔列出節點就成為 hub：艦隊視圖把本機與所有節點的對話合併呈現，允許／拒絕／停止透過 hub 代理到節點；節點 token 只存在 hub 的環境變數，瀏覽器永遠碰不到。`xharness fleet` 在終端機看整個艦隊。
+- **用量歷史趨勢。** 以磁碟上的 session 記錄為真本（每個任務結束 telemetry 都會落地，CLI／headless／Web／子代理全涵蓋），`xharness usage` 按小時或天彙整 token、模型呼叫、工具呼叫；艦隊視圖畫出每個節點的趨勢折線（單一 y 軸、每節點固定一色、十字游標提示、圖例、表格檢視），hub 會向各節點拉它們自己的歷史對齊同一時間軸。
 - **供應端型錄預設集。** `preset = "ollama"` 一行就接上 llama.cpp／Ollama／vLLM／LM Studio／LiteLLM 或 OpenAI／OpenRouter／Groq／Mistral／Together；`xharness providers probe` 探測每個端點並列出它提供的模型。
 - **記憶層。** 跨 session 的持久記憶，一則事實一個 Markdown 檔（`~/.xharness/memory/`），自動產生 `MEMORY.md` 索引；模型每次呼叫都看到索引（名稱＋一句描述），需要才 `memory_read` 全文；`memory_write`/`memory_delete` 走審批，每次異動寫入 `audit.jsonl`（哪個 agent、哪個 session）。`xharness memory` 讓人直接檢查 agent 到底記得什麼。記憶按 **主題** 分組並自動產生 `topics/<主題>.md` 主題頁；`xharness memory consolidate` 找出重複、矛盾、過時的記憶並提出合併計畫——預設 dry-run，`--apply` 才動手，`--llm` 可讓模型提案。久未確認或使用的記憶會標 **待確認**（`stale_days`，預設 90 天）讓模型與人都看見；`xharness memory verify` 重驗（可用同主題較新的記憶當證據請模型判斷）、`memory expire` 把真正過期的**歸檔**而非刪除。
 - **只增不改的 session 記錄。** 每則訊息與工具結果都以 JSONL 記錄在 `~/.xharness/sessions/`；`--resume <id>` 可接續。
@@ -173,6 +174,16 @@ xharness web                        # 艦隊視圖多出「節點：farm」區�
 ```
 
 信任模型：hub 只代理兩種動作（審批、停止）到節點，路徑白名單、對話 id 驗證；節點被 hub 詢問時不會再去輪詢自己的節點（避免遞迴）；「在節點開啟」會另開該節點的 UI（它有自己的認證）。LAN 內走 http 可接受，跨網段請在節點前放 TLS 反向代理。
+
+## 用量歷史趨勢
+
+```sh
+xharness usage                       # 最近 7 天，按天：token、模型呼叫、工具呼叫、任務數
+xharness usage --since 24h           # 最近 24 小時，按小時
+xharness usage --since 30d --nodes   # 加上設定檔裡每個艦隊節點的歷史
+```
+
+資料來源是 `~/.xharness/sessions/*.jsonl` 裡的 `telemetry` 事件（telemetry 插件在每個任務結束時寫入的累計用量），每個 session 內取相鄰兩筆的差即為該任務的用量，所以不需要 Web 伺服器一直開著、也涵蓋 headless 與子代理。Web 的 `GET /api/usage?since=7d` 回本機歷史，`GET /api/fleet/usage` 由 hub 合併各節點；艦隊視圖底部的「用量趨勢」可切 24 小時／7 天／30 天、切表格。eval 案例用的是拋棄式 harness，不寫 session，因此不計入。
 
 ## 供應端型錄預設集（providers）
 
@@ -334,7 +345,7 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 ## 藍圖
 
-- 艦隊視圖的歷史趨勢（每節點用量隨時間）
+- 1.0：在實際部署跑過一段穩定期後定版；之後以 1.x 逐步演進
 
 ## 安全
 

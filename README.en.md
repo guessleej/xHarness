@@ -26,6 +26,7 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Subagents.** `subagent` delegates one bounded task to a fresh child agent; `subagent_batch` fans independent tasks out in parallel. Children share tools and model, cannot spawn children, and route every side effect through the parent's approval policy.
 - **Web UI and fleet view.** `xharness web` serves a local interface: streaming transcript, tool cards, approval buttons, conversation, session, and memory lists, usage chips, light/dark theme. The fleet view shows every conversation and subagent on one page — state, usage, pending approvals — with inline approve/deny and a **stop** button per agent. Binds 127.0.0.1 by default; binding elsewhere requires `--token`.
 - **Multi-node fleet.** Every machine runs its own `xharness web` as a node; any machine whose config lists the nodes becomes a hub: its fleet view merges local and remote conversations, and approve / deny / stop are proxied through the hub. Node tokens live only in the hub's environment; the browser never sees them. `xharness fleet` prints the whole fleet in the terminal.
+- **Usage history.** Session logs on disk are the source of truth (telemetry lands at the end of every task, covering CLI, headless, Web, and subagents); `xharness usage` aggregates tokens, model calls, and tool calls by hour or day, and the fleet view draws a trend line per node (one y axis, one fixed hue per node, crosshair tooltip, legend, table view), with the hub pulling each node's own history onto a shared time axis.
 - **Provider catalog presets.** `preset = "ollama"` wires up llama.cpp, Ollama, vLLM, LM Studio, LiteLLM, or OpenAI, OpenRouter, Groq, Mistral, Together in one line; `xharness providers probe` checks each endpoint and lists the models it serves.
 - **Memory layer.** Persistent memory across sessions: one Markdown file per fact under `~/.xharness/memory/` with a generated `MEMORY.md` index. The model sees the index (names and one-line descriptions) on every call and loads a memory in full only when it asks; `memory_write`/`memory_delete` go through approval and every change is recorded in `audit.jsonl` with the agent and session. `xharness memory` shows a human exactly what the agent remembers. Memories are grouped by **topic** with generated `topics/<topic>.md` pages; `xharness memory consolidate` finds duplicate, contradictory, or stale memories and proposes a merge plan — dry-run by default, `--apply` executes, `--llm` lets the model propose. Memories not confirmed or used for a long time are flagged **待確認** (stale, `stale_days`, default 90) for both the model and humans; `xharness memory verify` re-verifies them (optionally with the model, using newer memories in the same topic as evidence) and `memory expire` **archives** rather than deletes what is truly expired.
 - **Append-only session log.** Every message and tool result is recorded as JSONL under `~/.xharness/sessions/`; `--resume <id>` continues a session.
@@ -173,6 +174,16 @@ xharness web                        # the fleet view gains a "節點: farm" sect
 ```
 
 Trust model: the hub forwards exactly two actions (approvals, stop) on an allow-list with validated conversation ids; a node answering a hub does not poll its own nodes (no recursion); "open on node" opens that node's own UI, which has its own authentication. Plain http is acceptable inside a LAN; put a TLS reverse proxy in front of nodes across network boundaries.
+
+## Usage history
+
+```sh
+xharness usage                       # last 7 days by day: tokens, model calls, tool calls, tasks
+xharness usage --since 24h           # last 24 hours by hour
+xharness usage --since 30d --nodes   # plus every configured fleet node
+```
+
+The source is the `telemetry` events in `~/.xharness/sessions/*.jsonl` (the cumulative usage the telemetry plugin writes at the end of each task); consecutive entries within a session are differenced into per-task usage, so no web server needs to be running and headless and subagent traffic count too. `GET /api/usage?since=7d` returns local history, `GET /api/fleet/usage` is the hub's merge of every node; the fleet view's "用量趨勢" section switches 24h / 7d / 30d and chart / table. Eval cases run on throwaway harnesses without sessions and are not counted.
 
 ## Provider catalog presets
 
@@ -355,7 +366,7 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
 ## Roadmap
 
-- Usage history in the fleet view (per-node tokens over time)
+- 1.0 after a stabilisation period in real deployments; 1.x from there
 
 ## Security
 

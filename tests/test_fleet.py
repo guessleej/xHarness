@@ -155,3 +155,12 @@ def test_web_token_sources(tmp_path, monkeypatch):
     secret.write_text("from-file\n", encoding="utf-8")
     monkeypatch.setenv("XHARNESS_WEB_TOKEN_FILE", str(secret))
     assert _web_token(None) == "from-file"
+
+
+def test_hub_merges_node_usage_history(two_servers, tmp_path, monkeypatch):
+    node_client, hub_client = two_servers
+    status, merged = hub_client.request("GET", "/api/fleet/usage?since=24h")
+    assert status == 200 and merged["node"] == "hub"
+    node = merged["nodes"][0]
+    assert node["ok"] and node["name"] == "farm" and node["history"]["bucket"] == "hour"
+    assert len(node["history"]["series"]) == len(merged["history"]["series"])  # shared time axis

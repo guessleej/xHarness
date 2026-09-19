@@ -12,7 +12,8 @@ from . import __version__
 from .agent import Agent, AgentOptions, default_system_prompt
 from .config import load_config
 from .evals import format_report, load_cases, run_suite, write_results
-from .fleet import format_table, load_nodes, poll_all
+from .fleet import format_table, load_nodes, poll_all, poll_usage_all
+from .usage import format_history, history
 from .consolidate import apply_plan, apply_verdicts, build_plan, verify_plan
 from .memory import MemoryStore, default_memory_dir
 from .providers import PRESETS, probe_provider
@@ -35,7 +36,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; "usage" shows token history; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -55,6 +56,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-open", action="store_true", dest="no_open", help="web: do not open a browser")
     parser.add_argument("--apply", action="store_true", help="memory consolidate: execute the plan (default: dry run)")
     parser.add_argument("--llm", action="store_true", dest="use_llm", help="memory consolidate: also ask the model for proposals")
+    parser.add_argument("--since", default="7d", help="usage: window such as 24h, 7d, 30d (default 7d)")
+    parser.add_argument("--bucket", choices=["hour", "day"], help="usage: bucket size (default by window)")
+    parser.add_argument("--nodes", action="store_true", help="usage: also fetch every configured fleet node")
     parser.add_argument("--repeat", type=int, default=1, help="eval: run each case N times")
     parser.add_argument("--json", dest="json_out", help="eval: write per-attempt results as JSONL")
     parser.add_argument("-V", "--version", action="version", version=__version__)
@@ -83,6 +87,19 @@ def _web_token(explicit: str | None) -> str | None:
         with open(path, encoding="utf-8") as handle:
             return handle.read().strip() or None
     return None
+
+
+def _run_usage(args: argparse.Namespace, config: Any) -> int:
+    report = history(since=args.since, bucket=args.bucket)
+    print(format_history(report, "local"))
+    if args.nodes:
+        for node in poll_usage_all(load_nodes(config.fleet), args.since, report["bucket"]):
+            print()
+            if node["ok"]:
+                print(format_history(node["history"], node["name"]))
+            else:
+                print(f"{node['name']}: unreachable  {node['url']}  {node.get('error', '')}")
+    return 0
 
 
 def _run_fleet(config: Any) -> int:
@@ -307,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_providers(args, config)
     if args.task and args.task[0] == "fleet":
         return _run_fleet(config)
+    if args.task and args.task[0] == "usage":
+        return _run_usage(args, config)
     if args.task and args.task[0] == "web":
         approval_mode = "auto" if args.yes else (args.approve or config.approval)
         return serve(
