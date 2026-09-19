@@ -8,6 +8,12 @@ English | [中文](README.md)
 
 xHarness is a plugin-based AI agent harness by xCloudinfo: governance-first, zero-dependency, "everything is a plugin", a compact Python package that runs against **any OpenAI-compatible endpoint** — llama.cpp (`llama-server`), vLLM, Ollama, LiteLLM, or a company gateway. Fully on-prem friendly: nothing leaves your machine except requests to the model endpoint you configure.
 
+## How it is used
+
+![xHarness user flow](docs/images/xharness_user_flow_en.png)
+
+Left to right: the workspace and the model endpoint feed xHarness; an operator gives tasks and answers approvals from the Web UI or CLI (1–3); a manager watches several machines from the fleet hub and approves or stops agents in place (4–5); the platform emits audit logs and usage trends, and reaches external tools or other nodes through MCP (6–7).
+
 ## Why
 
 Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one person can read in an afternoon: about 1,900 lines of Python, **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a test suite that runs in under a second.

@@ -8,6 +8,12 @@
 
 xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：治理優先、零相依的精簡 Python 套件，「一切皆插件」，可對接**任何 OpenAI 相容端點**——llama.cpp（`llama-server`）、vLLM、Ollama、LiteLLM 或企業閘道。完全適合地端部署：除了你設定的模型端點之外，不會對外傳送任何資料。
 
+## 使用者操作流程
+
+![xHarness 使用者操作流程圖](docs/images/xharness_user_flow.png)
+
+由左到右：工作區與模型端點把資料送進 xHarness，操作者在 Web UI／CLI 下任務並回答審批（1–3），管理者從艦隊 hub 看多台機器並就地審批或停止（4–5），平台把稽核記錄、用量趨勢輸出到看板，並經 MCP 呼叫外部工具或代理其他節點（6–7）。
+
 ## 為什麼做這個
 
 多數 agent harness 綁死單一廠商 API，還拖著龐大的相依樹。xHarness 保留架構核心——工具、模型 adapter、session 記錄、agent 迴圈的組裝全部都是掛在共享 context 上的插件——但把規模控制在一個人一個下午讀得完：約 1,900 行 Python、**零執行期相依**（純標準函式庫，含 SSE 串流client、TOML 設定讀取與 MCP client），測試跑完不到一秒。

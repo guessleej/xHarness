@@ -1,0 +1,264 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 780" width="1400" height="780" font-family="Noto Sans TC, Microsoft JhengHei, PingFang TC, sans-serif">
+  <defs><marker id="ar-green" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#059669"/></marker><marker id="ar-blue" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#2563eb"/></marker><marker id="ar-orange" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#ea580c"/></marker><marker id="ar-violet" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#7c3aed"/></marker></defs>
+  <rect width="1400" height="780" fill="#ffffff"/>
+  <g transform='translate(212.727,332.562) scale(0.22039)'>
+<g id="Layer_1_1_">
+	<g id="File_x2C__general">
+		
+	</g>
+</g>
+<g id="Access_control">
+</g>
+<g id="Azure_active_directory">
+</g>
+<g id="Folder">
+	<path fill="#059669" d="M350.1,151.5h-71.4c-11.2,0-24.1,5.2-31.8,12.9l-18.1,18.1c-7.7,7.7-12.9,20.6-12.9,31.8v217.7
+		c0,15.5,12.9,28.4,28.4,28.4H548c15.5,0,28.4-12.9,28.4-28.4V231.5c0-15.5-12.9-28.4-28.4-28.4H419.8c-1.7,0-6-2.6-7.7-4.3
+		l-29.3-33.6l0,0l0,0C374.2,156.6,361.3,151.5,350.1,151.5L350.1,151.5z"/>
+</g>
+<g id="symbols">
+</g>
+</g>
+  <text x="300" y="346.0" font-size="25" fill="#bf181f" text-anchor="middle" font-weight="700">Workspace</text>
+  <text x="300" y="466.0" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">Project directory</text>
+  <text x="300" y="490.0" font-size="18" fill="#64748b" text-anchor="middle">code, AGENTS.md</text>
+  <text x="300" y="511.0" font-size="18" fill="#64748b" text-anchor="middle">xharness.toml config</text>
+  <path d="M366 400 H 648" stroke="#059669" stroke-width="2.6" fill="none" marker-end="url(#ar-green)"/>
+  <text x="507" y="382" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">read / write files (sandboxed)</text>
+  <g transform='translate(213.613,523.697) scale(1.93459)'>
+<g id="Layer_1">
+	<g id="File_x2C__general">
+		
+	</g>
+	<g id="Message">
+	</g>
+	<g id="Monitor">
+	</g>
+	<g id="Monitor_running_apps">
+	</g>
+	<g id="Mouse">
+	</g>
+	<g id="Network_card">
+	</g>
+	<g id="Not_allowed">
+	</g>
+	<g id="Performance">
+	</g>
+	<g id="Phone">
+	</g>
+	<g id="Plug_and_play">
+	</g>
+	<g id="Powershell_script_file">
+	</g>
+	<g id="Protocol_stack">
+	</g>
+	<g id="Queue_x2C__general">
+	</g>
+	<g id="RMS_connector">
+	</g>
+	<g id="Router">
+	</g>
+	<g id="Script_file">
+	</g>
+	<g id="Secure_virtual_machine">
+	</g>
+</g>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+	<g id="Laptop">
+	</g>
+	<g id="Load_balancer">
+	</g>
+	<g id="Lock_x2C__protected">
+	</g>
+</g>
+<g id="symbols">
+	<g>
+		<path fill="#059669" d="M52.6,19.1h-16c-1.1,0-2,0.9-2,2v39h20v-39C54.6,20,53.7,19.1,52.6,19.1z M51.6,56.1h-14v-2h14V56.1z
+			 M51.6,52.1h-14v-2h14V52.1z M51.6,27.1h-14v-2h14V27.1z"/>
+	</g>
+</g>
+<g id="slices">
+</g>
+</g>
+  <text x="300" y="546.0" font-size="25" fill="#bf181f" text-anchor="middle" font-weight="700">Model endpoint</text>
+  <text x="300" y="666.0" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">OpenAI-compatible</text>
+  <text x="300" y="690.0" font-size="18" fill="#64748b" text-anchor="middle">llama.cpp / vLLM / Ollama</text>
+  <text x="300" y="711.0" font-size="18" fill="#64748b" text-anchor="middle">on-prem, nothing leaves</text>
+  <path d="M366 600 H 660 V 460" stroke="#059669" stroke-width="2.6" fill="none" marker-end="url(#ar-green)"/>
+  <text x="513" y="582" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">streamed reply, tool calls</text>
+  <g transform='translate(579.032,303.201) scale(0.32584)'>
+<g id="Layer_1_1_">
+</g>
+<g id="Access_control">
+</g>
+<g id="Azure_active_directory">
+</g>
+<g id="Application_server">
+	<g>
+		<g>
+			<path fill="#7c3aed" d="M374.2,118.3H236.9c-9.4,0-17.2,7.7-17.2,17.2v334.8h94.4v-34.3h-68.7v-17.2h68.7v-17.2h-68.7v-17.2h68.7
+				v-51.5v-8.6h8.6h51.5c5.2,0,8.6,0,17.2,0V135.5C391.4,126,383.6,118.3,374.2,118.3z M365.6,187H245.4v-17.2h120.2
+				C365.6,169.8,365.6,187,365.6,187z"/>
+		</g>
+		<g>
+			<path fill="#7c3aed" d="M326.1,337.2v133h197.4v-133H326.1z M514.1,459.9H333.9v-94.4h180.3V459.9z"/>
+			<polygon fill="#7c3aed" points="351,442.8 411.1,442.8 411.1,382.7 351,382.7 			"/>
+			<polygon fill="#7c3aed" points="432.6,442.8 496.9,442.8 496.9,434.2 432.6,434.2 			"/>
+			<polygon fill="#7c3aed" points="432.6,425.6 496.9,425.6 496.9,417 432.6,417 			"/>
+			<polygon fill="#7c3aed" points="432.6,408.4 496.9,408.4 496.9,399.8 432.6,399.8 			"/>
+			<polygon fill="#7c3aed" points="432.6,391.3 496.9,391.3 496.9,382.7 432.6,382.7 			"/>
+		</g>
+	</g>
+</g>
+</g>
+  <text x="775" y="328" font-size="25" fill="#bf181f" text-anchor="start" font-weight="700">xHarness (local or on-prem node)</text>
+  <text x="640" y="470" font-size="20" fill="#16202a" text-anchor="end" font-weight="700">agent loop + plugins</text>
+  <text x="640" y="495" font-size="18" fill="#64748b" text-anchor="end">tools · approval · sandbox</text>
+  <text x="640" y="518" font-size="18" fill="#64748b" text-anchor="end">brakes · memory · subagents</text>
+  <rect x="430" y="20" width="520" height="236" rx="10" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="10 6"/>
+  <text x="936" y="242" font-size="25" fill="#bf181f" text-anchor="end" font-weight="700">Operator</text>
+  <g transform='translate(301.300,-87.800) scale(2.00000)'>
+<g id="group100-187_1_" transform="translate(43.2593,-3764.95)">
+	
+	<g id="shape101-188_1_" transform="translate(7.20825,-11.5207)">
+		
+		<path fill="#2563eb" d="M58.6,3867.9c-5,1.2-7.9,6.7-6.5,12.3c1.4,5.6,6.5,9,11.5,7.8c5-1.2,7.9-6.7,6.5-12.3
+			C68.7,3870.2,63.6,3866.7,58.6,3867.9z"/>
+	</g>
+	<g id="shape102-190_1_">
+		
+		<path fill="#2563eb" d="M76.5,3878c-0.9-0.1-2,1.7-3.4,2.4c-1.4,0.6-2.9,1.9-6.9,0c-4-1.9-4.6-3.5-8-3.5c-3.4,0-8.8,6-8.9,14.7h34
+			c-0.1,0-0.4-6-2.3-9.2C78.7,3878.1,77.5,3878,76.5,3878z"/>
+	</g>
+</g>
+</g>
+  <text x="520" y="80.0" font-size="25" fill="#bf181f" text-anchor="middle" font-weight="700">User</text>
+  <text x="520" y="192.0" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">developer</text>
+  <path d="M562 130 H 664" stroke="#2563eb" stroke-width="2.6" fill="none" marker-end="url(#ar-blue)"/>
+  <text x="613" y="92" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">1. task</text>
+  <g transform='translate(645.522,80.176) scale(0.16282)'>
+<g id="Layer_1_1_">
+	<g id="File_x2C__general">
+		
+	</g>
+</g>
+<g id="Access_control">
+</g>
+<g id="Azure_active_directory">
+</g>
+<g id="Generic_code">
+</g>
+<g id="Laptop">
+	<path fill="#2563eb" d="M579.7,383.7c0-189.7,0-189.7,0-189.7c0-9.4-8.6-24.9-18.9-24.9c-23.2,0-328.7,0-328.7,0
+		c-10.3,0-20.6,15.5-20.6,24.9c0,189.7,0,189.7,0,189.7c-36.9,39.5-35.2,39.5-35.2,39.5c0,11.2,10.3,19.7,23.2,19.7
+		c394,0,394,0,394,0c12.9,0,23.2-9.4,23.2-19.7L579.7,383.7L579.7,383.7L579.7,383.7z M426.9,426.6c-68.7,0-68.7,0-68.7,0
+		c-3.4,0-6.9-1.7-6.9-3.4c7.7-12.9,7.7-12.9,7.7-12.9c0-1.7,2.6-2.6,6-2.6c54.9,0,54.9,0,54.9,0c2.6,0,5.2,0.9,5.2,2.6
+		c8.6,12.9,8.6,12.9,8.6,12.9C433.8,425.7,430.3,426.6,426.9,426.6L426.9,426.6z M563.4,382.8c-338.2,0-335.6,0-335.6,0
+		c0-187.1,0-187.1,0-187.1c0-4.3,4.3-10.3,9.4-10.3c319.3,0,317.6,0,317.6,0c5.2,0,8.6,6,8.6,10.3V382.8L563.4,382.8L563.4,382.8
+		L563.4,382.8z"/>
+</g>
+<g id="symbols">
+</g>
+<g id="slices">
+</g>
+</g>
+  <text x="710" y="80.0" font-size="25" fill="#bf181f" text-anchor="middle" font-weight="700">Interface</text>
+  <text x="710" y="192.0" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">Web UI / CLI / REPL</text>
+  <path d="M680 200 V 346" stroke="#2563eb" stroke-width="2.6" fill="none" marker-end="url(#ar-blue)"/>
+  <text x="662" y="296" font-size="20" fill="#16202a" text-anchor="end" font-weight="700">2. task, allow / deny</text>
+  <path d="M760 346 V 200" stroke="#2563eb" stroke-width="2.6" fill="none" marker-end="url(#ar-blue)"/>
+  <text x="778" y="296" font-size="20" fill="#16202a" text-anchor="start" font-weight="700">3. streaming transcript, tool and approval cards</text>
+  <g transform='translate(1115.304,-14.534) scale(0.47431)'>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+	<g id="Laptop">
+	</g>
+	<g id="Load_balancer">
+	</g>
+	<g id="Lock_x2C__protected">
+	</g>
+</g>
+<g id="symbols">
+</g>
+<g id="slices">
+</g>
+<g id="User">
+	
+	<g>
+		<g id="shape101-188_1_" transform="translate(7.20825,-11.5207)">
+			
+			<path fill="#ea580c" d="M380.4,242.5c-21.4,5.1-33.9,28.7-27.9,52.8c6,24,27.9,38.6,49.3,33.5c21.4-5.1,33.9-28.7,27.9-52.8
+				C423.7,252.4,401.4,237.4,380.4,242.5z"/>
+		</g>
+		<g id="shape102-190_1_">
+			
+			<path fill="#ea580c" d="M433.4,323.7c-3.9-0.4-8.6,7.3-14.6,10.3c-6,2.6-12.4,8.1-29.6,0c-17.2-8.1-19.7-15-34.3-15
+				s-37.7,25.7-38.2,63h145.8c-0.4,0-1.7-25.7-9.9-39.5C442.9,324.1,437.3,323.7,433.4,323.7z"/>
+		</g>
+	</g>
+</g>
+</g>
+  <text x="1300" y="80.0" font-size="25" fill="#bf181f" text-anchor="middle" font-weight="700">Manager (hub)</text>
+  <path d="M754 380 H 1280 V 172" stroke="#ea580c" stroke-width="2.6" fill="none" marker-end="url(#ar-orange)"/>
+  <text x="1010" y="364" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">4. fleet view: state, usage, pending approvals</text>
+  <path d="M1320 172 V 420 H 758" stroke="#ea580c" stroke-width="2.6" fill="none" marker-end="url(#ar-orange)"/>
+  <text x="1010" y="406" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">5. approve in place, stop an agent</text>
+  <g transform='translate(721.600,21.600) scale(1.77778)'>
+<g id="Layer_1">
+</g>
+<g id="Completed_Icons">
+	<path fill="#FFFFFF" d="M307.8,341.3c-1.7,0-2.7-1.4-2.7-2.7v-26.5c0-1.3,1-2.4,2.3-2.5c0,0,0.1,0,0.2,0h34.2
+		c1.4,0,2.5,1.1,2.5,2.5v26.6c0,1.4-1.1,2.5-2.5,2.5L307.8,341.3z"/>
+	<path fill="#0891b2" d="M332.2,332.2v-4.5h4.5v4.5H332.2z M326.2,332.2v-4.5h4.5v4.5H326.2z M332.2,326.2v-4.5h4.5v4.5H332.2z
+		 M312.6,332.2v-10.6h10.6v10.6H312.6z M326.2,326.2v-4.5h4.5v4.5H326.2z M339.8,317.1h-30.2v19.6h30.2V317.1z M341.8,339.8
+		c0,0-33,0-34,0c-1.2,0-1.2-1.2-1.2-1.2v-26.5c0-0.5,0.4-1,0.9-1c0,0,0.1,0,0.1,0h34.2c0.6,0,1,0.5,1,1v26.6
+		C342.8,339.3,342.4,339.8,341.8,339.8z"/>
+</g>
+</g>
+  <text x="1300" y="550.0" font-size="25" fill="#bf181f" text-anchor="middle" font-weight="700">Audit and trends</text>
+  <text x="1300" y="662.0" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">sessions · memory</text>
+  <path d="M754 450 V 600 H 1258" stroke="#7c3aed" stroke-width="2.6" fill="none" marker-end="url(#ar-violet)"/>
+  <text x="1010" y="582" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">6. audit logs, usage trend, eval reports</text>
+  <g transform='translate(1100.364,644.105) scale(0.14692)'>
+<g id="Layer_1_1_">
+</g>
+<g id="Access_control">
+</g>
+<g id="Azure_active_directory">
+</g>
+<g id="Connectors">
+	<g>
+		<path fill="#0891b2" d="M411.6,412.4c-54.1,0-97.9-43.8-97.9-97.9s43.8-97.9,97.9-97.9c24,0,45.5,8.6,62.7,22.3l27.5-27.5
+			c-24-21.5-55.8-34.3-90.1-34.3c-67,0-122.7,48.1-134.8,111.6h-58.4c-19.7,0-29.2,12-29.2,25.8s13.7,25.8,29.2,25.8h58.4
+			c12,63.5,67.8,111.6,134.8,111.6c36.1,0,68.7-13.7,92.7-36.9l-27.5-27.5C459.6,402.9,436.5,412.4,411.6,412.4z"/>
+		<path fill="#0891b2" d="M621,316.2L531.7,257v31.8h-85.8c-1.7-1.7-3.4-4.3-5.2-6c-18-18.9-48.1-18.9-66.1,0c-18,18-18,48.1,0,66.1
+			c18,18,48.1,18,66.1,0c2.6-2.6,5.2-5.2,6.9-8.6h84.1v35.2L621,316.2z"/>
+	</g>
+</g>
+<g id="symbols">
+</g>
+</g>
+  <text x="1160" y="644.0" font-size="25" fill="#bf181f" text-anchor="middle" font-weight="700">MCP / nodes</text>
+  <text x="1160" y="748.0" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">external tools, fleet nodes</text>
+  <path d="M700 450 V 690 H 1122" stroke="#7c3aed" stroke-width="2.6" fill="none" marker-end="url(#ar-violet)"/>
+  <text x="900" y="672" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">7. MCP tool calls, node proxying</text>
+  <rect x="40" y="738" width="20" height="20" rx="5" fill="#059669"/>
+  <text x="70" y="754" font-size="20" fill="#334155" text-anchor="start">data in / out</text>
+  <rect x="253" y="738" width="20" height="20" rx="5" fill="#2563eb"/>
+  <text x="283" y="754" font-size="20" fill="#334155" text-anchor="start">operator actions</text>
+  <rect x="499" y="738" width="20" height="20" rx="5" fill="#ea580c"/>
+  <text x="529" y="754" font-size="20" fill="#334155" text-anchor="start">management and approval</text>
+  <rect x="822" y="738" width="20" height="20" rx="5" fill="#7c3aed"/>
+  <text x="852" y="754" font-size="20" fill="#334155" text-anchor="start">platform output</text>
+</svg>
