@@ -767,6 +767,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   const $=s=>document.querySelector(s);
   const transcript=$('#transcript'),input=$('#input'),hint=$('#hint');
   let conv=null,es=null,token=null,assistantEl=null,assistantText='',composing=false;
+  let fleetTimer=null,fleetOn=false;
 
   // theme
   const root=document.documentElement;
@@ -830,7 +831,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   async function newConversation(resume){
     const c=await api('/api/conversations',{method:'POST',body:resume?{resume}:{}});
     conv=c.id;transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display=resume?'none':'';
-    hint.textContent='對話 '+c.id+' · session '+c.session;setStatus('閒置',false);await connect(conv,0);refreshList();closePanel();return c;
+    hint.textContent='對話 '+c.id+' · session '+c.session;setStatus('閒置',false);await connect(conv,0);refreshList();closePanel();if(fleetOn)toggleFleet(false);input.focus();return c;
   }
 
   async function send(){
@@ -867,7 +868,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
         d.innerHTML='<div class="t"></div><div class="m"><span class="dot'+(c.running?' run':'')+'"></span><span></span></div>';
         d.querySelector('.t').textContent=c.preview||'(尚未送出訊息)';
         d.querySelector('.m span:last-child').textContent=(c.usage?c.usage.total_tokens+' tokens · ':'')+'session '+c.session;
-        d.onclick=async()=>{if(c.id===conv){closePanel();return;}conv=c.id;transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display='none';hint.textContent='對話 '+c.id+' · session '+c.session;await connect(conv,0);closePanel();};
+        d.onclick=async()=>{if(c.id===conv){closePanel();if(fleetOn)toggleFleet(false);return;}conv=c.id;transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display='none';hint.textContent='對話 '+c.id+' · session '+c.session;await connect(conv,0);closePanel();if(fleetOn)toggleFleet(false);};
         box.appendChild(d);});
       const sessions=await api('/api/sessions');const sb=$('#sessions');sb.innerHTML='';
       sessions.slice(0,30).forEach(s=>{const d=document.createElement('div');d.className='item';
@@ -885,7 +886,6 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   }
 
   // fleet view
-  let fleetTimer=null,fleetOn=false;
   function fmtState(s){return s==='running'?'執行中':s==='waiting'?'等待許可':'閒置';}
   async function renderFleet(){
     try{

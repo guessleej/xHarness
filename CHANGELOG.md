@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.0.1 — 2026-09-19
+
+- Web UI：在艦隊視圖按「新對話」或從面板選對話時，現在會切回逐字稿（之前停留在艦隊、每按一次多一張閒置卡）。
+- Web UI: creating a conversation or picking one from the panel while in the fleet view now returns to the transcript (it used to stay on the fleet grid and add an idle card per click).
+
 ## 1.0.0 — 2026-09-19
 
 首個正式版。從 0.1（2026-08-22）到 1.0 共 10 個功能版本，全部在地端機群實測。
