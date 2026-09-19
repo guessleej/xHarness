@@ -658,6 +658,8 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
 .fc.waiting:before{background:#d97706}
 .fc .head{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .fc .state{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--tint);color:var(--ink-2)}
+.fc.current{box-shadow:0 0 0 2px var(--brand),var(--shadow-sm)}
+.fc .cur{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--brand);color:#fff;margin-left:auto}
 .fc .state.running{color:var(--brand)}.fc .state.waiting{color:#d97706}.fc .state.idle{color:#2e7d32}
 .fc .prev{font-size:15px;line-height:1.45;max-height:4.3em;overflow:hidden}
 .fc .meta{font-size:12px;color:var(--ink-3);display:flex;flex-wrap:wrap;gap:6px 12px}
@@ -706,6 +708,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
     <span class="chip" id="chip-model">model: -</span>
     <span class="chip" id="chip-usage">usage: 0 tokens</span>
     <span class="chip" id="chip-status">閒置</span>
+    <span class="chip" id="chip-conv" title="目前對話">對話：尚未建立</span>
   </div>
   <button class="btn" id="btn-new">新對話</button>
   <button class="btn" id="btn-fleet">艦隊</button>
@@ -766,7 +769,11 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
 (function(){
   const $=s=>document.querySelector(s);
   const transcript=$('#transcript'),input=$('#input'),hint=$('#hint');
-  let conv=null,es=null,token=null,assistantEl=null,assistantText='',composing=false;
+  let conv=null,es=null,token=null,assistantEl=null,assistantText='',composing=false,convPreview='';
+  function shortTitle(t){t=(t||'').trim();return t?(t.length>18?t.slice(0,18)+'…':t):'尚未送出訊息';}
+  function setCurrent(id,preview){conv=id;convPreview=preview||'';
+    $('#chip-conv').textContent=id?'對話：'+shortTitle(convPreview):'對話：尚未建立';
+    $('#btn-fleet').textContent=fleetOn?(id?'回到對話：'+shortTitle(convPreview):'離開艦隊'):'艦隊';}
   let fleetTimer=null,fleetOn=false;
 
   // theme
@@ -794,8 +801,8 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   function finishAssistant(){if(assistantEl){const c=assistantEl.querySelector('.cursor');if(c)c.remove();}assistantEl=null;assistantText='';}
 
   function handle(ev){
-    if(ev.type==='user'){$('#hero').style.display='none';el('user','你',ev.text);setStatus('執行中…',true);}
-    else if(ev.type==='history'){$('#hero').style.display='none';el(ev.role==='user'?'user':'assistant',ev.role==='user'?'你':'xHarness',ev.text);}
+    if(ev.type==='user'){$('#hero').style.display='none';el('user','你',ev.text);setStatus('執行中…',true);if(!convPreview)setCurrent(conv,ev.text);}
+    else if(ev.type==='history'){$('#hero').style.display='none';el(ev.role==='user'?'user':'assistant',ev.role==='user'?'你':'xHarness',ev.text);if(ev.role==='user'&&!convPreview)setCurrent(conv,ev.text);}
     else if(ev.type==='delta'){
       if(!assistantEl){assistantEl=el('assistant','xHarness','');const c=document.createElement('span');c.className='cursor';assistantEl.querySelector('.body').appendChild(c);}
       assistantText+=ev.text;const body=assistantEl.querySelector('.body');body.textContent=assistantText;const c=document.createElement('span');c.className='cursor';body.appendChild(c);
@@ -830,7 +837,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
 
   async function newConversation(resume){
     const c=await api('/api/conversations',{method:'POST',body:resume?{resume}:{}});
-    conv=c.id;transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display=resume?'none':'';
+    setCurrent(c.id,'');transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display=resume?'none':'';
     hint.textContent='對話 '+c.id+' · session '+c.session;setStatus('閒置',false);await connect(conv,0);refreshList();closePanel();if(fleetOn)toggleFleet(false);input.focus();return c;
   }
 
@@ -868,7 +875,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
         d.innerHTML='<div class="t"></div><div class="m"><span class="dot'+(c.running?' run':'')+'"></span><span></span></div>';
         d.querySelector('.t').textContent=c.preview||'(尚未送出訊息)';
         d.querySelector('.m span:last-child').textContent=(c.usage?c.usage.total_tokens+' tokens · ':'')+'session '+c.session;
-        d.onclick=async()=>{if(c.id===conv){closePanel();if(fleetOn)toggleFleet(false);return;}conv=c.id;transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display='none';hint.textContent='對話 '+c.id+' · session '+c.session;await connect(conv,0);closePanel();if(fleetOn)toggleFleet(false);};
+        d.onclick=async()=>{if(c.id===conv){closePanel();if(fleetOn)toggleFleet(false);return;}setCurrent(c.id,c.preview);transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display='none';hint.textContent='對話 '+c.id+' · session '+c.session;await connect(conv,0);closePanel();if(fleetOn)toggleFleet(false);};
         box.appendChild(d);});
       const sessions=await api('/api/sessions');const sb=$('#sessions');sb.innerHTML='';
       sessions.slice(0,30).forEach(s=>{const d=document.createElement('div');d.className='item';
@@ -906,10 +913,10 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
         (n.items||[]).forEach(it=>gg.appendChild(card(it,n)));nb.appendChild(gg);});
     }catch(e){console.error(e)}
   }
-  function card(it,node){const c=document.createElement('div');c.className='fc '+it.state;
+  function card(it,node){const c=document.createElement('div');c.className='fc '+it.state+(!node&&it.id===conv?' current':'');
         const base=node?'/api/nodes/'+encodeURIComponent(node.name)+'/conversations/'+it.id:'/api/conversations/'+it.id;
         const u=it.usage||{};
-        c.innerHTML='<div class="head"><span class="state '+it.state+'">'+fmtState(it.state)+'</span><span class="meta">'+(it.elapsed!=null?it.elapsed+'s':'')+'</span></div>'
+        c.innerHTML='<div class="head"><span class="state '+it.state+'">'+fmtState(it.state)+'</span>'+((!node&&it.id===conv)?'<span class="cur">目前對話</span>':'')+'<span class="meta">'+(it.elapsed!=null?it.elapsed+'s':'')+'</span></div>'
           +'<div class="prev"></div>'
           +'<div class="meta"><span>'+(u.total_tokens||0)+' tokens</span><span>'+(u.calls||0)+' calls</span><span>'+(it.tool_calls||0)+' tools</span><span>'+it.model+'</span><span>session '+it.session+'</span></div>'
           +(it.children.length?'<div class="kids">子代理：'+it.children.map(ch=>'<span title="'+ch.task.replace(/"/g,'')+'">'+ch.name+'</span>').join('')+'</div>':'')
@@ -923,9 +930,9 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
           no.onclick=()=>api(base+'/approvals',{method:'POST',body:{id:a.id,allow:false}}).then(renderFleet);
           d.append(ok,no);ap.appendChild(d);});
         const acts=c.querySelector('.acts');
-        const open=document.createElement('button');open.className='btn sm';open.textContent=node?'在節點開啟':'開啟';
+        const open=document.createElement('button');open.className='btn sm'+((!node&&it.id===conv)?' primary':'');open.textContent=node?'在節點開啟':((it.id===conv)?'回到此對話':'開啟');
         if(node){open.onclick=()=>window.open(node.url,'_blank','noopener');}
-        else{open.onclick=async()=>{conv=it.id;transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display='none';hint.textContent='對話 '+it.id+' · session '+it.session;await connect(conv,0);toggleFleet(false);};}
+        else{open.onclick=async()=>{setCurrent(it.id,it.preview);transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display='none';hint.textContent='對話 '+it.id+' · session '+it.session;await connect(conv,0);toggleFleet(false);};}
         acts.appendChild(open);
         if(it.running){const st=document.createElement('button');st.className='btn ghost sm';st.textContent='停止';st.onclick=()=>api(base+'/stop',{method:'POST',body:{}}).then(renderFleet);acts.appendChild(st);}
         return c;}
@@ -976,7 +983,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   document.querySelectorAll('#usage [data-since]').forEach(b=>b.onclick=()=>{usageSince=b.dataset.since;document.querySelectorAll('#usage [data-since]').forEach(o=>o.classList.toggle('primary',o===b));loadUsage();});
   $('#usage-table-toggle').onclick=()=>{const t=$('#usage-table');t.hidden=!t.hidden;$('#usage-table-toggle').textContent=t.hidden?'表格':'圖表';$('#usage-chart').style.display=t.hidden?'':'none';};
   window.addEventListener('resize',()=>{if(fleetOn)renderUsage();});
-  function toggleFleet(on){fleetOn=on;document.body.classList.toggle('fleet',on);$('#btn-fleet').textContent=on?'回到對話':'艦隊';
+  function toggleFleet(on){fleetOn=on;document.body.classList.toggle('fleet',on);setCurrent(conv,convPreview);
     if(fleetTimer){clearInterval(fleetTimer);fleetTimer=null;}
     if(on){renderFleet();loadUsage();fleetTimer=setInterval(renderFleet,2000);}}
   $('#btn-fleet').onclick=()=>toggleFleet(!fleetOn);
