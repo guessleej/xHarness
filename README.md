@@ -164,7 +164,7 @@ name = "hub-office"                 # 本機在艦隊視圖的顯示名稱（預
 
 [fleet.nodes.farm]
 url = "http://10.0.0.5:3080"
-token_env = "XHARNESS_NODE_FARM_TOKEN"
+token_file = "~/.xharness/node-tokens/farm"   # 0600 檔案；或 token_env = "XHARNESS_NODE_FARM_TOKEN"
 # timeout_seconds = 3
 ```
 

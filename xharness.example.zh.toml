@@ -31,7 +31,7 @@ max_turns = 40
 # name = "hub-office"          # 本機在艦隊視圖的名稱
 # [fleet.nodes.farm]
 # url = "http://10.0.0.5:3080"
-# token_env = "XHARNESS_NODE_FARM_TOKEN"
+# token_file = "~/.xharness/node-tokens/farm"   # 0600 檔案；或 token_env = "XHARNESS_NODE_FARM_TOKEN"
 
 # project_instructions = true  # 自動讀工作目錄的 AGENTS.md / CLAUDE.md 進 system prompt
 

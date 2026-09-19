@@ -164,7 +164,7 @@ name = "hub-office"                 # this machine's label in the fleet view (de
 
 [fleet.nodes.farm]
 url = "http://10.0.0.5:3080"
-token_env = "XHARNESS_NODE_FARM_TOKEN"
+token_file = "~/.xharness/node-tokens/farm"   # a 0600 file; or token_env = "XHARNESS_NODE_FARM_TOKEN"
 # timeout_seconds = 3
 ```
 

@@ -28,6 +28,16 @@ def test_load_nodes_and_validation(monkeypatch):
     assert node_name({"name": "hub-1"}) == "hub-1" and node_name({})
 
 
+def test_token_file_wins_over_env(tmp_path, monkeypatch):
+    secret = tmp_path / "farm"
+    secret.write_text("from-file\n", encoding="utf-8")
+    monkeypatch.setenv("FARM_TOKEN", "from-env")
+    nodes = load_nodes({"nodes": {"farm": {"url": "http://h:1", "token_env": "FARM_TOKEN", "token_file": str(secret)}}})
+    assert nodes[0].token == "from-file"
+    nodes = load_nodes({"nodes": {"farm": {"url": "http://h:1", "token_env": "FARM_TOKEN", "token_file": str(tmp_path / "missing")}}})
+    assert nodes[0].token == "from-env"
+
+
 class FakeResponse(io.BytesIO):
     status = 200
 

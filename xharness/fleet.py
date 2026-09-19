@@ -6,7 +6,8 @@ polls each node's /api/fleet and shows everything together, and forwards
 approve / deny / stop actions to the node that owns the conversation.
 
 Trust model: a node must bind a non-loopback address with --token, and the
-hub keeps that token only in an environment variable named by `token_env`.
+hub keeps that token only in a 0600 file (`token_file`) or an environment
+variable (`token_env`), never in the config itself.
 The hub forwards exactly two actions (approvals, stop) on an allow-list;
 the browser never sees node tokens and never talks to nodes directly.
 """
@@ -32,10 +33,20 @@ class Node:
     name: str
     url: str
     token_env: str | None = None
+    token_file: str | None = None
     timeout: float = DEFAULT_TIMEOUT_SECONDS
 
     @property
     def token(self) -> str | None:
+        """token_file (a 0600 file) wins over token_env; neither is ever written to config."""
+        if self.token_file:
+            try:
+                with open(os.path.expanduser(self.token_file), encoding="utf-8") as handle:
+                    value = handle.read().strip()
+                if value:
+                    return value
+            except OSError:
+                pass
         return os.environ.get(self.token_env) if self.token_env else None
 
 
@@ -56,6 +67,7 @@ def load_nodes(config: dict[str, Any] | None) -> list[Node]:
                 name=str(name),
                 url=url,
                 token_env=str(entry["token_env"]) if entry.get("token_env") else None,
+                token_file=str(entry["token_file"]) if entry.get("token_file") else None,
                 timeout=float(entry.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)),
             )
         )

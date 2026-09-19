@@ -30,7 +30,7 @@ max_turns = 40
 # name = "hub-office"
 # [fleet.nodes.farm]
 # url = "http://10.0.0.5:3080"
-# token_env = "XHARNESS_NODE_FARM_TOKEN"
+# token_file = "~/.xharness/node-tokens/farm"   # or token_env = "XHARNESS_NODE_FARM_TOKEN"
 
 # project_instructions = true  # read AGENTS.md / CLAUDE.md from cwd into the system prompt
 
