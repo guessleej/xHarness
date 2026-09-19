@@ -326,6 +326,12 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
         server_version = f"xharness/{__version__}"
         protocol_version = "HTTP/1.1"
 
+        def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+            # Polling GETs from the UI would flood the terminal; log writes and problems only.
+            if self.command == "GET" and str(code).startswith("2"):
+                return
+            super().log_request(code, size)
+
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - stdlib signature
             sys.stderr.write(f"[web] {self.address_string()} {format % args}\n")
 
@@ -1001,7 +1007,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   window.addEventListener('resize',()=>{if(fleetOn)renderUsage();});
   function toggleFleet(on){fleetOn=on;document.body.classList.toggle('fleet',on);setCurrent(conv,convPreview);
     if(fleetTimer){clearInterval(fleetTimer);fleetTimer=null;}
-    if(on){renderFleet();loadUsage();fleetTimer=setInterval(renderFleet,2000);}}
+    if(on){renderFleet();loadUsage();fleetTimer=setInterval(()=>{if(!document.hidden)renderFleet();},2000);}}
   $('#btn-fleet').onclick=()=>toggleFleet(!fleetOn);
 
   (async function init(){

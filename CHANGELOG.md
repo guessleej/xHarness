@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.0.5 — 2026-09-19
+
+- Web：終端只記錄寫入與錯誤（艦隊輪詢的 GET 不再洗版）；分頁在背景時暫停艦隊輪詢。
+- Web: the terminal logs writes and errors only (fleet polling GETs no longer flood it); fleet polling pauses while the tab is hidden.
+
 ## 1.0.4 — 2026-09-19
 
 - Web UI：加上瀏覽器分頁圖示（伺服器自帶的 SVG，品牌紅底白 X）。
