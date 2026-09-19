@@ -658,7 +658,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
 .fc.waiting:before{background:#d97706}
 .fc .head{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .fc .state{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--tint);color:var(--ink-2)}
-.fc.current{box-shadow:0 0 0 2px var(--brand),var(--shadow-sm)}
+.fc.current{background:var(--tint)}
 .fc .cur{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--brand);color:#fff;margin-left:auto}
 .fc .state.running{color:var(--brand)}.fc .state.waiting{color:#d97706}.fc .state.idle{color:#2e7d32}
 .fc .prev{font-size:15px;line-height:1.45;max-height:4.3em;overflow:hidden}

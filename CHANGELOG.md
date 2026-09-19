@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.0.3 — 2026-09-19
+
+- Web UI：艦隊視圖的「目前對話」卡片改用淡色底標示，不再用彩色描邊。
+- Web UI: the current conversation card in the fleet view is marked with a tinted background instead of a colored outline.
+
 ## 1.0.2 — 2026-09-19
 
 - Web UI：導覽列新增「對話：…」晶片，「回到對話」按鈕寫出目前對話的標題，艦隊視圖把目前對話的卡片標為「目前對話」——多個對話並存時一眼知道現在在哪一個。
