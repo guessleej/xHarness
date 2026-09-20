@@ -36,7 +36,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; "usage" shows token history; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "desktop" opens it in a native window; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; "usage" shows token history; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -309,6 +309,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.task[:2] == ["providers", "presets"]:
         return _run_providers(args, None)  # the catalog needs no config
+    if args.task and args.task[0] == "desktop":
+        from .desktop import run_desktop  # the window reports a missing config itself
+
+        return run_desktop(args.config_path, "auto" if args.yes else args.approve)
 
     try:
         config = load_config(args.config_path, provider_override=args.provider, model_override=args.model)

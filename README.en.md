@@ -30,6 +30,7 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Cost brakes (telemetry).** An `llm/stream` middleware counts tokens, tool calls, and latency per model call; `max_total_tokens` / `max_llm_calls` hard-stop a runaway task, the usage summary lands in the session log, and `/usage` shows it in the REPL.
 - **Eval subsystem.** `xharness eval <dir>` runs a scored suite against any model: each case executes in a clean temp workspace and is graded by deterministic checks (files, answers, command results, whether tools were actually called) plus an optional LLM judge, reporting pass rate, per-case tokens and time, with JSONL output. The bundled `evals/basic` suite quantifies whether a model uses tools and follows instructions.
 - **Subagents.** `subagent` delegates one bounded task to a fresh child agent; `subagent_batch` fans independent tasks out in parallel. Children share tools and model, cannot spawn children, and route every side effect through the parent's approval policy.
+- **Desktop app.** `xharness desktop` opens the same Web UI in the operating system's native window (WebKit on macOS, WebView2 on Windows, WebKitGTK on Linux), no browser tab; the server binds a loopback port only this process knows and stops when the window closes. `packaging/desktop/build.py` bundles it with PyInstaller into `xHarness.app` + `.dmg` (macOS) or `xHarness.exe` (Windows) for people without Python. The one optional dependency is pywebview (`pip install "xharness[desktop]"`).
 - **Web UI and fleet view.** `xharness web` serves a local interface: streaming transcript, tool cards, approval buttons, conversation, session, and memory lists, usage chips, light/dark theme. The fleet view shows every conversation and subagent on one page — state, usage, pending approvals — with inline approve/deny and a **stop** button per agent. Binds 127.0.0.1 by default; binding elsewhere requires `--token`.
 - **Real-browser search and open.** Point `[tools] browser = "http://127.0.0.1:9377"` at a local camofox (a real Firefox) and two tools appear: `web_search` opens the DuckDuckGo results page in the browser and returns title / URL / snippet (no search API key), and `browser_open` returns the rendered visible text, so JavaScript-rendered pages are readable too. Both go through approval by default; `browser_approval = false` waives it.
 - **Telegram channel.** Mount `[channels.telegram]` on a node and drive it from your phone: every chat is an ordinary conversation (visible in the fleet view, same approval policy and budget brake, same session log), and mutating tools arrive as allow / deny buttons; `POST /api/notify` lets the platform, a scheduler or any other system push a notification to your Telegram. Only chats listed in `allowed_chats` are served, everything else is ignored; the bot token is read from a file (`token_file`) or an env var, never from the config itself.
@@ -145,6 +146,24 @@ The UI is one zero-dependency page: a glass top bar with model, usage, and statu
 **Fleet view** (top bar, "艦隊"): one card per conversation — state (running / waiting for approval / idle), task preview, tokens, calls, tool count, elapsed seconds, active subagents — under a row of totals. Pending approvals can be allowed or denied right on the card, and any running agent can be stopped: it halts before its next model call and pending approvals are denied (an in-flight model request cannot be interrupted; the loop exits when it returns).
 
 Security: loopback by default, non-loopback `Host` headers rejected (DNS rebinding), every POST needs a custom header (cross-site form posts), tokens only in `Authorization`, SSE authenticated with 60-second single-use tickets. Details in [docs/ssdlc.md](docs/ssdlc.md).
+
+## Desktop app
+
+```sh
+pip install "xharness[desktop]"
+xharness desktop
+```
+
+Same config file (`./xharness.toml`, then `~/.xharness/config.toml`), same approvals, same session log, same fleet view — in a native window. Without a config file the window shows how to create one.
+
+To hand it to people without Python:
+
+```sh
+pip install -e ".[build]"
+python packaging/desktop/build.py
+```
+
+macOS yields `dist/xHarness.app` and `dist/xHarness-<version>.dmg` (icon rendered from the brand SVG when `rsvg-convert` is installed, otherwise no icon); Windows yields `dist/xHarness/xHarness.exe`. The bundle is unsigned: on macOS allow it once under System Settings → Privacy & Security.
 
 ## Subagents
 

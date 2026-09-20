@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xharness"
-version = "1.2.0"
+version = "1.3.0"
 description = "xHarness: a plugin-based AI agent harness by xCloudinfo. Standard library only; runs against any OpenAI-compatible endpoint."
 readme = "README.md"
 license = { text = "MIT" }
@@ -33,6 +33,8 @@ xharness = "xharness.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+desktop = ["pywebview>=6"]
+build = ["pywebview>=6", "pyinstaller>=6.16"]
 
 [tool.setuptools.packages.find]
 include = ["xharness*"]

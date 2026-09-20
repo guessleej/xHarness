@@ -30,6 +30,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：�
 - **成本煞車（telemetry）。** `llm/stream` 中介層統計每次模型呼叫的 token、工具呼叫數與延遲；設定 `max_total_tokens` / `max_llm_calls` 超額即硬停整個任務，用量摘要同步寫入 session 記錄，REPL 用 `/usage` 查。
 - **Eval 子系統。** `xharness eval <目錄>` 對任何模型跑評測套件：每個案例在乾淨的暫存工作區執行任務，用確定性檢查（檔案內容、回答、指令結果、有沒有真的呼叫工具）加可選的 LLM 評審計分，輸出通過率、每案 token 與耗時，可寫 JSONL。內建 `evals/basic` 六個案例，直接量化「這顆模型會不會用工具、守不守規矩」。
 - **子代理（subagent）。** `subagent` 把一個有界的子任務交給全新的子代理、`subagent_batch` 平行分派多個獨立任務；子代理共用工具與模型、不能再生子代理，每個有副作用的動作都回流父代理的審批策略。
+- **桌面版。** `xharness desktop` 把同一套 Web UI 開在作業系統原生視窗（macOS WebKit／Windows WebView2／Linux WebKitGTK），不佔瀏覽器分頁；伺服器綁在只有這個程序知道的 loopback 埠，關窗即停。`packaging/desktop/build.py` 用 PyInstaller 打成 `xHarness.app`＋`.dmg`（macOS）或 `xHarness.exe`（Windows），給不裝 Python 的人。唯一的選配相依是 pywebview（`pip install "xharness[desktop]"`）。
 - **Web UI 與艦隊視圖。** `xharness web` 起本機介面：串流逐字稿、工具卡片、審批按鈕、對話與歷史 session 清單、記憶清單、用量晶片、開燈關燈；「艦隊」視圖一頁看完所有對話與子代理的狀態、用量、等待中的許可，可就地審批或**停止**任何一個 agent。預設只綁 127.0.0.1，對外綁定必須帶 `--token`。
 - **真瀏覽器搜尋與開頁。** `[tools] browser = "http://127.0.0.1:9377"` 接上地端 camofox（真 Firefox）後多兩個工具：`web_search` 在瀏覽器裡開 DuckDuckGo 結果頁、回傳標題／網址／摘要（不用任何搜尋 API 金鑰）；`browser_open` 回傳渲染後的可見文字，JavaScript 才長出來的頁面也讀得到。兩者預設走審批，`browser_approval = false` 可放行。
 - **Telegram 通道。** 節點掛上 `[channels.telegram]` 後，手機直接對它下任務：每個聊天就是一個普通對話（艦隊視圖看得到、同一套審批與煞車、同一份 session 記錄），有副作用的工具以「允許／拒絕」按鈕送到手機決定；`POST /api/notify` 讓平台、排程或其他系統把通知推到你的 Telegram。只服務 `allowed_chats` 列出的聊天，其餘一律不回應；bot token 只從檔案（`token_file`）或環境變數讀，不進設定檔。
@@ -145,6 +146,24 @@ xharness web --host 0.0.0.0 --token 一串長隨機字串   # 對外綁定必須
 **艦隊視圖**（導覽列「艦隊」）：每個對話一張卡——狀態（執行中／等待許可／閒置）、任務預覽、tokens／呼叫／工具數、執行秒數、正在跑的子代理——上方是總覽數字；等待中的許可可以直接在卡片上允許或拒絕，執行中的 agent 可以按「停止」：它會在下一次模型呼叫前停下、待決的許可一律視為拒絕（進行中的那一次模型請求無法中斷，回來就停）。
 
 安全設計：預設只綁 loopback、拒絕非 loopback 的 `Host`（防 DNS rebinding）、所有 POST 需自訂標頭（防跨站表單）、token 只走 `Authorization` 標頭、SSE 用 60 秒一次性票證。細節見 [docs/ssdlc.zh.md](docs/ssdlc.zh.md)。
+
+## 桌面版
+
+```sh
+pip install "xharness[desktop]"
+xharness desktop
+```
+
+同一份設定檔（`./xharness.toml`，再來 `~/.xharness/config.toml`）、同一套審批、同一份 session 記錄、同一個艦隊視圖——只是開在原生視窗裡。沒有設定檔時視窗會直接顯示怎麼建。
+
+要打包給不裝 Python 的同事：
+
+```sh
+pip install -e ".[build]"
+python packaging/desktop/build.py
+```
+
+macOS 產出 `dist/xHarness.app` 與 `dist/xHarness-<版本>.dmg`（圖示由品牌 SVG 產生，需要 `rsvg-convert`；沒有就不帶圖示）；Windows 產出 `dist/xHarness/xHarness.exe`。打包的 app 沒有簽章，macOS 第一次開要在「系統設定 → 隱私權與安全性」放行。
 
 ## 子代理（subagent）
 

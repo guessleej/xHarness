@@ -1,9 +1,10 @@
-__pycache__/
-*.pyc
 *.egg-info/
+*.pyc
+.DS_Store
+.pytest_cache/
+.venv/
+__pycache__/
 build/
 dist/
-.venv/
-.pytest_cache/
-.DS_Store
+packaging/desktop/build/
 xharness.toml

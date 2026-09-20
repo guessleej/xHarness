@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.3.0 — 2026-09-21
+
+- 新增桌面版：`xharness desktop` 把 Web UI 開在原生視窗（pywebview，選配 `xharness[desktop]`），伺服器綁隨機 loopback 埠、關窗即停；沒有設定檔時視窗顯示建立方式。`packaging/desktop/build.py` 以 PyInstaller 打包成 `xHarness.app`＋`.dmg`／`xHarness.exe`。`web.start_server()` 從 `serve()` 抽出供兩者共用。
+- Desktop app: `xharness desktop` opens the Web UI in a native window (pywebview, optional `xharness[desktop]`); the server binds a random loopback port and stops when the window closes; with no config the window shows how to create one. `packaging/desktop/build.py` bundles `xHarness.app` + `.dmg` / `xHarness.exe` with PyInstaller. `web.start_server()` is split out of `serve()` for both to share.
+
 ## 1.2.0 — 2026-09-21
 
 - 新增瀏覽器工具（`[tools] browser = "<camofox 位址>"`）：`web_search` 在真瀏覽器開 DuckDuckGo 結果頁、回傳標題／網址／摘要（結果頁的跳轉連結已還原成真實網址）；`browser_open` 回傳渲染後可見文字。預設走審批，`browser_approval = false` 可放行。

@@ -612,6 +612,30 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
     return Handler
 
 
+def start_server(
+    config: ResolvedConfig,
+    host: str = "127.0.0.1",
+    port: int = 3080,
+    token: str | None = None,
+    approval_mode: str = "prompt",
+    harness_factory: Callable[[str | None], Harness] | None = None,
+) -> tuple[ThreadingHTTPServer, WebApp, str]:
+    """Bind the server and mount channels without serving yet; `serve` and the desktop window share this."""
+    bare = host.split("%")[0]
+    if bare == "::1":
+        bare = "[::1]"
+    if bare not in LOOPBACK_HOSTS and not token:
+        raise PermissionError(
+            f"refusing to bind {host} without --token; a non-loopback address exposes the harness to the network"
+        )
+    app = WebApp(config, approval_mode=approval_mode, harness_factory=harness_factory)
+    app.start_channels()
+    server = ThreadingHTTPServer((host, port), make_handler(app, token))
+    server.daemon_threads = True
+    url = f"http://{host}:{server.server_address[1]}/"
+    return server, app, url
+
+
 def serve(
     config: ResolvedConfig,
     host: str = "127.0.0.1",
@@ -621,25 +645,11 @@ def serve(
     open_browser: bool = True,
     harness_factory: Callable[[str | None], Harness] | None = None,
 ) -> int:
-    bare = host.split("%")[0]
-    if bare == "::1":
-        bare = "[::1]"
-    if bare not in LOOPBACK_HOSTS and not token:
-        print(
-            f"xharness: refusing to bind {host} without --token; "
-            "a non-loopback address exposes the harness to the network",
-            file=sys.stderr,
-        )
-        return 2
-    app = WebApp(config, approval_mode=approval_mode, harness_factory=harness_factory)
     try:
-        app.start_channels()
-    except Exception as error:  # noqa: BLE001 - a misconfigured channel is a startup error, shown plainly
+        server, app, url = start_server(config, host, port, token, approval_mode, harness_factory)
+    except Exception as error:  # noqa: BLE001 - bind refusals and channel misconfiguration are startup errors, shown plainly
         print(f"xharness: {error}", file=sys.stderr)
         return 2
-    server = ThreadingHTTPServer((host, port), make_handler(app, token))
-    server.daemon_threads = True
-    url = f"http://{host}:{server.server_address[1]}/"
     print(f"xHarness {__version__} web UI at {url}  (model: {config.provider['model']}, approval: {approval_mode})", file=sys.stderr)
     if token:
         print("bearer token required for /api; paste it into the UI when asked", file=sys.stderr)
