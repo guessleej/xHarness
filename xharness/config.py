@@ -29,6 +29,8 @@ class ResolvedConfig:
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     webfetch: bool = False
     channels: dict[str, dict[str, Any]] = field(default_factory=dict)
+    browser: str | None = None
+    browser_approval: bool = True
 
 
 def _find_config_file(explicit_path: str | None) -> str | None:
@@ -40,6 +42,15 @@ def _find_config_file(explicit_path: str | None) -> str | None:
         if os.path.exists(candidate):
             return candidate
     return None
+
+
+def _browser_url(value: Any) -> str | None:
+    if not value:
+        return None
+    url = str(value)
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("[tools] browser must be an http(s) URL of the camofox service, e.g. http://127.0.0.1:9377")
+    return url
 
 
 def load_config(
@@ -93,4 +104,6 @@ def load_config(
         mcp_servers=raw.get("mcp", {}).get("servers", {}),
         webfetch=bool(raw.get("tools", {}).get("webfetch", False)),
         channels=raw.get("channels", {}) or {},
+        browser=_browser_url(raw.get("tools", {}).get("browser")),
+        browser_approval=bool(raw.get("tools", {}).get("browser_approval", True)),
     )

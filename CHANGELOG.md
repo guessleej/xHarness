@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.2.0 — 2026-09-21
+
+- 新增瀏覽器工具（`[tools] browser = "<camofox 位址>"`）：`web_search` 在真瀏覽器開 DuckDuckGo 結果頁、回傳標題／網址／摘要（結果頁的跳轉連結已還原成真實網址）；`browser_open` 回傳渲染後可見文字。預設走審批，`browser_approval = false` 可放行。
+- Browser tools (`[tools] browser = "<camofox url>"`): `web_search` opens the DuckDuckGo results page in a real browser and returns title / URL / snippet (redirect links unwrapped to the real URL); `browser_open` returns the rendered visible text. Approval-gated by default; `browser_approval = false` waives it.
+
 ## 1.1.0 — 2026-09-21
 
 - 新增 Telegram 通道（`[channels.telegram]`）：手機直接對節點下任務、有副作用的工具以「允許／拒絕」按鈕審批、`/new` `/stop` `/usage` `/status` 指令；每個聊天就是一個普通對話，艦隊視圖、煞車、session 記錄全部共用。只服務 `allowed_chats`，其餘不回應；token 只從 `token_file` 或 `token_env` 讀。

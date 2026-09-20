@@ -21,6 +21,7 @@ from .tools.search import search_tools_plugin
 from .tools.security import security_tool_plugin
 from .tools.todo import todo_tool_plugin
 from .tools.webfetch import webfetch_tool_plugin
+from .tools.browser import browser_tools_plugin
 
 
 def _load_user_plugin(module_path: str) -> Plugin:
@@ -55,6 +56,8 @@ def build_harness(
         harness.use("memory", memory_plugin(config.memory))
     if config.webfetch:
         harness.use("tool-webfetch", webfetch_tool_plugin)
+    if config.browser:
+        harness.use("tool-browser", browser_tools_plugin(config.browser, config.browser_approval))
     if config.mcp_servers:
         harness.use("mcp", mcp_plugin(config.mcp_servers))
     if not no_session:

@@ -31,6 +31,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：�
 - **Eval 子系統。** `xharness eval <目錄>` 對任何模型跑評測套件：每個案例在乾淨的暫存工作區執行任務，用確定性檢查（檔案內容、回答、指令結果、有沒有真的呼叫工具）加可選的 LLM 評審計分，輸出通過率、每案 token 與耗時，可寫 JSONL。內建 `evals/basic` 六個案例，直接量化「這顆模型會不會用工具、守不守規矩」。
 - **子代理（subagent）。** `subagent` 把一個有界的子任務交給全新的子代理、`subagent_batch` 平行分派多個獨立任務；子代理共用工具與模型、不能再生子代理，每個有副作用的動作都回流父代理的審批策略。
 - **Web UI 與艦隊視圖。** `xharness web` 起本機介面：串流逐字稿、工具卡片、審批按鈕、對話與歷史 session 清單、記憶清單、用量晶片、開燈關燈；「艦隊」視圖一頁看完所有對話與子代理的狀態、用量、等待中的許可，可就地審批或**停止**任何一個 agent。預設只綁 127.0.0.1，對外綁定必須帶 `--token`。
+- **真瀏覽器搜尋與開頁。** `[tools] browser = "http://127.0.0.1:9377"` 接上地端 camofox（真 Firefox）後多兩個工具：`web_search` 在瀏覽器裡開 DuckDuckGo 結果頁、回傳標題／網址／摘要（不用任何搜尋 API 金鑰）；`browser_open` 回傳渲染後的可見文字，JavaScript 才長出來的頁面也讀得到。兩者預設走審批，`browser_approval = false` 可放行。
 - **Telegram 通道。** 節點掛上 `[channels.telegram]` 後，手機直接對它下任務：每個聊天就是一個普通對話（艦隊視圖看得到、同一套審批與煞車、同一份 session 記錄），有副作用的工具以「允許／拒絕」按鈕送到手機決定；`POST /api/notify` 讓平台、排程或其他系統把通知推到你的 Telegram。只服務 `allowed_chats` 列出的聊天，其餘一律不回應；bot token 只從檔案（`token_file`）或環境變數讀，不進設定檔。
 - **多節點艦隊。** 每台機器跑自己的 `xharness web` 當節點，任一台在設定檔列出節點就成為 hub：艦隊視圖把本機與所有節點的對話合併呈現，允許／拒絕／停止透過 hub 代理到節點；節點 token 只存在 hub 的環境變數，瀏覽器永遠碰不到。`xharness fleet` 在終端機看整個艦隊。
 - **用量歷史趨勢。** 以磁碟上的 session 記錄為真本（每個任務結束 telemetry 都會落地，CLI／headless／Web／子代理全涵蓋），`xharness usage` 按小時或天彙整 token、模型呼叫、工具呼叫；艦隊視圖畫出每個節點的趨勢折線（單一 y 軸、每節點固定一色、十字游標提示、圖例、表格檢視），hub 會向各節點拉它們自己的歷史對齊同一時間軸。
@@ -99,6 +100,8 @@ xharness --resume 2026-08-22-ab12cd34   # 接續 session
 | `memory_verify` | 是 | 確認一則「待確認」的記憶仍成立，重設確認日期 |
 | `memory_consolidate` | 是 | 整併一個主題：找重複／矛盾／過時並合併，不帶 `apply` 只回計畫 |
 | `security_scan` | 否 | 對目錄跑 bandit / pip-audit / gitleaks（未安裝的略過） |
+| `web_search` | 依設定 | 在真瀏覽器開 DuckDuckGo 結果頁，回傳最多 10 筆標題／網址／摘要；`[tools] browser` 設了才有 |
+| `browser_open` | 依設定 | 真瀏覽器開頁、回傳渲染後可見文字（40k 字截斷）；`[tools] browser` 設了才有 |
 | `webfetch` | 是 | 抓取 http(s) 網頁並轉成可讀文字；**預設關閉**（`[tools] webfetch = true` 才開）——開了它才會有模型端點以外的對外連線，且每次抓取都走審批 |
 
 審批只作用於有副作用的工具。headless 模式預設 `auto`（沒有人盯著管線）；互動模式預設 `prompt`。明確指定 `--approve prompt|auto` 一律優先。

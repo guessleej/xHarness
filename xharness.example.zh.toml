@@ -55,6 +55,8 @@ model = "your-model-id"
 # 選配內建工具。
 # [tools]
 # webfetch = false       # true 啟用 webfetch 工具（對外連線，走審批）
+# browser = "http://127.0.0.1:9377"   # 地端 camofox 位址；設了就多 web_search／browser_open 兩個工具
+# browser_approval = true              # false 讓這兩個工具不走審批（瀏覽器已在節點自己的機器上）
 
 # Telegram 通道（隨 `xharness web` 啟動）：手機下任務、按鈕審批、接收 /api/notify 推播。
 # token 放檔案（chmod 600），不要寫進這裡；allowed_chats 留空會拒絕啟動。
