@@ -2,6 +2,13 @@
 
 中文 | English below
 
+## 1.1.0 — 2026-09-21
+
+- 新增 Telegram 通道（`[channels.telegram]`）：手機直接對節點下任務、有副作用的工具以「允許／拒絕」按鈕審批、`/new` `/stop` `/usage` `/status` 指令；每個聊天就是一個普通對話，艦隊視圖、煞車、session 記錄全部共用。只服務 `allowed_chats`，其餘不回應；token 只從 `token_file` 或 `token_env` 讀。
+- 新增 `POST /api/notify {text, chats?}`：讓平台、排程或其他系統把通知推到已掛上的通道；沒有通道回 503。
+- Telegram channel (`[channels.telegram]`): drive a node from your phone, approve mutating tools with allow / deny buttons, `/new` `/stop` `/usage` `/status`; every chat is an ordinary conversation sharing the fleet view, the budget brake and the session log. Only `allowed_chats` are served; the token is read from `token_file` or `token_env` only.
+- `POST /api/notify {text, chats?}`: let the platform, a scheduler or any other system push a notification through the mounted channels; 503 when none is mounted.
+
 ## 1.0.6 — 2026-09-19
 
 - Web UI：側面板新增「工具」區——列出所有工具（標示有副作用）、沙箱狀態、MCP server 與各自貢獻的工具數；新增 `GET /api/tools`。

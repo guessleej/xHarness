@@ -35,6 +35,7 @@ from .memory import MemoryStore, default_memory_dir
 from .presets import build_harness
 from .sandbox import resolve_sandbox
 from .session import SessionLog, messages_from_events
+from .telegram import TelegramBridge, telegram_settings
 
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 APPROVAL_TIMEOUT_SECONDS = 600
@@ -136,6 +137,19 @@ class WebApp:
         self.tickets: dict[str, float] = {}
         self.node_name = node_name(config.fleet)
         self.nodes = {node.name: node for node in load_nodes(config.fleet)}
+        self.telegram: TelegramBridge | None = None
+
+    def start_channels(self) -> None:
+        """Mount the channels named in [channels.*]; a bad channel config is fatal on purpose."""
+        settings = telegram_settings(self.config)
+        if settings:
+            self.telegram = TelegramBridge(self, settings)
+            self.telegram.start()
+            print(f"telegram channel on for {len(self.telegram.allowed)} chat(s)", file=sys.stderr)
+
+    def notify(self, text: str, chats: list[int] | None = None) -> int:
+        """Push a message out every mounted channel; returns recipients reached."""
+        return self.telegram.notify(text, chats) if self.telegram else 0
 
     def create(self, resume: str | None = None) -> Conversation:
         harness = self.harness_factory(resume)
@@ -348,6 +362,8 @@ class WebApp:
         probe = getattr(self, "_probe", None)
         if probe is not None:
             probe.dispose()
+        if self.telegram is not None:
+            self.telegram.stop()
 
 
 def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]:
@@ -542,6 +558,19 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             if parts[1:] == ["tickets"]:
                 self._json(200, {"ticket": app.issue_ticket(), "ttl": TICKET_TTL_SECONDS})
                 return
+            if parts[1:] == ["notify"]:
+                text = str(body.get("text") or "").strip()
+                if not text:
+                    self._json(400, {"error": "text is required"})
+                    return
+                chats = body.get("chats")
+                try:
+                    reached = app.notify(text[:8000], [int(c) for c in chats] if isinstance(chats, list) else None)
+                except Exception as error:  # noqa: BLE001 - channel failures are reported, not raised
+                    self._json(502, {"error": f"{type(error).__name__}: {error}"})
+                    return
+                self._json(200 if reached else 503, {"reached": reached})
+                return
             if parts[1:] == ["conversations"]:
                 resume = body.get("resume")
                 try:
@@ -603,6 +632,11 @@ def serve(
         )
         return 2
     app = WebApp(config, approval_mode=approval_mode, harness_factory=harness_factory)
+    try:
+        app.start_channels()
+    except Exception as error:  # noqa: BLE001 - a misconfigured channel is a startup error, shown plainly
+        print(f"xharness: {error}", file=sys.stderr)
+        return 2
     server = ThreadingHTTPServer((host, port), make_handler(app, token))
     server.daemon_threads = True
     url = f"http://{host}:{server.server_address[1]}/"

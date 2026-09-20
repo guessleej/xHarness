@@ -55,6 +55,12 @@ model = "your-model-id"
 # [tools]
 # webfetch = false       # true enables the webfetch tool (network egress, approval-gated)
 
+# Telegram channel (starts with `xharness web`): tasks from your phone, approvals as buttons, /api/notify pushes.
+# Keep the token in a file (chmod 600), never here; an empty allowed_chats refuses to start.
+# [channels.telegram]
+# token_file = "~/.xharness/telegram-token"
+# allowed_chats = [123456789]
+
 # MCP servers (stdio): their tools join the registry as mcp__{server}__{tool}.
 # [mcp.servers.fs]
 # command = "npx"

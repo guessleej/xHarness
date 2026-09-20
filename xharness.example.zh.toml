@@ -56,6 +56,12 @@ model = "your-model-id"
 # [tools]
 # webfetch = false       # true 啟用 webfetch 工具（對外連線，走審批）
 
+# Telegram 通道（隨 `xharness web` 啟動）：手機下任務、按鈕審批、接收 /api/notify 推播。
+# token 放檔案（chmod 600），不要寫進這裡；allowed_chats 留空會拒絕啟動。
+# [channels.telegram]
+# token_file = "~/.xharness/telegram-token"
+# allowed_chats = [123456789]
+
 # MCP server（stdio）：其工具以 mcp__{server}__{tool} 名稱進工具清單。
 # [mcp.servers.fs]
 # command = "npx"

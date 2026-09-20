@@ -275,3 +275,23 @@ def test_tools_endpoint_lists_tools_and_flags_mutating(server_factory):
     names = {tool["name"]: tool for tool in payload["tools"]}
     assert "mutate" in names and names["mutate"]["mutating"] is True and names["mutate"]["source"] == "builtin"
     assert payload["mcp_servers"] == []
+
+
+def test_notify_endpoint_requires_text_and_reports_reach(server_factory):
+    client, app = server_factory([])
+    assert client.request("POST", "/api/notify", {"text": ""})[0] == 400
+    status, payload = client.request("POST", "/api/notify", {"text": "hello"})
+    assert status == 503 and payload == {"reached": 0}  # no channel mounted
+
+    class Channel:
+        allowed = {1}
+
+        def notify(self, text, chats=None):
+            return 1 if text == "hello" else 0
+
+        def stop(self):
+            pass
+
+    app.telegram = Channel()
+    assert client.request("POST", "/api/notify", {"text": "hello"}) == (200, {"reached": 1})
+    assert client.request("POST", "/api/notify", {"text": "hello"}, csrf=False)[0] == 403

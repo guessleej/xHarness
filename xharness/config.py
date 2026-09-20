@@ -28,6 +28,7 @@ class ResolvedConfig:
     sandbox: dict[str, Any] = field(default_factory=dict)
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     webfetch: bool = False
+    channels: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def _find_config_file(explicit_path: str | None) -> str | None:
@@ -91,4 +92,5 @@ def load_config(
         sandbox=raw.get("sandbox", {}),
         mcp_servers=raw.get("mcp", {}).get("servers", {}),
         webfetch=bool(raw.get("tools", {}).get("webfetch", False)),
+        channels=raw.get("channels", {}) or {},
     )
