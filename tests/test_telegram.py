@@ -79,9 +79,12 @@ def test_approval_arrives_as_buttons_and_callback_resolves_it():
     assert keyboard and keyboard[0]["reply_markup"]["inline_keyboard"][0][0]["callback_data"].startswith("allow:")
     approval_id = next(iter(bridge.pending))
     bridge.handle({"update_id": 2, "callback_query": {"id": "q1", "data": f"allow:{approval_id}",
-                                                       "message": {"chat": {"id": CHAT}}}})
+                                                       "message": {"chat": {"id": CHAT}, "message_id": 77, "text": "需要你決定"}}})
     assert api.wait_for("做完了")
-    assert ("answerCallbackQuery", {"callback_query_id": "q1", "text": "已允許"}) in api.sent
+    assert ("answerCallbackQuery", {"callback_query_id": "q1", "text": "已允許，執行中"}) in api.sent
+    edited = [p for m, p in api.sent if m == "editMessageText"]
+    assert edited and edited[0]["message_id"] == 77 and "已允許" in edited[0]["text"]
+    assert any(t.startswith("[工具完成] mutate") for t in api.texts())
 
 
 def test_callback_from_other_chat_cannot_approve():
@@ -112,3 +115,12 @@ def test_notify_reaches_allowed_chats_only():
     assert app.notify("訓練完成", chats=[CHAT, 999]) == 1
     assert api.texts() == ["訓練完成"]
     assert WebApp(CONFIG, harness_factory=factory_with([])).notify("沒通道") == 0
+
+
+def test_chat_conversation_gets_chat_guidance():
+    app, api, bridge = bridge_with([AssistantTurn(content="在")])
+    bridge.handle(message("還在嗎"))
+    assert api.wait_for("在")
+    conv = bridge.chats[CHAT]
+    system = next(m for m in conv.agent.messages if m["role"] == "system")["content"]
+    assert "Telegram" in system and "no tools" in system

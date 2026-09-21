@@ -151,7 +151,7 @@ class WebApp:
         """Push a message out every mounted channel; returns recipients reached."""
         return self.telegram.notify(text, chats) if self.telegram else 0
 
-    def create(self, resume: str | None = None) -> Conversation:
+    def create(self, resume: str | None = None, extra_system: str | None = None) -> Conversation:
         harness = self.harness_factory(resume)
         session = harness.ctx.optional("session")
         session_id = session.id if session else "-"
@@ -174,6 +174,7 @@ class WebApp:
             harness.ctx,
             AgentOptions(
                 system_prompt=self.config.system_prompt,
+                system_suffix=extra_system,
                 max_turns=self.config.max_turns or AgentOptions.max_turns,
                 approval_mode=self.approval_mode,
                 project_instructions=self.config.project_instructions,

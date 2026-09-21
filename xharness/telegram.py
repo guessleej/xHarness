@@ -24,6 +24,12 @@ import urllib.request
 from typing import Any, Callable
 
 TELEGRAM_API = "https://api.telegram.org"
+CHAT_GUIDANCE = (
+    "This conversation comes from a Telegram chat on the operator's phone. "
+    "Greetings, questions and small talk get a direct short answer in the user's language, with no tools. "
+    "Use tools only when the message is an actual task that needs them; never explore the working "
+    "directory on your own initiative."
+)
 MESSAGE_LIMIT = 4000  # Telegram caps at 4096; keep headroom for the "(1/3)" marker
 POLL_TIMEOUT_SECONDS = 30
 
@@ -180,12 +186,13 @@ class TelegramBridge:
         with self.lock:
             conv = self.chats.get(chat)
             if conv is None:
-                conv = self.app.create()
+                conv = self.app.create(extra_system=CHAT_GUIDANCE)
                 self.chats[chat] = conv
             return conv
 
     def _callback(self, query: dict[str, Any]) -> None:
-        chat = int(((query.get("message") or {}).get("chat") or {}).get("id", 0))
+        message = query.get("message") or {}
+        chat = int((message.get("chat") or {}).get("id", 0))
         data = str(query.get("data") or "")
         query_id = str(query.get("id") or "")
         if chat not in self.allowed or ":" not in data:
@@ -198,7 +205,15 @@ class TelegramBridge:
         conv = self.app.get(target[1])
         allow = verb == "allow"
         ok = bool(conv) and self.app.approve(conv, approval_id, allow)
-        self._answer(query_id, ("已允許" if allow else "已拒絕") if ok else "審批已失效")
+        verdict = ("已允許，執行中" if allow else "已拒絕") if ok else "審批已失效"
+        self._answer(query_id, verdict)
+        # Replace the buttons with the verdict so the decision is visible in the chat itself.
+        if message.get("message_id"):
+            try:
+                self.api("editMessageText", {"chat_id": chat, "message_id": message["message_id"],
+                                             "text": f"{message.get('text') or ''}\n\n{verdict}"})
+            except Exception as error:  # noqa: BLE001 - cosmetic; the approval itself already went through
+                print(f"[telegram] edit failed: {error}", file=sys.stderr)
 
     def _answer(self, query_id: str, text: str) -> None:
         if query_id:
@@ -216,6 +231,8 @@ class TelegramBridge:
                 kind = event.get("type")
                 if kind == "tool_start":
                     self.send(chat, f"[工具] {event.get('name')} {str(event.get('args') or '')[:160]}")
+                elif kind == "tool_end":
+                    self.send(chat, f"[工具{'完成' if event.get('ok') else '失敗'}] {event.get('name')}，等模型下一步…")
                 elif kind == "approval_request":
                     self.pending[event["id"]] = (chat, conv.id)
                     self.api("sendMessage", {

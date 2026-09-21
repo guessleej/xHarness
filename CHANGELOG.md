@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.3.1 — 2026-09-21
+
+- Telegram：按下「允許／拒絕」後把按鈕換成結果文字（之前只有一閃即逝的提示，看起來像沒反應）；工具跑完也回報一行；聊天型訊息（問候、閒聊）直接回答不動工具，不再對「還在嗎」跑 `ls`。`WebApp.create()` 多了 `extra_system`、`AgentOptions.system_suffix`。
+- Telegram: after allow / deny the buttons are replaced with the verdict (before, only a transient toast, which looked like nothing happened); tool completion is reported too; chat-style messages (greetings, small talk) are answered directly without tools — no more `ls` in reply to "are you there". `WebApp.create()` gains `extra_system`, `AgentOptions.system_suffix`.
+
 ## 1.3.0 — 2026-09-21
 
 - 新增桌面版：`xharness desktop` 把 Web UI 開在原生視窗（pywebview，選配 `xharness[desktop]`），伺服器綁隨機 loopback 埠、關窗即停；沒有設定檔時視窗顯示建立方式。`packaging/desktop/build.py` 以 PyInstaller 打包成 `xHarness.app`＋`.dmg`／`xHarness.exe`。`web.start_server()` 從 `serve()` 抽出供兩者共用。

@@ -66,6 +66,7 @@ def default_system_prompt(cwd: str, model: str | None = None) -> str:
 @dataclass
 class AgentOptions:
     system_prompt: str | None = None
+    system_suffix: str | None = None  # appended to whichever system prompt applies (channel guidance etc.)
     max_turns: int = DEFAULT_MAX_TURNS
     cwd: str | None = None
     #: "auto" approves mutating tools silently; "prompt" asks via `prompt`.
@@ -98,6 +99,8 @@ class Agent:
         if not any(message.get("role") == "system" for message in self.messages):
             llm = ctx.optional("llm")
             system = self.options.system_prompt or default_system_prompt(cwd, getattr(llm, "model", None))
+            if self.options.system_suffix:
+                system = f"{system}\n{self.options.system_suffix}"
             if self.options.project_instructions:
                 instructions = load_project_instructions(cwd)
                 if instructions:
