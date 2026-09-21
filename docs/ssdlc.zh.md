@@ -89,7 +89,7 @@
   輸出上限與逾時。
 - 每個 `# nosec` 抑制都要在現場附理由註解，並在本文件登錄
   （現有：`tools/bash.py` 的 `B404`/`B603`/`B607`——執行指令就是該工具的本職；
-  `llm.py` 的 `B310`——scheme 已在建構時驗證；`tools/security.py` 的 `B404`/`B603`——呼叫掃描器是該工具本職，argv 固定且有逾時；`evals.py` 的 `B404`/`B603`——`command` 檢查是案例作者的程式碼、在用完即丟的工作區執行；`sandbox.py` 的 `B404`/`B603`/`B108`——後端功能探測與 bwrap 的 /tmp bind 目標，探測 argv 固定）。
+  `llm.py` 的 `B310`——scheme 已在建構時驗證；`tools/security.py` 的 `B404`/`B603`——呼叫掃描器是該工具本職，argv 固定且有逾時；`evals.py` 的 `B404`/`B603`——`command` 檢查是案例作者的程式碼、在用完即丟的工作區執行；`desktop.py` 的 `B110`——關閉時銷毀可能已關閉的原生視窗屬預期行為，沒有可回復之處；`sandbox.py` 的 `B404`/`B603`/`B108`——後端功能探測與 bwrap 的 /tmp bind 目標，探測 argv 固定）。
 
 ### 階段四：驗證
 

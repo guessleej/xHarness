@@ -1,6 +1,6 @@
 """xHarness: a plugin-based AI agent harness by xCloudinfo."""
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 from .agent import Agent, AgentOptions, default_system_prompt, load_project_instructions
 from .config import ResolvedConfig, load_config

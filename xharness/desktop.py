@@ -89,9 +89,12 @@ def run_desktop(
     try:
         webview.start(private_mode=False)  # keep localStorage (theme, last conversation) between launches
     finally:
+        # The window may already be closed (the user closing it is what triggers this
+        # shutdown path); destroy() failing here is expected and there is nothing to
+        # recover, so cleanup continues to server.shutdown() below regardless.
         try:
             window.destroy()
-        except Exception:  # noqa: BLE001 - already closed
+        except Exception:  # nosec B110
             pass
         server.shutdown()
         server.server_close()
