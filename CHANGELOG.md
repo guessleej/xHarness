@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.3.2 — 2026-09-21
+
+- CI：修 bandit SAST 發現——`desktop.py` 關閉時銷毀可能已關閉的原生視窗那段 `try/except/pass` 補上理由並登錄 SSDLC nosec 清單，不再靜默跳過。
+- CI: fix a bandit SAST finding — the try/except/pass around destroying a possibly-already-closed native window on desktop shutdown now carries a justification and is registered in the SSDLC nosec list instead of being silently skipped.
+
 ## 1.3.1 — 2026-09-21
 
 - Telegram：按下「允許／拒絕」後把按鈕換成結果文字（之前只有一閃即逝的提示，看起來像沒反應）；工具跑完也回報一行；聊天型訊息（問候、閒聊）直接回答不動工具，不再對「還在嗎」跑 `ls`。`WebApp.create()` 多了 `extra_system`、`AgentOptions.system_suffix`。
