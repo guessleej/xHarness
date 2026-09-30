@@ -949,8 +949,7 @@ a{color:var(--brand)}
 .meter{height:5px;border-radius:99px;background:rgba(107,122,133,.18);overflow:hidden;margin-top:6px}
 .meter i{display:block;height:100%;background:var(--brand);border-radius:99px}
 /* run status lives with the transcript, not in the toolbar */
-.statusbar{display:none;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 14px}
-.statusbar.on{display:flex}
+.statusbar{gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 14px}
 .brand{font-weight:800;font-size:20px;letter-spacing:.2px;color:var(--brand);text-decoration:none}
 .chips{display:flex;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
 .chip{font-size:13px;padding:4px 10px;border-radius:999px;background:var(--tint);color:var(--ink-2);white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
@@ -968,8 +967,7 @@ a{color:var(--brand)}
 .gate .err{margin-top:12px;font-size:14px;color:var(--brand);min-height:20px}
 .gate .btn{width:100%;margin-top:18px}
 /* admin surfaces */
-.adm{display:none;max-width:1080px;margin:0 auto;padding:0 16px 32px}
-.adm.on{display:block}
+.adm{max-width:1080px;margin:0 auto;padding:0 16px 32px}
 .admtabs{display:flex;gap:8px;margin:18px 0 14px;flex-wrap:wrap}
 .scroll{max-height:56vh;overflow:auto;padding-right:4px}
 .chk{display:flex;gap:14px;align-items:flex-start;padding:14px 16px;border-radius:12px;background:var(--card);
@@ -1011,13 +1009,13 @@ a{color:var(--brand)}
   .navlinks::-webkit-scrollbar{display:none}
   .navlink{flex:none}
   .menu{right:0;min-width:min(280px,calc(100vw - 32px))}
-  .hero{padding:24px 0 20px}
-  .hero h1{font-size:30px}
-  .hero p{font-size:15px}
+  #hero{padding:24px 0 20px}
+  #hero h1{font-size:30px}
+  #hero p{font-size:15px}
   .starters{grid-template-columns:1fr;gap:10px}
   .starter{min-height:0}
   main{padding-bottom:196px}   /* the composer is two lines tall on a phone */
-  body.landing main{min-height:0;display:block;padding-top:16px}
+  body.view-chat.landing main{min-height:0;display:block;padding-top:16px}
   .statusbar{margin-bottom:10px}
   .chip{max-width:none;flex-shrink:0}
   .scroll{max-height:none;overflow:visible}
@@ -1031,15 +1029,19 @@ a{color:var(--brand)}
 .btn.primary:hover{background:var(--brand-dark)}
 .btn:disabled{opacity:.55;cursor:not-allowed}
 main{max-width:1080px;margin:0 auto;padding:10px 16px 170px}
-body.landing main{min-height:calc(100vh - 210px);display:flex;flex-direction:column;justify-content:center;padding-bottom:40px}
-body.landing .hero{padding-top:0}
-.hero{position:relative;padding:64px 0 30px;text-align:center;overflow:hidden}
-.hero::before{content:"";position:absolute;inset:-40% -20% auto;height:420px;pointer-events:none;z-index:-1;
+body.view-chat.landing main{min-height:calc(100vh - 210px);display:flex;flex-direction:column;justify-content:center;padding-bottom:40px}
+body.view-chat.landing #hero{padding-top:0}
+.hero{padding:26px 0 8px}
+.hero h1{margin:0 0 4px;font-size:30px;line-height:1.2}
+.hero p{margin:0;color:var(--ink-3);font-size:15px}
+/* the landing hero only: centred, larger, and lit */
+#hero{position:relative;padding:64px 0 30px;text-align:center;overflow:hidden}
+#hero::before{content:"";position:absolute;inset:-40% -20% auto;height:420px;pointer-events:none;z-index:-1;
   background:radial-gradient(closest-side,rgba(191,24,31,.13),transparent 70%);
   animation:drift 26s ease-in-out infinite}
 @keyframes drift{0%,100%{transform:translate3d(-4%,0,0) scale(1)}50%{transform:translate3d(6%,3%,0) scale(1.12)}}
-.hero h1{margin:0 0 10px;font-size:40px;line-height:1.15;letter-spacing:-.5px}
-.hero p{margin:0 auto;color:var(--ink-3);font-size:16px;max-width:560px}
+#hero h1{margin:0 0 10px;font-size:40px;line-height:1.15;letter-spacing:-.5px}
+#hero p{margin:0 auto;color:var(--ink-3);font-size:16px;max-width:560px}
 .starters{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:12px;margin:26px 0 8px}
 .starter{display:flex;flex-direction:column;gap:6px;text-align:left;font:inherit;padding:16px 18px;min-height:104px;
   border-radius:15px;border:0;cursor:pointer;
@@ -1054,7 +1056,7 @@ body.landing .hero{padding-top:0}
 .starter .sv{display:block;font-size:15px;line-height:1.5}
 @keyframes rise{to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){
-  .hero::before{animation:none}
+  #hero::before{animation:none}
   .starter{animation:none;opacity:1;transform:none}
 }
 .msg{background:var(--card);border-radius:16px;padding:16px 18px;margin:14px 0;box-shadow:var(--shadow-sm);
@@ -1096,9 +1098,18 @@ textarea:focus{box-shadow:0 0 0 3px rgba(191,24,31,.18),var(--shadow-sm)}
 .backdrop{position:fixed;inset:0;background:rgba(22,32,42,.35);z-index:25;opacity:0;pointer-events:none;transition:opacity .3s}
 .backdrop.open{opacity:1;pointer-events:auto}
 .sec{font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-3);padding:12px 12px 4px}
-#fleet{display:none}
-body.fleet #fleet{display:block}
-body.fleet #transcript,body.fleet #hero,body.fleet #starters,body.fleet #statusbar,body.fleet .composer{display:none}
+/* Which view is on screen is decided here, by one body class, and nowhere
+   else. Setting .hidden or an inline display from JS was how the starter
+   cards ended up sitting above the admin page: `hidden` loses to an
+   explicit `display:grid` in the stylesheet. */
+#fleet,.adm,#hero,#starters,#statusbar{display:none}
+body.view-fleet #fleet{display:block}
+body.view-admin .adm{display:block}
+body.view-chat.landing #hero{display:block}
+body.view-chat.landing #starters{display:grid}
+body.view-chat:not(.landing) #statusbar{display:flex}
+body:not(.view-chat) #transcript{display:none}
+body:not(.view-chat) .composer{display:none}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0}
 .kpi{background:var(--card);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow-sm)}
 .kpi .n{font-size:28px;font-weight:800;line-height:1.1}
@@ -1328,11 +1339,11 @@ body.fleet #transcript,body.fleet #hero,body.fleet #starters,body.fleet #statusb
     $('#chip-conv').textContent=id?'對話：'+shortTitle(convPreview):'對話：尚未建立';}
   // The empty state (hero + starters) and the run status are mutually exclusive:
   // a toolbar full of chips before anything has happened is noise.
-  function showEmptyState(on){
-    $('#hero').style.display=on?'':'none';
-    $('#starters').style.display=on?'':'none';
-    $('#statusbar').classList.toggle('on',!on);
-    document.body.classList.toggle('landing',on);
+  function showEmptyState(on){document.body.classList.toggle('landing',on);}
+  function showView(name){   // 'chat' | 'fleet' | 'admin'
+    const body=document.body;
+    ['chat','fleet','admin'].forEach(key=>body.classList.toggle('view-'+key,key===name));
+    setNav(name);
   }
   function setNav(which){
     [['chat','#btn-new'],['fleet','#btn-fleet'],['admin','#btn-admin']].forEach(([key,sel])=>{
@@ -1429,7 +1440,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet #starters,body.fleet #statusb
   function autosize(){input.style.height='auto';input.style.height=Math.min(220,input.scrollHeight)+'px';}
   input.addEventListener('input',autosize);
   $('#btn-send').onclick=send;
-  $('#btn-new').onclick=()=>{if(admOn)toggleAdmin(false);if(fleetOn)toggleFleet(false);setNav('chat');newConversation();};
+  $('#btn-new').onclick=()=>{admOn=fleetOn=false;showView('chat');newConversation();};
   document.querySelectorAll('.starter').forEach(button=>{
     button.onclick=()=>{input.value=button.dataset.task;input.focus();send();};
   });
@@ -1565,10 +1576,14 @@ body.fleet #transcript,body.fleet #hero,body.fleet #starters,body.fleet #statusb
   document.querySelectorAll('#usage [data-since]').forEach(b=>b.onclick=()=>{usageSince=b.dataset.since;document.querySelectorAll('#usage [data-since]').forEach(o=>o.classList.toggle('primary',o===b));loadUsage();});
   $('#usage-table-toggle').onclick=()=>{const t=$('#usage-table');t.hidden=!t.hidden;$('#usage-table-toggle').textContent=t.hidden?'表格':'圖表';$('#usage-chart').style.display=t.hidden?'':'none';};
   window.addEventListener('resize',()=>{if(fleetOn)renderUsage();});
-  function toggleFleet(on){fleetOn=on;document.body.classList.toggle('fleet',on);setCurrent(conv,convPreview);
+  function toggleFleet(on){
+    fleetOn=on;
+    if(on)admOn=false;
+    showView(on?'fleet':'chat');
+    setCurrent(conv,convPreview);
     if(fleetTimer){clearInterval(fleetTimer);fleetTimer=null;}
     if(on){renderFleet();loadUsage();fleetTimer=setInterval(()=>{if(!document.hidden)renderFleet();},2000);}}
-  $('#btn-fleet').onclick=()=>{if(admOn)toggleAdmin(false);toggleFleet(!fleetOn);setNav(fleetOn?'fleet':'chat');};
+  $('#btn-fleet').onclick=()=>toggleFleet(!fleetOn);
 
   // --- identity ---------------------------------------------------
   function saveToken(){try{token?localStorage.setItem('xh-token',token):localStorage.removeItem('xh-token')}catch(e){}}
@@ -1646,13 +1661,13 @@ body.fleet #transcript,body.fleet #hero,body.fleet #starters,body.fleet #statusb
     if(which==='usr')loadUsers();
   }
   function toggleAdmin(on){
-    admOn=on;$('#admin').classList.toggle('on',on);
-    $('#transcript').hidden=on;$('#hero').hidden=on;$('#starters').hidden=on;$('#statusbar').hidden=on;
-    $('#fleet').classList.remove('on');
-    document.querySelector('.composer').style.display=on?'none':'';
-    if(on){if(fleetOn)toggleFleet(false);admShow('sec');}
+    admOn=on;
+    if(on)fleetOn=false;
+    if(fleetTimer){clearInterval(fleetTimer);fleetTimer=null;}
+    showView(on?'admin':'chat');
+    if(on)admShow('sec');
   }
-  $('#btn-admin').onclick=()=>{if(fleetOn)toggleFleet(false);toggleAdmin(!admOn);setNav(admOn?'admin':'chat');};
+  $('#btn-admin').onclick=()=>toggleAdmin(!admOn);
   document.querySelectorAll('[data-adm]').forEach(b=>{b.onclick=()=>admShow(b.dataset.adm);});
 
   const VERDICT={pass:'通過',warn:'有建議事項',fail:'有必須修正的項目'};
@@ -1794,6 +1809,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet #starters,body.fleet #statusb
   document.addEventListener('keydown',e=>{if(e.key==='Escape')whoMenu.classList.remove('open');});
 
   (async function init(){
+    showView('chat');
     document.body.classList.add('landing');   // nothing has happened yet ('empty' is taken by the empty-list style)
     loadToken();
     try{applyMeta(await api('/api/meta'));}

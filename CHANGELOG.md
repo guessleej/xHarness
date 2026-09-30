@@ -2,6 +2,18 @@
 
 中文 | English below
 
+## 1.5.1 — 2026-09-30
+
+修 1.5.0 的兩個排版問題，都出在「同一件事有兩個地方在決定」。
+
+- **切到「管理」或「艦隊」時，空狀態的建議卡還留在頁面最上方。** 視圖切換是用 JS 設 `hidden` 屬性做的，但 `.starters` 在樣式表裡有明確的 `display:grid`，`hidden` 蓋不過去。現在哪個視圖在畫面上只由 body 的一個 class 決定，JS 不再逐個元素設 `hidden` 或 inline `display`。
+- **「管理」與「艦隊」的標題被拉成置中的大字。** `.hero` 是這兩頁共用的區塊標題樣式，1.5.0 把落地頁的置中、放大與光暈直接加在上面。這些現在限定在落地頁自己的 `#hero`。
+
+Two layout fixes from 1.5.0, both cases of two places deciding the same thing.
+
+- **The starter cards stayed at the top of the admin and fleet views.** View switching set the `hidden` property from JS, but `.starters` carries an explicit `display:grid` in the stylesheet, which wins. Which view is on screen is now decided by a single body class, and JS no longer sets `hidden` or an inline `display` per element.
+- **The admin and fleet headings were centred and oversized.** `.hero` is the shared section-heading block those views use, and 1.5.0 put the landing page's centring, larger type and glow directly on it. Those now apply only to the landing page's own `#hero`.
+
 ## 1.5.0 — 2026-09-30
 
 Web UI 重新排版。舊版把狀態晶片和導覽按鈕塞在同一列，人一多、晶片一長就擠成三行把按鈕推開；空狀態只有兩行字，中間留一大片白。
