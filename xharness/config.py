@@ -29,6 +29,8 @@ class ResolvedConfig:
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     webfetch: bool = False
     channels: dict[str, dict[str, Any]] = field(default_factory=dict)
+    auth: dict[str, Any] = field(default_factory=dict)
+    desktop: dict[str, Any] = field(default_factory=dict)
     browser: str | None = None
     browser_approval: bool = True
 
@@ -104,6 +106,8 @@ def load_config(
         mcp_servers=raw.get("mcp", {}).get("servers", {}),
         webfetch=bool(raw.get("tools", {}).get("webfetch", False)),
         channels=raw.get("channels", {}) or {},
+        auth=raw.get("auth", {}) or {},
+        desktop=raw.get("desktop", {}) or {},
         browser=_browser_url(raw.get("tools", {}).get("browser")),
         browser_approval=bool(raw.get("tools", {}).get("browser_approval", True)),
     )

@@ -101,13 +101,38 @@ Rules the architecture enforces:
   documented justification here and a supply-chain review.
 - No secrets in the repository: credentials are env-var references
   (`api_key_env`), and the working config `xharness.toml` is gitignored.
+- **Secrets at rest.** Passwords are never recoverable: accounts keep a
+  PBKDF2-HMAC-SHA256 hash (600k iterations, per-account salt) in a 0600 file,
+  and the LDAP backend keeps no password material at all. The only value the
+  harness itself writes that must be readable again is a node's bearer token,
+  and it goes to a 0600 file. Encrypting that file would move the problem
+  rather than solve it: the key would have to live on the same machine, with
+  the same permissions, so the protection would still be the file mode. What
+  this does not cover is an attacker who already reads the harness user's
+  files -- at that point the session transcripts are the bigger loss. Should
+  the harness ever store a third-party credential it must replay (it does not
+  today: provider keys are read from the environment or a file the operator
+  owns), that value gets AES-256-GCM with an `enc:v1:` prefix before it lands.
+- **One redaction path.** `redact.py` masks bearer tokens, secrets in URL query
+  strings, `sk-`/`hf_`/`ghp_` key shapes and connection-string passwords.
+  Access-audit details, error messages returned to the browser and the `error`
+  events appended to transcripts all pass through it, so a leak has one place
+  to be fixed rather than one per call site.
+- **Identity trust boundaries** (1.4.0): sign-in refusals are worded
+  identically whether or not the account exists; repeated failures lock the
+  account for five minutes; session tokens are revoked on password change and
+  on disable; SSE tickets are single-use, expire in 60 seconds and carry the
+  identity that redeemed them; admin-only routes (`usage-report`,
+  `security-check`, `users`, `access-audit`, node forwarding) check the
+  principal, not just authentication; a user name that reaches a filesystem
+  path or an LDAP DN is validated against a strict character set first.
 - Input validation at boundaries: URL scheme allow-list, tool-argument JSON
   validation, session JSONL tolerant parsing, bounded outputs and timeouts.
 - Every `# nosec` suppression carries a justification comment at the site and
   a corresponding entry in this document (current: `B404`/`B603`/`B607` in
   `tools/bash.py` — running commands is that tool's purpose; `B310` in
   `llm.py` — scheme validated at construction; `B404`/`B603` in `tools/security.py` —
-  invoking the scanners is that tool's purpose, with fixed argv and timeouts; `B404`/`B603` in `evals.py` — `command` checks are case-author code run in a throwaway workspace; `B110` in `desktop.py` — destroying an already-closed native window on shutdown is expected and has nothing to recover; `B404`/`B603`/`B108` in `sandbox.py` — backend
+  invoking the scanners is that tool's purpose, with fixed argv and timeouts; `B404`/`B603` in `evals.py` — `command` checks are case-author code run in a throwaway workspace; `B110` in `desktop.py` — destroying an already-closed native window on shutdown is expected and has nothing to recover; `B104`/`B105` in `desktop.py` — a fleet node is meant to be reachable and is protected by its bearer token, and `DEFAULT_TOKEN_FILE` is a file name rather than a credential; `B110` in `ldap.py` — the bind result is already decoded when the socket is closed, so a failing close changes nothing; `B404`/`B603`/`B310` in `scripts/report/build_usage_report.py` — the optional LibreOffice conversion uses a fixed argv and the report fetch validates its scheme; `B404`/`B603`/`B108` in `sandbox.py` — backend
   functional probes and the bwrap /tmp bind target, fixed probe argv).
 
 ### Phase 4 — Verification

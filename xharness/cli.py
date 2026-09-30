@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import getpass
+import json
 import os
 import sys
 from typing import Any
@@ -16,6 +18,8 @@ from .fleet import format_table, load_nodes, poll_all, poll_usage_all
 from .usage import format_history, history
 from .consolidate import apply_plan, apply_verdicts, build_plan, verify_plan
 from .memory import MemoryStore, default_memory_dir
+from .identity import UserStore
+from .report import collect as collect_report, format_report as format_usage_report
 from .providers import PRESETS, probe_provider
 from .web import serve
 from .presets import build_harness
@@ -36,7 +40,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "eval <path>" runs a suite; "web" starts the local UI; "desktop" opens it in a native window; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; "usage" shows token history; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "users" manages accounts; "report" prints the service usage report; "eval <path>" runs a suite; "web" starts the local UI; "desktop" opens it in a native window; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; "usage" shows token history; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -61,6 +65,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--nodes", action="store_true", help="usage: also fetch every configured fleet node")
     parser.add_argument("--repeat", type=int, default=1, help="eval: run each case N times")
     parser.add_argument("--json", dest="json_out", help="eval: write per-attempt results as JSONL")
+    parser.add_argument("--role", choices=["admin", "user"], default="user", help="users add: the new account's role")
+    parser.add_argument("--display", help="users add: display name shown in the UI")
     parser.add_argument("-V", "--version", action="version", version=__version__)
     return parser
 
@@ -302,6 +308,93 @@ def _prompt_approval(summary: str) -> bool:
     return answer.strip().lower().startswith("y")
 
 
+def _run_users(args: Any, config: Any) -> int:
+    """Account administration. Passwords are typed, never passed as arguments:
+    a command line ends up in shell history, `ps` output and CI logs."""
+    store = UserStore(getattr(config, "auth", {}) or {})
+    if not store.enabled:
+        print(
+            "xharness: accounts are off. Add an [auth] section to the config first, for example:\n"
+            '  [auth]\n  backend = "local"\n  default_quota_tokens_per_day = 500000',
+            file=sys.stderr,
+        )
+        return 1
+    action = args.task[1] if len(args.task) > 1 else "list"
+    name = args.task[2] if len(args.task) > 2 else ""
+
+    if action == "list":
+        accounts = store.accounts()
+        if not accounts:
+            print("no accounts yet; create one with: xharness users add <name>")
+            return 0
+        print(f"{'帳號':<20}{'角色':<8}{'每日上限':>12}  顯示名稱")
+        for row in accounts:
+            limit = f"{row['quota_tokens_per_day']:,}" if row["quota_tokens_per_day"] else "無限制"
+            state = "（已停用）" if row["disabled"] else ""
+            print(f"{row['name']:<20}{row['role']:<8}{limit:>12}  {row['display']}{state}")
+        return 0
+
+    if action == "audit":
+        records = store.audit_tail(int(args.task[2]) if len(args.task) > 2 and args.task[2].isdigit() else 50)
+        if not records:
+            print("no access records yet")
+            return 0
+        for row in records:
+            mark = "ok  " if row.get("ok") else "FAIL"
+            print(f"{row.get('ts', '')[:19]}  {mark}  {row.get('action', ''):<16}{row.get('user', ''):<20}{row.get('detail', '')}")
+        return 0
+
+    if not name:
+        print(f"usage: xharness users {action} <name>", file=sys.stderr)
+        return 2
+
+    try:
+        if action == "add":
+            if store.backend == "ldap":
+                print("xharness: the LDAP backend holds the passwords; list the account in [auth.users] instead.", file=sys.stderr)
+                return 1
+            password = getpass.getpass(f"password for {name}: ")
+            if password != getpass.getpass("repeat: "):
+                print("xharness: passwords do not match", file=sys.stderr)
+                return 1
+            user = store.add(name, password, args.role, args.display or "")
+            print(f"created {user.name} ({user.role})")
+            return 0
+        if action == "password":
+            password = getpass.getpass(f"new password for {name}: ")
+            if password != getpass.getpass("repeat: "):
+                print("xharness: passwords do not match", file=sys.stderr)
+                return 1
+            ok = store.set_password(name, password)
+            print("password changed" if ok else f"no such account: {name}", file=sys.stderr if not ok else sys.stdout)
+            return 0 if ok else 1
+        if action == "disable":
+            ok = store.remove(name)
+            # Disabling keeps the history attributable; deleting would orphan it.
+            print(f"{name} disabled (history kept)" if ok else f"no such account: {name}")
+            return 0 if ok else 1
+    except ValueError as error:
+        print(f"xharness: {error}", file=sys.stderr)
+        return 1
+
+    print("usage: xharness users [list | add <name> | password <name> | disable <name> | audit [n]]", file=sys.stderr)
+    return 2
+
+
+def _run_report(args: Any, config: Any) -> int:
+    """The service usage report, in the terminal or as JSON for the document builder."""
+    store = UserStore(getattr(config, "auth", {}) or {})
+    nodes = poll_all(load_nodes(config.fleet)) if config.fleet.get("nodes") else []
+    report = collect_report(config, since=args.since if args.since != "7d" else "30d", users=store, nodes=nodes)
+    if args.json_out:
+        with open(args.json_out, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, ensure_ascii=False, indent=2)
+        print(f"wrote {args.json_out}", file=sys.stderr)
+        return 0
+    print(format_usage_report(report))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.task and args.task[0] == "sessions":
@@ -330,6 +423,10 @@ def main(argv: list[str] | None = None) -> int:
         return _run_fleet(config)
     if args.task and args.task[0] == "usage":
         return _run_usage(args, config)
+    if args.task and args.task[0] == "users":
+        return _run_users(args, config)
+    if args.task and args.task[0] in ("report", "usage-report"):
+        return _run_report(args, config)
     if args.task and args.task[0] == "web":
         approval_mode = "auto" if args.yes else (args.approve or config.approval)
         return serve(

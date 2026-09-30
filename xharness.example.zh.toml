@@ -75,3 +75,38 @@ model = "your-model-id"
 # [[plugins]]
 # id = "my-tool"
 # module = "./plugins/my_tool.py"
+
+# ── 多使用者（學校、單位共用同一台機器時使用）─────────────────────
+# 不設這一段，行為和以前完全一樣：單一操作者、共用一份 session 記錄。
+# 設了之後：每個人要登入、各自有自己的對話與 session 目錄、
+# 用量與稽核都歸得到人、管理者才看得到全體報表與資安檢查頁。
+# [auth]
+# backend = "local"                    # local（本機帳號）| ldap（接學校 AD／OpenLDAP）
+# session_hours = 12                   # 登入後多久要重新登入
+# default_role = "user"                # 新帳號的預設角色：user | admin
+# default_quota_tokens_per_day = 500000    # 每人每日 token 上限（0 或不設＝無限制）
+# default_quota_tokens_per_month = 8000000 # 每人每月 token 上限
+
+# 個別使用者的角色與配額（密碼不在這裡，用 xharness users add 建立）。
+# [auth.users.teacher1]
+# display = "張老師"
+# quota_tokens_per_day = 1000000
+# [auth.users.itadmin]
+# role = "admin"
+
+# 接學校目錄服務時改用這個後端；密碼由目錄驗證，本機不存任何密碼。
+# [auth.ldap]
+# url = "ldaps://ad.school.edu.tw"     # 一律用 ldaps；ldap:// 會讓密碼裸奔
+# user_dn = "{user}@school.edu.tw"     # AD 用 UPN；OpenLDAP 用 "uid={user},ou=people,dc=school,dc=edu,dc=tw"
+# allow_any = true                     # false 時只有列在 [auth.users] 的人能用
+# verify_certificate = true            # 自建 CA 請把根憑證裝進系統信任區，不要關掉這個
+# timeout_seconds = 10
+
+# ── 桌面版 ────────────────────────────────────────────────────
+# 桌面視窗預設只綁本機隨機埠，網路上看不到、也不需要權杖。
+# node = true 讓同一個視窗額外開一個對外的節點埠，資訊中心的 hub 就能
+# 看到這台機器、就地審批或停止——不必在好用與管得住之間二選一。
+# [desktop]
+# node = true
+# node_port = 3080
+# token_file = "~/.xharness/desktop-node-token"   # 不存在會自動產生（chmod 600）

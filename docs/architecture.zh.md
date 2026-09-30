@@ -45,12 +45,12 @@
 | | dsh | xHarness |
 |---|---|---|
 | 語言 | TypeScript | Python（3.11+，純標準函式庫） |
-| 規模 | 約 56.5 萬行、227 個套件 | 約 1,900 行、1 個套件 |
+| 規模 | 約 56.5 萬行、227 個套件 | 約 8,090 行、1 個套件 |
 | 插件執行期 | Cordis（服務、型別化事件、HMR、fiber） | `Context`（服務、事件、中介層、scope 回捲） |
 | 組合方式 | profile、bundle、分層 YAML patch | 一個 preset 函式 + TOML 插件清單 |
 | 供應端 | adapter 註冊表、型錄、模型探索 | 一個 OpenAI 相容 adapter |
 | 沙箱 | bwrap / Landlock / Seatbelt / ACL，fail-closed | Seatbelt（macOS）/ bwrap（Linux）；`require` 模式 fail-closed，`auto` 無後端時退回審批策略 |
-| 介面 | Web 應用 | CLI |
+| 介面 | Web 應用 | CLI、Web UI、原生桌面視窗、Telegram |
 
 重點不是對等，而是：架構核心——掛在共享 context 上、效果可回捲的插件；可攔截的模型呼叫接縫；只增不改的 session 記錄——可以塞進一個開發者審計得完的套件裡。對地端部署來說這很重要：每一行會碰網路的程式碼都必須可被審查。
 

@@ -16,7 +16,7 @@ Left to right: the workspace and the model endpoint feed xHarness; an operator g
 
 ## Why
 
-Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one person can read in an afternoon: about 1,900 lines of Python, **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a test suite that runs in under a second.
+Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one developer can audit: about 8,100 lines of Python (package code, excluding 3,346 lines of tests), **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a 227-case test suite that finishes in about 20 seconds (most of it spent shutting down test HTTP servers, not computing).
 
 ## Features
 
@@ -30,7 +30,7 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Cost brakes (telemetry).** An `llm/stream` middleware counts tokens, tool calls, and latency per model call; `max_total_tokens` / `max_llm_calls` hard-stop a runaway task, the usage summary lands in the session log, and `/usage` shows it in the REPL.
 - **Eval subsystem.** `xharness eval <dir>` runs a scored suite against any model: each case executes in a clean temp workspace and is graded by deterministic checks (files, answers, command results, whether tools were actually called) plus an optional LLM judge, reporting pass rate, per-case tokens and time, with JSONL output. The bundled `evals/basic` suite quantifies whether a model uses tools and follows instructions.
 - **Subagents.** `subagent` delegates one bounded task to a fresh child agent; `subagent_batch` fans independent tasks out in parallel. Children share tools and model, cannot spawn children, and route every side effect through the parent's approval policy.
-- **Desktop app.** `xharness desktop` opens the same Web UI in the operating system's native window (WebKit on macOS, WebView2 on Windows, WebKitGTK on Linux), no browser tab; the server binds a loopback port only this process knows and stops when the window closes. `packaging/desktop/build.py` bundles it with PyInstaller into `xHarness.app` + `.dmg` (macOS) or `xHarness.exe` (Windows) for people without Python. The one optional dependency is pywebview (`pip install "xharness[desktop]"`).
+- **Desktop app.** `xharness desktop` opens the same Web UI in the operating system's native window (WebKit on macOS, WebView2 on Windows, WebKitGTK on Linux), no browser tab; the server binds a loopback port only this process knows and stops when the window closes. `packaging/desktop/build.py` bundles it with PyInstaller into `xHarness.app` + `.dmg` (macOS) or `xHarness.exe` (Windows) for people without Python. The one optional dependency is pywebview (`pip install "xharness[desktop]"`). `[desktop] node = true` opens a second, token-protected listener on the same window, so a hub can see and steer the machine: usable and governable at once.
 - **Web UI and fleet view.** `xharness web` serves a local interface: streaming transcript, tool cards, approval buttons, conversation, session, and memory lists, usage chips, light/dark theme. The fleet view shows every conversation and subagent on one page — state, usage, pending approvals — with inline approve/deny and a **stop** button per agent. Binds 127.0.0.1 by default; binding elsewhere requires `--token`.
 - **Real-browser search and open.** Point `[tools] browser = "http://127.0.0.1:9377"` at a local camofox (a real Firefox) and two tools appear: `web_search` opens the DuckDuckGo results page in the browser and returns title / URL / snippet (no search API key), and `browser_open` returns the rendered visible text, so JavaScript-rendered pages are readable too. Both go through approval by default; `browser_approval = false` waives it.
 - **Telegram channel.** Mount `[channels.telegram]` on a node and drive it from your phone: every chat is an ordinary conversation (visible in the fleet view, same approval policy and budget brake, same session log), and mutating tools arrive as allow / deny buttons; `POST /api/notify` lets the platform, a scheduler or any other system push a notification to your Telegram. Only chats listed in `allowed_chats` are served, everything else is ignored; the bot token is read from a file (`token_file`) or an env var, never from the config itself.
@@ -41,6 +41,9 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Append-only session log.** Every message and tool result is recorded as JSONL under `~/.xharness/sessions/`; `--resume <id>` continues a session.
 - **Two run modes.** Headless one-shot (`xharness "task"`) and an interactive REPL.
 - **Extensible.** User plugin modules add tools and services from config; `llm/stream` middleware intercepts every model call for caching, logging, or routing.
+- **Multi-user, with quotas.** `[auth]` turns one machine into a service for a group: local accounts or the site's AD / OpenLDAP (an LDAP client written against the standard library), a private conversation and transcript directory per person, daily and monthly token allowances, temporary lockout after repeated failures, and an audit record for every sign-in and refusal. Without the section, single-operator behaviour is unchanged.
+- **Service usage report.** `xharness report` and `GET /api/usage-report` produce the six blocks management asks for — who used it, what it cost, self-hosted vs bought-in, whether the hardware was used, whether outbound integrations are safe, system health and governance; `scripts/report/build_usage_report.py` renders it as Word or PDF. Estimates carry their assumptions, and the report lists the system's own problems.
+- **Secret-handling self-check.** `GET /api/security-check` walks through where secrets live and who can read them, in plain language with the fix beside it, never showing a value; audit records and error messages pass through one masker.
 - **No telemetry.** xHarness sends nothing anywhere except your configured model endpoint (and the `webfetch` tool or MCP servers you enable yourself). There is no anonymous id, no usage upload, no phone-home of any kind.
 
 ## Quickstart
@@ -164,6 +167,100 @@ python packaging/desktop/build.py
 ```
 
 macOS yields `dist/xHarness.app` and `dist/xHarness-<version>.dmg` (icon rendered from the brand SVG when `rsvg-convert` is installed, otherwise no icon); Windows yields `dist/xHarness/xHarness.exe`. The bundle is unsigned: on macOS allow it once under System Settings → Privacy & Security.
+
+## Multi-user (a shared machine: a school, a department)
+
+Without `[auth]`, xHarness is one person's tool and behaves exactly as before.
+With it, one machine serves a group and can still say who used what:
+
+```toml
+[auth]
+backend = "local"                        # or ldap, for the site's AD / OpenLDAP
+default_quota_tokens_per_day = 500000
+
+[auth.users.itadmin]
+role = "admin"
+```
+
+```sh
+xharness users add itadmin --role admin   # the password is typed, never an argument
+xharness users add teacher1 --display "Ms Chang"
+xharness web --host 0.0.0.0               # with [auth] no shared token is needed
+```
+
+Once people sign in:
+
+- **Each person's work is visible only to them.** Conversations, transcripts and
+  usage return their own; transcripts live in separate directories
+  (`sessions/u/<user>/`) rather than being filtered at query time. Admins see all.
+- **Each person has their own allowance.** `quota_tokens_per_day` / `_per_month`
+  accumulate across tasks and restarts and hard-stop before the next model call,
+  so one person cannot spend the department's capacity.
+- **Every sign-in, refusal and lockout lands in `access-audit.jsonl`.** Repeated
+  failures lock the account temporarily. Disabling an account keeps its history
+  attributable; deleting it would orphan the usage.
+
+With the directory backend no password material stays on the machine:
+
+```toml
+[auth]
+backend = "ldap"
+
+[auth.ldap]
+url = "ldaps://ad.school.edu.tw"
+user_dn = "{user}@school.edu.tw"
+```
+
+The LDAP client exists for exactly this and does exactly one thing: check whether
+a password is right. No searching, no attribute mapping — roles and quotas stay in
+the config. Empty passwords are refused before connecting (an empty simple bind is
+an anonymous bind, which most servers answer with success), DN templates accept a
+strict character set only, and `ldaps://` verifies the certificate chain by default.
+
+## Service usage report
+
+The one for a dean, a department head or a customer's management. Six blocks,
+every figure computed from the harness's own records: who used it, what it cost,
+self-hosted vs bought-in, whether the hardware was used, whether outbound
+integrations are safe, system health and governance.
+
+```sh
+xharness report                                   # in the terminal
+xharness report --since 30d --json report.json    # JSON for the builder
+python3 scripts/report/build_usage_report.py report.json -o usage-report.docx
+python3 scripts/report/build_usage_report.py --url http://node:3080 \
+    --token-file ~/.xharness/node-token --pdf     # straight from a node, as PDF
+```
+
+The Web UI's admin tab shows the same report and can download the JSON. The
+endpoint is `GET /api/usage-report?since=30d` (administrators only).
+
+An estimate always carries its assumption: with no `cost_per_1k_tokens` configured
+the block says so rather than showing a confident zero. The report also lists the
+system's own problems — unattributed usage, unreachable nodes, hardware idle for
+the whole period, failed sign-ins — because a report that only brings good news
+does not get read twice.
+
+The builder needs `python-docx` (and `matplotlib` for the charts); neither is a
+runtime dependency of xHarness.
+
+## Secret-handling self-check
+
+`GET /api/security-check` (administrators only), or the first panel of the Web UI's
+admin tab. Every check is about where secrets are and who can read them, in plain
+language with the fix beside it:
+
+- secrets written straight into the config file (use `api_key_env` / `token_file`)
+- secrets in URLs (`?api_key=` survives in access logs, proxies and browser history)
+- permissions on the account file, node token files and the session directory
+- whether an exposed binding requires a token or a sign-in
+- the sandbox mode (`auto` falls back to no sandbox where no backend exists)
+- whether LDAP is encrypted and verified
+
+The page never shows a secret's value, only whether one is in the wrong place.
+Audit records, error messages and transcripts all pass through one masker first, so
+bearer tokens, secrets in URL query strings, `sk-` / `hf_` / `ghp_` shapes and
+connection-string passwords are never written down.
 
 ## Subagents
 

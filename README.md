@@ -16,7 +16,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：�
 
 ## 為什麼做這個
 
-多數 agent harness 綁死單一廠商 API，還拖著龐大的相依樹。xHarness 保留架構核心——工具、模型 adapter、session 記錄、agent 迴圈的組裝全部都是掛在共享 context 上的插件——但把規模控制在一個人一個下午讀得完：約 1,900 行 Python、**零執行期相依**（純標準函式庫，含 SSE 串流client、TOML 設定讀取與 MCP client），測試跑完不到一秒。
+多數 agent harness 綁死單一廠商 API，還拖著龐大的相依樹。xHarness 保留架構核心——工具、模型 adapter、session 記錄、agent 迴圈的組裝全部都是掛在共享 context 上的插件——但把規模控制在一個開發者審計得完：約 8,100 行 Python（套件程式碼，不含 3,346 行測試）、**零執行期相依**（純標準函式庫，含 SSE 串流client、TOML 設定讀取與 MCP client），227 個測試約 20 秒跑完（多數時間花在關閉測試用的 HTTP 伺服器，不是在算）。
 
 ## 特色
 
@@ -41,6 +41,9 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：�
 - **只增不改的 session 記錄。** 每則訊息與工具結果都以 JSONL 記錄在 `~/.xharness/sessions/`；`--resume <id>` 可接續。
 - **兩種執行模式。** headless 一次性（`xharness "任務"`）與互動 REPL。
 - **可擴充。** 使用者插件模組可從設定檔加入工具與服務；`llm/stream` 中介層可攔截每次模型呼叫做快取、記錄或路由。
+- **多使用者與配額。** `[auth]` 讓同一台機器服務一群人：本機帳號或學校 AD／OpenLDAP 登入（純標準函式庫的 LDAP 用戶端）、每個人自己的對話與 session 目錄、每人每日／每月的 token 上限、連續登入失敗暫時鎖定、每次登入與拒絕都寫入稽核記錄。不設這一段時，行為與單人使用完全相同。
+- **服務使用報告。** `xharness report` 與 `GET /api/usage-report` 產出六塊給決策者看的數字——誰在用、花多少、自建 vs 外購、設備有沒有被用到、對外串接安不安全、系統健康與治理；`scripts/report/build_usage_report.py` 把它做成 Word 或 PDF。估算值一定帶著假設，報告也會列出系統自己的問題。
+- **機密防護檢查頁。** `GET /api/security-check` 逐項檢查機密放在哪裡、誰讀得到，講人話並附修法，永遠不顯示機密內容；稽核與錯誤訊息統一過一次遮罩。
 - **零遙測。** 除了你設定的模型端點（以及你自己選擇啟用的 `webfetch` 與 MCP server），xHarness 不對任何地方傳送資料。沒有匿名 id、沒有使用量上傳、沒有任何 phone-home。
 
 ## 快速開始
@@ -164,6 +167,75 @@ python packaging/desktop/build.py
 ```
 
 macOS 產出 `dist/xHarness.app` 與 `dist/xHarness-<版本>.dmg`（圖示由品牌 SVG 產生，需要 `rsvg-convert`；沒有就不帶圖示）；Windows 產出 `dist/xHarness/xHarness.exe`。打包的 app 沒有簽章，macOS 第一次開要在「系統設定 → 隱私權與安全性」放行。
+
+## 多使用者（學校、單位共用一台機器）
+
+不設 `[auth]` 時，xHarness 就是一個人的工具，行為與先前版本完全相同。設了之後，同一台機器可以服務一群人，而且說得出誰用了什麼：
+
+```toml
+[auth]
+backend = "local"                        # 或 ldap，接學校的 AD／OpenLDAP
+default_quota_tokens_per_day = 500000    # 每人每日上限
+
+[auth.users.itadmin]
+role = "admin"
+```
+
+```sh
+xharness users add itadmin --role admin   # 密碼是互動輸入的，不會留在指令歷史裡
+xharness users add teacher1 --display "張老師"
+xharness web --host 0.0.0.0               # 有 [auth] 就不必再給共用 token
+```
+
+登入之後：
+
+- **每個人的工作只有自己看得到。** 對話、session 記錄、用量趨勢都只回自己的；記錄分開存在 `sessions/u/<使用者>/`，不是靠查詢時過濾。管理者看得到全部。
+- **每個人有自己的額度。** `quota_tokens_per_day` / `_per_month` 跨任務、跨重啟累計，超額時在下一次模型呼叫之前硬停——一個人用完自己的額度，不會把整個單位的算力吃掉。
+- **每一次登入、拒絕與鎖定都寫進 `access-audit.jsonl`。** 連續失敗會暫時鎖定該帳號；帳號的停用是停用不是刪除，因為帳號一旦刪掉，歷史用量就歸不了戶。
+
+接學校目錄服務時密碼不會留在這台機器上：
+
+```toml
+[auth]
+backend = "ldap"
+
+[auth.ldap]
+url = "ldaps://ad.school.edu.tw"
+user_dn = "{user}@school.edu.tw"
+```
+
+LDAP 用戶端是為了這件事寫的，只做一件事——驗證這個人的密碼對不對，不查目錄、不讀屬性；角色與配額仍然由設定檔決定。空密碼會在連線之前就被拒絕（空密碼的 simple bind 會變成匿名綁定，多數伺服器會回成功），DN 樣板只接受嚴格字元集，`ldaps://` 預設驗證憑證鏈。
+
+## 服務使用報告
+
+給校長、主管或客戶老闆看的那一份。六塊，每一塊都由平台自己的記錄算出來：誰在用、花多少、自建 vs 外購、設備有沒有被用到、對外串接安不安全、系統健康與治理。
+
+```sh
+xharness report                                   # 終端機版
+xharness report --since 30d --json report.json    # 給產生器用的 JSON
+python3 scripts/report/build_usage_report.py report.json -o 使用報告.docx
+python3 scripts/report/build_usage_report.py --url http://node:3080 \
+    --token-file ~/.xharness/node-token --pdf     # 直接從節點抓，並轉 PDF
+```
+
+Web UI 的「管理」分頁有同一份報告，可下載 JSON。端點是 `GET /api/usage-report?since=30d`（管理者限定）。
+
+估算值一定帶著假設一起出現：沒有設 `cost_per_1k_tokens` 就寫「本期未收集」，而不是給一個看起來很確定的 0。報告也會列出系統自己的問題——未歸戶的用量、連不上的節點、整個期間零用量的設備、登入失敗次數——因為一份只報喜的報表沒有人會再看第二次。
+
+產生器需要 `python-docx`（圖表另需 `matplotlib`），兩者都不是 xHarness 的執行期相依。
+
+## 機密防護檢查
+
+`GET /api/security-check`（管理者限定），或 Web UI「管理」分頁的第一項。逐項檢查機密放在哪裡、誰讀得到，每一項都講人話並附上修法：
+
+- 設定檔裡有沒有直接寫著金鑰或密碼（該用 `api_key_env`／`token_file`）
+- 機密有沒有跑進網址（`?api_key=` 會留在 access log、反向代理與瀏覽器歷史裡）
+- 帳號檔、節點權杖檔、session 目錄的權限
+- 對外綁定有沒有要求權杖或登入
+- 沙箱模式（`auto` 在沒有後端的機器上會退回無沙箱）
+- LDAP 是不是走 ldaps 且驗證憑證
+
+這一頁永遠不顯示機密內容，只回答「有沒有放錯地方」。稽核、錯誤訊息與工作階段記錄都會先過一次集中遮罩，Bearer 權杖、網址裡的金鑰、`sk-`／`hf_`／`ghp_` 形狀與連線字串密碼都不會被寫下來。
 
 ## 子代理（subagent）
 

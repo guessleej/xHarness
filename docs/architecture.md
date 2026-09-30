@@ -45,12 +45,12 @@ For scale, here is xHarness next to a large plugin-based harness (DeepSeek's dsh
 | | dsh | xHarness |
 |---|---|---|
 | Language | TypeScript | Python (3.11+, stdlib only) |
-| Size | ~565k lines, 227 packages | ~1.9k lines, 1 package |
+| Size | ~565k lines, 227 packages | ~8,090 lines, 1 package |
 | Plugin runtime | Cordis (services, typed events, HMR, fibers) | `Context` (services, events, middleware, scoped disposal) |
 | Composition | profiles, bundles, layered YAML patches | one preset function + a TOML plugin list |
 | Providers | adapter registry, catalogs, model discovery | one OpenAI-compatible adapter |
 | Sandbox | bwrap / Landlock / Seatbelt / ACL, fail-closed | Seatbelt (macOS) / bwrap (Linux); `require` mode fail-closed, `auto` falls back to approval policy |
-| UI | web app | CLI |
+| UI | web app | CLI, Web UI, native desktop window, Telegram |
 
 The claim is not parity. The claim is that the architectural core — plugins over a shared context with reversible effects, an interceptable model-call seam, an append-only session log — fits in a package a single developer can audit, which matters for on-prem deployments where every line that touches the network must be reviewable.
 

@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install "bandit[toml]"
-      - run: bandit -r xharness
+      - run: bandit -r xharness scripts
   dependency-audit:
     name: Dependency audit (pip-audit)
     runs-on: ubuntu-latest

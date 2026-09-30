@@ -8,3 +8,9 @@ build/
 dist/
 packaging/desktop/build/
 xharness.toml
+
+# Never commit a secrets file, however it got here
+.env
+.env.*
+users.json
+*-node-token

@@ -74,3 +74,40 @@ model = "your-model-id"
 # [[plugins]]
 # id = "my-tool"
 # module = "./plugins/my_tool.py"
+
+# ── Multi-user (a shared machine: a school, a department) ─────────────
+# Leave this out and nothing changes: one operator, one shared session store.
+# Configure it and everyone signs in, each person gets their own conversations
+# and transcript directory, usage and audit records are attributable, and only
+# administrators see the fleet-wide report and the security self-check.
+# [auth]
+# backend = "local"                    # local (accounts here) | ldap (the school's AD/OpenLDAP)
+# session_hours = 12
+# default_role = "user"
+# default_quota_tokens_per_day = 500000     # per person; 0 or unset means no limit
+# default_quota_tokens_per_month = 8000000
+
+# Roles and quotas per person. Passwords are never here: use `xharness users add`.
+# [auth.users.teacher1]
+# display = "Ms Chang"
+# quota_tokens_per_day = 1000000
+# [auth.users.itadmin]
+# role = "admin"
+
+# With the LDAP backend no password material is stored on this machine at all.
+# [auth.ldap]
+# url = "ldaps://ad.school.edu.tw"     # always ldaps; ldap:// sends the password in the clear
+# user_dn = "{user}@school.edu.tw"     # AD uses the UPN; OpenLDAP "uid={user},ou=people,dc=..."
+# allow_any = true                     # false restricts access to the names in [auth.users]
+# verify_certificate = true            # install your internal CA rather than turning this off
+# timeout_seconds = 10
+
+# ── Desktop window ────────────────────────────────────────────────────
+# The window binds a random loopback port and needs no token. `node = true`
+# opens a second, network-reachable listener on the same instance, so a hub can
+# see and steer this machine: usable by the person in front of it, visible to
+# the people responsible for it.
+# [desktop]
+# node = true
+# node_port = 3080
+# token_file = "~/.xharness/desktop-node-token"   # generated (0600) if absent

@@ -10,11 +10,18 @@ Nothing about the harness changes: same config file, same approvals, same
 session log, same fleet view. Because the server binds a loopback port that
 only this process knows, no token is needed and nothing is reachable from
 the network.
+
+With [desktop] node = true the same window also serves as a fleet node: a
+second listener on a fixed port, protected by a bearer token, lets an IT
+office watch and steer this machine's agent from the hub. One window, one
+set of conversations, two ways in -- so a school does not have to choose
+between an app its teachers can use and a fleet its administrators can see.
 """
 
 from __future__ import annotations
 
 import os
+import secrets
 import sys
 import threading
 from typing import Any, Callable
@@ -43,8 +50,35 @@ model = "your-model-id"</pre>
 </div></body></html>"""
 
 
+DEFAULT_NODE_PORT = 3080
+DEFAULT_TOKEN_FILE = "desktop-node-token"  # nosec B105 - a file name, not a token value
+
+
 def _config_path() -> str:
     return os.path.join(harness_home(), "config.toml")
+
+
+def node_token(settings: dict[str, Any]) -> str:
+    """Read the node token, creating a 0600 file the first time.
+
+    The token never goes in the config file: the config is copied around and
+    pasted into tickets, and a node token is the run of this machine.
+    """
+    path = os.path.expanduser(str(settings.get("token_file") or os.path.join(harness_home(), DEFAULT_TOKEN_FILE)))
+    try:
+        with open(path, encoding="utf-8") as handle:
+            existing = handle.read().strip()
+        if existing:
+            return existing
+    except OSError:
+        pass
+    token = secrets.token_urlsafe(32)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(token + "\n")
+    print(f"xharness: new node token written to {path} (share it with the hub, not with people)", file=sys.stderr)
+    return token
 
 
 def run_desktop(
@@ -83,6 +117,23 @@ def run_desktop(
 
     threading.Thread(target=server.serve_forever, name="xharness-desktop-server", daemon=True).start()
     print(f"xHarness {__version__} desktop at {url}  (model: {config.provider['model']})", file=sys.stderr)
+
+    node_server = None
+    settings = getattr(config, "desktop", {}) or {}
+    if settings.get("node"):
+        host = str(settings.get("node_host") or "0.0.0.0")  # nosec B104 - a fleet node is meant to be reachable; the token is what protects it
+        port = int(settings.get("node_port") or DEFAULT_NODE_PORT)
+        try:
+            node_server, _, node_url = start_server(
+                config, host=host, port=port, token=node_token(settings),
+                approval_mode=approval_mode or config.approval, app=app,
+            )
+        except OSError as error:
+            # A busy port must not cost the user their window.
+            print(f"xharness: fleet node not started ({error})", file=sys.stderr)
+        else:
+            threading.Thread(target=node_server.serve_forever, name="xharness-desktop-node", daemon=True).start()
+            print(f"xHarness fleet node at {node_url} (token required)", file=sys.stderr)
     window = webview.create_window(
         WINDOW_TITLE, url, width=WINDOW_SIZE[0], height=WINDOW_SIZE[1], min_size=(720, 520), text_select=True
     )
@@ -98,5 +149,8 @@ def run_desktop(
             pass
         server.shutdown()
         server.server_close()
+        if node_server is not None:
+            node_server.shutdown()
+            node_server.server_close()
         app.dispose()
     return 0

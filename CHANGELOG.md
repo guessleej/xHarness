@@ -2,6 +2,31 @@
 
 中文 | English below
 
+## 1.4.0 — 2026-09-30
+
+多使用者與交付治理：一台機器可以同時服務一群人，而且說得出誰用了什麼、花了多少、安不安全。
+
+- **使用者身分（`[auth]`）**：本機帳號（PBKDF2-HMAC-SHA256，雜湊存 0600 檔，密碼永不進設定檔）或學校目錄（`[auth.ldap]`，純標準函式庫的 LDAP simple bind，拒絕空密碼的匿名綁定、DN 樣板防注入、ldaps 預設驗憑證）。連續失敗會暫時鎖定，登入成敗一律寫入 `access-audit.jsonl`。不設這一段時行為與 1.3.x 完全相同。
+- **每人獨立的工作階段**：session 記錄改存 `sessions/u/<使用者>/`，對話列表、session 清單、艦隊視圖與用量只回該使用者自己的；管理者才看得到全體。
+- **每人配額（`quota_tokens_per_day` / `_per_month`）**：跨任務、跨重啟累計，超額在下一次模型呼叫前硬停。以磁碟上的記錄為真本，涵蓋 CLI、Web、Telegram 與子代理。
+- **服務使用報告**：`GET /api/usage-report`（管理者限定）與 `xharness report` 產出六塊——誰在用、花多少、自建 vs 外購、設備有沒有用到、對外串接安不安全、系統健康與治理。`scripts/report/build_usage_report.py` 把它做成 Word（選配 `--pdf`）。報表會揭露系統自己的問題：未歸戶的用量、連不上的節點、零用量的設備、登入失敗。
+- **機密防護檢查頁**：`GET /api/security-check`（管理者限定）與 UI 的「管理」分頁，逐項講人話並附修法——設定檔有沒有明文機密、機密有沒有進網址、帳號檔與權杖檔的權限、對外綁定有沒有權杖、沙箱模式、LDAP 是否加密。永遠不顯示機密內容。
+- **桌面版可同時當艦隊節點（`[desktop] node = true`）**：同一個視窗多開一個帶權杖的對外埠，使用者用得順、資訊中心看得到，不必二選一。權杖首次啟動自動產生成 0600 檔案。
+- **集中遮罩（`redact.py`）**：稽核記錄、錯誤訊息與工作階段記錄統一過一次遮罩，Bearer 權杖、網址查詢字串裡的金鑰、`sk-`／`hf_`／`ghp_` 形狀與連線字串密碼都不會被寫下來。
+- CLI：新增 `xharness users [list|add|password|disable|audit]`（密碼用互動輸入，不經命令列）與 `xharness report`。停用帳號是停用不是刪除，歷史用量才歸得了戶。
+
+Multi-user operation and delivery governance: one machine can serve a group of
+people and still answer who used what, what it cost, and whether it is safe.
+
+- **Identity (`[auth]`)**: local accounts (PBKDF2-HMAC-SHA256, hashes in a 0600 file, passwords never in the config) or the site directory (`[auth.ldap]`, an LDAP simple bind written against the standard library only — empty-password anonymous binds refused, DN templates injection-proof, ldaps verified by default). Repeated failures lock an account temporarily; every sign-in and refusal lands in `access-audit.jsonl`. Without this section the behaviour is exactly 1.3.x.
+- **Per-user sessions**: transcripts move to `sessions/u/<user>/`; conversation lists, session lists, the fleet view and usage return only that person's own work. Administrators see everyone.
+- **Per-user quotas** (`quota_tokens_per_day` / `_per_month`): accumulated across tasks and restarts, hard-stopping before the next model call. The session logs on disk are the source of truth, so CLI, Web, Telegram and subagent traffic all count.
+- **Service usage report**: `GET /api/usage-report` (admin only) and `xharness report` produce six blocks — who used it, what it cost, self-hosted vs bought-in, whether the hardware was used, whether outbound integrations are safe, system health and governance. `scripts/report/build_usage_report.py` turns it into a Word document (optional `--pdf`). The report states its own problems: unattributed usage, unreachable nodes, idle hardware, failed sign-ins.
+- **Secret-handling self-check**: `GET /api/security-check` (admin only) and the UI's admin tab, each finding in plain language with the fix beside it — inline secrets in the config, secrets in URLs, permissions on the account and token files, an exposed binding without a token, the sandbox mode, LDAP encryption. It never shows a secret's value.
+- **The desktop window can be a fleet node** (`[desktop] node = true`): a second, token-protected listener on the same instance, so the app stays usable for the person in front of it and visible to the people responsible for it. The token is generated into a 0600 file on first launch.
+- **Central redaction (`redact.py`)**: audit records, error messages and transcripts pass through one masker, so bearer tokens, secrets in URL query strings, `sk-` / `hf_` / `ghp_` shapes and connection-string passwords are never written down.
+- CLI: `xharness users [list|add|password|disable|audit]` (passwords typed, never passed as arguments) and `xharness report`. Disabling an account keeps its history attributable; deleting would orphan it.
+
 ## 1.3.2 — 2026-09-21
 
 - CI：修 bandit SAST 發現——`desktop.py` 關閉時銷毀可能已關閉的原生視窗那段 `try/except/pass` 補上理由並登錄 SSDLC nosec 清單，不再靜默跳過。

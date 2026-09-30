@@ -13,6 +13,7 @@ Security posture (see docs/ssdlc.md):
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import secrets
@@ -30,14 +31,24 @@ from .agent import Agent, AgentOptions
 from .config import ResolvedConfig
 from .context import Harness
 from .fleet import forward, load_nodes, node_name, poll_all, poll_usage_all
+from .identity import User, UserStore
 from .usage import choose_bucket, history, parse_since
 from .memory import MemoryStore, default_memory_dir
 from .presets import build_harness
+from .quota import QuotaGuard
+from .redact import scrub
+from .report import collect as collect_report
+from . import seccheck
 from .sandbox import resolve_sandbox
-from .session import SessionLog, messages_from_events
+from .session import SessionLog, messages_from_events, sessions_dir
 from .telegram import TelegramBridge, telegram_settings
+from .telemetry import BudgetExceeded
 
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
+#: Callers that are not a signed-in person: the single-operator install with
+#: no [auth] at all, and a hub forwarding an action with the node token.
+OPERATOR = "operator"
+NODE = "node"
 APPROVAL_TIMEOUT_SECONDS = 600
 TICKET_TTL_SECONDS = 60
 MAX_BODY_BYTES = 1_000_000
@@ -50,6 +61,16 @@ FAVICON_SVG = (
 )
 
 
+def is_admin(principal: Any) -> bool:
+    """Operators and hubs see everything; among signed-in people only admins do."""
+    return principal in (OPERATOR, NODE) or bool(getattr(principal, "is_admin", False))
+
+
+def principal_name(principal: Any) -> str | None:
+    """The user name to file work under, or None for a shared (unattributed) store."""
+    return getattr(principal, "name", None)
+
+
 @dataclass
 class Approval:
     summary: str
@@ -58,11 +79,19 @@ class Approval:
 
 
 class Conversation:
-    def __init__(self, conv_id: str, harness: Harness, agent: Agent, session_id: str) -> None:
+    def __init__(
+        self,
+        conv_id: str,
+        harness: Harness,
+        agent: Agent,
+        session_id: str,
+        user: str | None = None,
+    ) -> None:
         self.id = conv_id
         self.harness = harness
         self.agent = agent
         self.session_id = session_id
+        self.user = user
         self.events: list[dict[str, Any]] = []
         self.cond = threading.Condition()
         self.running = False
@@ -103,9 +132,12 @@ class Conversation:
             state = "waiting" if pending else "running"
         else:
             state = "idle"
+        quota = self.harness.ctx.optional("quota")
         return {
             "id": self.id,
             "session": self.session_id,
+            "user": self.user,
+            "quota": quota.report() if quota is not None and quota.active else None,
             "running": self.running,
             "state": state,
             "preview": self.preview,
@@ -127,17 +159,28 @@ class WebApp:
         self,
         config: ResolvedConfig,
         approval_mode: str = "prompt",
-        harness_factory: Callable[[str | None], Harness] | None = None,
+        harness_factory: Callable[..., Harness] | None = None,
     ) -> None:
         self.config = config
         self.approval_mode = approval_mode
-        self.harness_factory = harness_factory or (lambda resume: build_harness(config, resume=resume))
+        self.harness_factory = harness_factory or (
+            lambda resume, user=None: build_harness(config, resume=resume, user=user)
+        )
+        # Tests and embedders may pass a one-argument factory; keep working with both.
+        try:
+            self._factory_takes_user = len(inspect.signature(self.harness_factory).parameters) >= 2
+        except (TypeError, ValueError):
+            self._factory_takes_user = False
         self.conversations: dict[str, Conversation] = {}
         self.lock = threading.Lock()
         self.tickets: dict[str, float] = {}
         self.node_name = node_name(config.fleet)
         self.nodes = {node.name: node for node in load_nodes(config.fleet)}
         self.telegram: TelegramBridge | None = None
+        self.users = UserStore(getattr(config, "auth", {}) or {})
+        #: Recorded for the security self-check, which has to know how we are exposed.
+        self.bound_host: str | None = None
+        self.has_token = False
 
     def start_channels(self) -> None:
         """Mount the channels named in [channels.*]; a bad channel config is fatal on purpose."""
@@ -151,12 +194,17 @@ class WebApp:
         """Push a message out every mounted channel; returns recipients reached."""
         return self.telegram.notify(text, chats) if self.telegram else 0
 
-    def create(self, resume: str | None = None, extra_system: str | None = None) -> Conversation:
-        harness = self.harness_factory(resume)
+    def create(
+        self,
+        resume: str | None = None,
+        extra_system: str | None = None,
+        user: User | None = None,
+    ) -> Conversation:
+        harness = self.harness_factory(resume, user) if self._factory_takes_user else self.harness_factory(resume)
         session = harness.ctx.optional("session")
         session_id = session.id if session else "-"
         conv_id = secrets.token_hex(6)
-        initial = messages_from_events(SessionLog.load(resume)) if resume else []
+        initial = messages_from_events(SessionLog.load(resume, principal_name(user))) if resume else []
         holder: dict[str, Conversation] = {}
 
         def prompt(summary: str) -> bool:
@@ -189,7 +237,7 @@ class WebApp:
                 ),
             ),
         )
-        conv = Conversation(conv_id, harness, agent, session_id)
+        conv = Conversation(conv_id, harness, agent, session_id, principal_name(user))
         holder["conv"] = conv
 
         def child_start(payload: Any) -> None:
@@ -214,10 +262,16 @@ class WebApp:
         with self.lock:
             return self.conversations.get(conv_id)
 
-    def list(self) -> list[dict[str, Any]]:
+    def visible(self, conv: Conversation, viewer: Any) -> bool:
+        """A signed-in person sees their own conversations; admins see everyone's."""
+        if not self.users.enabled or is_admin(viewer):
+            return True
+        return conv.user == principal_name(viewer)
+
+    def list(self, viewer: Any = OPERATOR) -> list[dict[str, Any]]:
         with self.lock:
             convs = sorted(self.conversations.values(), key=lambda c: c.created, reverse=True)
-        return [conv.summary() for conv in convs]
+        return [conv.summary() for conv in convs if self.visible(conv, viewer)]
 
     def send(self, conv: Conversation, text: str) -> bool:
         with conv.cond:
@@ -233,7 +287,14 @@ class WebApp:
                 answer = conv.agent.run(text)
                 conv.push({"type": "done", "answer": answer, "usage": conv.usage()})
             except Exception as error:  # noqa: BLE001 - surfaced to the browser
-                conv.push({"type": "error", "message": f"{type(error).__name__}: {error}", "usage": conv.usage()})
+                # An exception often repeats the URL or header that failed, which
+                # is exactly where a token would be.
+                detail = scrub(f"{type(error).__name__}: {error}")
+                conv.push({"type": "error", "message": detail, "usage": conv.usage()})
+                session = conv.harness.ctx.optional("session")
+                if session:
+                    kind = "budget-stop" if isinstance(error, BudgetExceeded) else "error"
+                    session.append({"type": kind, "message": detail[:500]})
             finally:
                 with conv.cond:
                     conv.running = False
@@ -263,8 +324,8 @@ class WebApp:
         conv.push({"type": "stop_requested"})
         return True
 
-    def fleet(self, include_nodes: bool = True) -> dict[str, Any]:
-        items = self.list()
+    def fleet(self, include_nodes: bool = True, viewer: Any = OPERATOR) -> dict[str, Any]:
+        items = self.list(viewer)
         model = str(self.config.provider["model"])
         for item in items:
             item["model"] = model
@@ -342,18 +403,34 @@ class WebApp:
             for memory in store.list()
         ]
 
-    def issue_ticket(self) -> str:
+    def issue_ticket(self, owner: str | None = None) -> str:
+        """Single-use, 60s credential for the SSE stream, which cannot set headers."""
         ticket = secrets.token_urlsafe(24)
         now = time.time()
         with self.lock:
-            self.tickets = {key: exp for key, exp in self.tickets.items() if exp > now}
-            self.tickets[ticket] = now + TICKET_TTL_SECONDS
+            self.tickets = {key: value for key, value in self.tickets.items() if value[0] > now}
+            self.tickets[ticket] = (now + TICKET_TTL_SECONDS, owner)
         return ticket
 
-    def redeem_ticket(self, ticket: str) -> bool:
+    def redeem_ticket(self, ticket: str) -> tuple[bool, str | None]:
         with self.lock:
-            expiry = self.tickets.pop(ticket, None)
-        return expiry is not None and expiry > time.time()
+            entry = self.tickets.pop(ticket, None)
+        if entry is None or entry[0] <= time.time():
+            return False, None
+        return True, entry[1]
+
+    def usage_report(self, since: str = "30d") -> dict[str, Any]:
+        """The six-block service usage report; admin-only at the route level."""
+        nodes = poll_all(list(self.nodes.values())) if self.nodes else []
+        return collect_report(self.config, since=since, users=self.users, nodes=nodes)
+
+    def security_check(self) -> dict[str, Any]:
+        return seccheck.run(
+            self.config,
+            bound_host=self.bound_host,
+            has_token=self.has_token,
+            users=self.users,
+        )
 
     def dispose(self) -> None:
         with self.lock:
@@ -411,18 +488,50 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             header = self.headers.get("Authorization") or ""
             return header.startswith("Bearer ") and secrets.compare_digest(header[7:], token or "")
 
+        def _presented(self) -> str:
+            header = self.headers.get("Authorization") or ""
+            return header[7:] if header.startswith("Bearer ") else ""
+
         def _guard(self, sse_ticket: str | None = None) -> bool:
+            """Decide the caller and record it on self.principal, or answer 401/403."""
+            self.principal: Any = None
+            if app.users.enabled:
+                presented = self._presented()
+                user = app.users.resolve(presented) if presented else None
+                if user is not None:
+                    self.principal = user
+                    return True
+                if token and presented and secrets.compare_digest(presented, token):
+                    self.principal = NODE  # a hub forwarding an action, not a person
+                    return True
+                if sse_ticket:
+                    ok, owner = app.redeem_ticket(sse_ticket)
+                    if ok:
+                        self.principal = app.users.profile(owner) if owner else NODE
+                        if self.principal is not None:
+                            return True
+                self._json(401, {"error": "unauthorized", "auth": "users"})
+                return False
             if token:
                 if self._bearer_ok():
+                    self.principal = OPERATOR
                     return True
-                if sse_ticket and app.redeem_ticket(sse_ticket):
+                if sse_ticket and app.redeem_ticket(sse_ticket)[0]:
+                    self.principal = OPERATOR
                     return True
-                self._json(401, {"error": "unauthorized"})
+                self._json(401, {"error": "unauthorized", "auth": "token"})
                 return False
             if not self._host_ok():
                 self._json(403, {"error": "forbidden host"})
                 return False
+            self.principal = OPERATOR
             return True
+
+        def _admin_only(self) -> bool:
+            if is_admin(getattr(self, "principal", None)):
+                return True
+            self._json(403, {"error": "administrator only"})
+            return False
 
         def _body(self) -> dict[str, Any] | None:
             length = int(self.headers.get("Content-Length") or 0)
@@ -469,6 +578,7 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     sandbox = resolved.name if resolved else None
                 except (RuntimeError, ValueError):
                     sandbox = None
+                principal = getattr(self, "principal", None)
                 self._json(200, {
                     "version": __version__,
                     "model": app.config.provider["model"],
@@ -476,13 +586,53 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     "approval": app.approval_mode,
                     "sandbox": sandbox,
                     "auth": bool(token),
+                    "identity": app.users.enabled,
+                    "user": principal.public() if isinstance(principal, User) else None,
+                    "admin": is_admin(principal),
                 })
                 return
             if parts[1:] == ["conversations"]:
-                self._json(200, app.list())
+                self._json(200, app.list(self.principal))
                 return
             if parts[1:] == ["sessions"]:
-                self._json(200, SessionLog.list()[:50])
+                self._json(200, SessionLog.list(principal_name(self.principal))[:50])
+                return
+            if parts[1:] == ["me"]:
+                principal = self.principal
+                payload: dict[str, Any] = {
+                    "user": principal.public() if isinstance(principal, User) else None,
+                    "admin": is_admin(principal),
+                    "identity": app.users.enabled,
+                }
+                if isinstance(principal, User) and (principal.quota_tokens_per_day or principal.quota_tokens_per_month):
+                    # No telemetry here: this is the on-disk figure between tasks.
+                    payload["quota"] = QuotaGuard(
+                        principal.name,
+                        principal.quota_tokens_per_day,
+                        principal.quota_tokens_per_month,
+                    ).report()
+                self._json(200, payload)
+                return
+            if parts[1:] == ["usage-report"]:
+                if not self._admin_only():
+                    return
+                self._json(200, app.usage_report((query.get("since") or ["30d"])[0]))
+                return
+            if parts[1:] == ["security-check"]:
+                if not self._admin_only():
+                    return
+                self._json(200, app.security_check())
+                return
+            if parts[1:] == ["users"]:
+                if not self._admin_only():
+                    return
+                self._json(200, {"users": app.users.accounts(), "backend": app.users.backend,
+                                 "sessions": app.users.sessions()})
+                return
+            if parts[1:] == ["access-audit"]:
+                if not self._admin_only():
+                    return
+                self._json(200, app.users.audit_tail(int((query.get("limit") or ["100"])[0] or 100)))
                 return
             if parts[1:] == ["memory"]:
                 self._json(200, app.memory_index())
@@ -493,7 +643,8 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             if parts[1:] == ["usage"]:
                 since = (query.get("since") or ["7d"])[0]
                 bucket = (query.get("bucket") or [None])[0]
-                self._json(200, history(since=since, bucket=bucket))
+                scope = None if is_admin(self.principal) else sessions_dir(principal_name(self.principal))
+                self._json(200, history(directory=scope, since=since, bucket=bucket))
                 return
             if parts[1:] == ["fleet", "usage"]:
                 since = (query.get("since") or ["7d"])[0]
@@ -507,11 +658,14 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             if parts[1:] == ["fleet"]:
                 # A hub asking us for our snapshot must not make us poll our own nodes
                 # (X-XHarness-Client: hub), which would fan out recursively.
-                self._json(200, app.fleet(include_nodes=self.headers.get(CSRF_HEADER) != "hub"))
+                self._json(200, app.fleet(
+                    include_nodes=self.headers.get(CSRF_HEADER) != "hub",
+                    viewer=self.principal,
+                ))
                 return
             if len(parts) == 4 and parts[1] == "conversations" and parts[3] == "events":
                 conv = app.get(parts[2])
-                if conv is None:
+                if conv is None or not app.visible(conv, self.principal):
                     self._json(404, {"error": "no such conversation"})
                     return
                 after = int((query.get("after") or ["0"])[0] or 0)
@@ -548,16 +702,29 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             if parts[:1] != ["api"]:
                 self._json(404, {"error": "not found"})
                 return
-            if not self._guard():
-                return
             if not self.headers.get(CSRF_HEADER):
                 self._json(403, {"error": f"missing {CSRF_HEADER} header"})
                 return
             body = self._body()
             if body is None:
                 return
+            if parts[1:] == ["login"]:
+                self._login(body)
+                return
+            if not self._guard():
+                return
+            if parts[1:] == ["logout"]:
+                app.users.revoke(self._presented())
+                self._json(200, {"ok": True})
+                return
             if parts[1:] == ["tickets"]:
-                self._json(200, {"ticket": app.issue_ticket(), "ttl": TICKET_TTL_SECONDS})
+                ticket = app.issue_ticket(principal_name(self.principal))
+                self._json(200, {"ticket": ticket, "ttl": TICKET_TTL_SECONDS})
+                return
+            if parts[1:] == ["users"]:
+                if not self._admin_only():
+                    return
+                self._manage_user(body)
                 return
             if parts[1:] == ["notify"]:
                 text = str(body.get("text") or "").strip()
@@ -574,8 +741,9 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 return
             if parts[1:] == ["conversations"]:
                 resume = body.get("resume")
+                owner = self.principal if isinstance(self.principal, User) else None
                 try:
-                    conv = app.create(str(resume) if resume else None)
+                    conv = app.create(str(resume) if resume else None, user=owner)
                 except Exception as error:  # noqa: BLE001 - reported to the caller
                     self._json(400, {"error": str(error)})
                     return
@@ -583,7 +751,7 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 return
             if len(parts) == 4 and parts[1] == "conversations":
                 conv = app.get(parts[2])
-                if conv is None:
+                if conv is None or not app.visible(conv, self.principal):
                     self._json(404, {"error": "no such conversation"})
                     return
                 if parts[3] == "messages":
@@ -605,10 +773,51 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     self._json(200 if ok else 409, {"ok": ok})
                     return
             if len(parts) == 6 and parts[1] == "nodes" and parts[3] == "conversations":
+                if not self._admin_only():  # steering another machine is an operator action
+                    return
                 status, payload = app.forward_action(parts[2], parts[4], parts[5], body)
                 self._json(status, payload if payload is not None else {})
                 return
             self._json(404, {"error": "not found"})
+
+        # --- identity routes ------------------------------------------
+        def _login(self, body: dict[str, Any]) -> None:
+            if not app.users.enabled:
+                self._json(400, {"error": "this server does not use accounts"})
+                return
+            user, detail = app.users.authenticate(str(body.get("user") or ""), str(body.get("password") or ""))
+            if user is None:
+                # One message for every refusal: a different wording for "no such
+                # user" would tell an attacker which names exist.
+                self._json(401, {"error": detail if "try again" in detail else "登入失敗，請確認帳號與密碼"})
+                return
+            self._json(200, {"token": app.users.issue(user), "user": user.public()})
+
+        def _manage_user(self, body: dict[str, Any]) -> None:
+            action = str(body.get("action") or "add")
+            name = str(body.get("user") or "")
+            try:
+                if action == "add":
+                    created = app.users.add(
+                        name,
+                        str(body.get("password") or ""),
+                        str(body.get("role") or "user"),
+                        str(body.get("display") or ""),
+                    )
+                    self._json(201, created.public())
+                    return
+                if action == "password":
+                    ok = app.users.set_password(name, str(body.get("password") or ""))
+                    self._json(200 if ok else 404, {"ok": ok})
+                    return
+                if action == "disable":
+                    ok = app.users.remove(name)
+                    self._json(200 if ok else 404, {"ok": ok})
+                    return
+            except ValueError as error:
+                self._json(400, {"error": str(error)})
+                return
+            self._json(400, {"error": "action must be add, password or disable"})
 
     return Handler
 
@@ -619,18 +828,33 @@ def start_server(
     port: int = 3080,
     token: str | None = None,
     approval_mode: str = "prompt",
-    harness_factory: Callable[[str | None], Harness] | None = None,
+    harness_factory: Callable[..., Harness] | None = None,
+    app: WebApp | None = None,
 ) -> tuple[ThreadingHTTPServer, WebApp, str]:
-    """Bind the server and mount channels without serving yet; `serve` and the desktop window share this."""
+    """Bind the server and mount channels without serving yet; `serve` and the desktop
+    window share this. Pass `app` to put a second listener on an existing instance."""
     bare = host.split("%")[0]
     if bare == "::1":
         bare = "[::1]"
-    if bare not in LOOPBACK_HOSTS and not token:
+    # Accounts are an authentication mechanism in their own right: with [auth]
+    # configured, every /api call still has to present a credential, so a node
+    # that people sign in to does not additionally need a shared token.
+    if bare not in LOOPBACK_HOSTS and not token and not (getattr(config, "auth", None) or {}):
         raise PermissionError(
-            f"refusing to bind {host} without --token; a non-loopback address exposes the harness to the network"
+            f"refusing to bind {host} without --token; a non-loopback address exposes the harness to the network "
+            "(configure [auth] to require sign-in instead)"
         )
-    app = WebApp(config, approval_mode=approval_mode, harness_factory=harness_factory)
-    app.start_channels()
+    if app is None:
+        app = WebApp(config, approval_mode=approval_mode, harness_factory=harness_factory)
+        app.bound_host = bare
+        app.has_token = bool(token)
+        app.start_channels()
+    elif bare not in LOOPBACK_HOSTS:
+        # A second listener on the same app (the desktop window also serving as a
+        # fleet node): the security page must report the exposed binding, not the
+        # loopback one the window uses.
+        app.bound_host = bare
+        app.has_token = bool(token)
     server = ThreadingHTTPServer((host, port), make_handler(app, token))
     server.daemon_threads = True
     url = f"http://{host}:{server.server_address[1]}/"
@@ -644,7 +868,7 @@ def serve(
     token: str | None = None,
     approval_mode: str = "prompt",
     open_browser: bool = True,
-    harness_factory: Callable[[str | None], Harness] | None = None,
+    harness_factory: Callable[..., Harness] | None = None,
 ) -> int:
     try:
         server, app, url = start_server(config, host, port, token, approval_mode, harness_factory)
@@ -698,6 +922,61 @@ a{color:var(--brand)}
 .chips{display:flex;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
 .chip{font-size:13px;padding:4px 10px;border-radius:999px;background:var(--tint);color:var(--ink-2);white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
 .btn{font:inherit;font-size:14px;padding:8px 14px;border-radius:10px;border:0;cursor:pointer;background:var(--card);color:var(--ink);box-shadow:var(--shadow-sm)}
+/* sign-in gate: a full page, not a dialog -- there is nothing behind it to click back to */
+.gate{position:fixed;inset:0;z-index:60;display:none;place-items:center;background:var(--bg);background-attachment:fixed;padding:16px}
+.gate.on{display:grid}
+.gate .card{width:min(420px,100%);background:var(--card);border-radius:18px;padding:32px 34px;box-shadow:var(--shadow)}
+.gate h1{margin:0 0 4px;font-size:24px;color:var(--brand)}
+.gate p{margin:0 0 20px;color:var(--ink-3);font-size:14px}
+.gate label{display:block;font-size:13px;color:var(--ink-2);margin:12px 0 6px}
+.gate input{width:100%;font:inherit;padding:10px 12px;border-radius:10px;background:transparent;color:var(--ink);
+  border:1px solid rgba(107,122,133,.35)}
+.gate input:focus{outline:none;border-color:var(--brand)}
+.gate .err{margin-top:12px;font-size:14px;color:var(--brand);min-height:20px}
+.gate .btn{width:100%;margin-top:18px}
+/* admin surfaces */
+.adm{display:none;max-width:1080px;margin:0 auto;padding:0 16px 32px}
+.adm.on{display:block}
+.admtabs{display:flex;gap:8px;margin:18px 0 14px;flex-wrap:wrap}
+.scroll{max-height:56vh;overflow:auto;padding-right:4px}
+.chk{display:flex;gap:14px;align-items:flex-start;padding:14px 16px;border-radius:12px;background:var(--card);
+  box-shadow:var(--shadow-sm);margin-bottom:8px}
+.chk .bd{flex:1;min-width:0}
+.chk .ti{font-weight:700;font-size:15px}
+.chk .de{font-size:14px;color:var(--ink-2);margin-top:2px}
+.chk .fx{font-size:13px;color:var(--ink-3);margin-top:6px;font-family:var(--mono);word-break:break-all}
+.st{font-size:13px;padding:3px 11px;border-radius:999px;white-space:nowrap;font-weight:700}
+.st.pass{background:rgba(46,125,50,.13);color:#2e7d32}
+.st.warn{background:rgba(217,119,6,.16);color:#a85f05}
+.st.fail{background:var(--tint);color:var(--brand)}
+:root[data-theme="dark"] .st.pass{background:rgba(46,125,50,.2);color:#7bc47f}
+:root[data-theme="dark"] .st.warn{background:rgba(217,119,6,.22);color:#e0a052}
+.rep{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(248px,1fr))}
+.rep .b{background:var(--card);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow-sm)}
+.rep .b h3{margin:0 0 8px;font-size:14px;color:var(--ink-3);font-weight:700}
+.rep .b .n{font-size:26px;font-weight:800;color:var(--brand);line-height:1.2}
+.rep .b .m{font-size:13px;color:var(--ink-2);margin-top:6px}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{text-align:left;font-size:13px;color:var(--ink-3);padding:8px 10px;font-weight:700}
+.tbl td{padding:8px 10px;background:var(--card)}
+.tbl tr td:first-child{border-radius:10px 0 0 10px}
+.tbl tr td:last-child{border-radius:0 10px 10px 0}
+.uform{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.uform input,.uform select{font:inherit;font-size:14px;padding:8px 10px;border-radius:10px;background:var(--card);
+  color:var(--ink);border:1px solid rgba(107,122,133,.3)}
+@media (max-width:640px){
+  /* Chips carry status, not decoration: on a phone they scroll sideways in
+     their own row instead of stacking one character wide. */
+  .chips{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;flex-basis:100%;order:3}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{max-width:none;flex-shrink:0}
+  .scroll{max-height:none;overflow:visible}
+  .tbl{display:block;overflow-x:auto;white-space:nowrap}
+  .uform{flex-direction:column;align-items:stretch}
+  .uform input,.uform select,.uform .btn{width:100%}
+  .chk{flex-direction:column;gap:8px}
+  .st{align-self:flex-start}
+}
 .btn.primary{background:var(--brand);color:#fff}
 .btn.primary:hover{background:var(--brand-dark)}
 .btn:disabled{opacity:.55;cursor:not-allowed}
@@ -801,6 +1080,19 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
 </style>
 </head>
 <body>
+<div class="gate" id="gate"><div class="card">
+  <h1>xHarness</h1>
+  <p id="gate-sub">請以你的帳號登入。</p>
+  <form id="gate-form" autocomplete="on">
+    <label for="gate-user">帳號</label>
+    <input id="gate-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+    <label for="gate-pass">密碼</label>
+    <input id="gate-pass" name="password" type="password" autocomplete="current-password" required>
+    <div class="err" id="gate-err"></div>
+    <button class="btn primary" id="gate-go" type="submit">登入</button>
+  </form>
+</div></div>
+
 <nav class="nav" id="nav"><div class="in">
   <a class="brand" href="#">xHarness</a>
   <div class="chips">
@@ -808,11 +1100,15 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
     <span class="chip" id="chip-usage">usage: 0 tokens</span>
     <span class="chip" id="chip-status">閒置</span>
     <span class="chip" id="chip-conv" title="目前對話">對話：尚未建立</span>
+    <span class="chip" id="chip-quota" hidden title="本期配額"></span>
+    <span class="chip" id="chip-user" hidden></span>
   </div>
   <button class="btn" id="btn-new">新對話</button>
   <button class="btn" id="btn-fleet">艦隊</button>
+  <button class="btn" id="btn-admin" hidden>管理</button>
   <button class="btn" id="btn-list">對話與紀錄</button>
   <button class="btn" id="btn-theme" aria-label="切換主題">主題</button>
+  <button class="btn" id="btn-logout" hidden>登出</button>
 </div></nav>
 
 <main>
@@ -839,6 +1135,48 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
       <div id="usage-chart" class="viz-chart"></div>
       <div id="usage-legend" class="viz-legend"></div>
       <div id="usage-table" class="viz-table" hidden></div>
+    </div>
+  </section>
+
+  <section class="adm" id="admin">
+    <div class="hero"><h1>管理</h1><p>只有管理者看得到：這台機器的資安狀態、全體用量與帳號。</p></div>
+    <div class="admtabs">
+      <button class="btn sm primary" data-adm="sec">機密防護檢查</button>
+      <button class="btn sm" data-adm="rep">服務使用報告</button>
+      <button class="btn sm" data-adm="usr">帳號</button>
+    </div>
+
+    <div id="adm-sec">
+      <div class="nodehead"><h2 id="sec-verdict">檢查中…</h2>
+        <span class="m">檢查機密放在哪裡、誰讀得到。本頁永遠不顯示機密內容。</span></div>
+      <div class="admtabs"><button class="btn sm" id="sec-rerun">重新檢查</button></div>
+      <div class="scroll" id="sec-list"></div>
+    </div>
+
+    <div id="adm-rep" hidden>
+      <div class="nodehead"><h2>服務使用報告</h2><span class="m" id="rep-range">近 30 天</span></div>
+      <div class="admtabs">
+        <button class="btn sm" data-since="7d">7 天</button>
+        <button class="btn sm primary" data-since="30d">30 天</button>
+        <button class="btn sm" data-since="90d">90 天</button>
+        <span class="viz-sp"></span>
+        <button class="btn sm" id="rep-json">下載 JSON</button>
+      </div>
+      <div class="rep" id="rep-cards"></div>
+      <div class="scroll" id="rep-detail"></div>
+    </div>
+
+    <div id="adm-usr" hidden>
+      <div class="nodehead"><h2>帳號</h2><span class="m">停用不刪除，歷史用量才歸得了戶。</span></div>
+      <form class="uform" id="usr-form">
+        <input id="usr-name" placeholder="帳號" autocapitalize="off" spellcheck="false" required>
+        <input id="usr-display" placeholder="顯示名稱">
+        <input id="usr-pass" type="password" placeholder="密碼（至少 8 字）" autocomplete="new-password" required>
+        <select id="usr-role"><option value="user">一般使用者</option><option value="admin">管理者</option></select>
+        <button class="btn sm primary" type="submit">新增</button>
+      </form>
+      <div class="err" id="usr-err"></div>
+      <div class="scroll" id="usr-list"></div>
     </div>
   </section>
 </main>
@@ -871,6 +1209,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   const $=s=>document.querySelector(s);
   const transcript=$('#transcript'),input=$('#input'),hint=$('#hint');
   let conv=null,es=null,token=null,assistantEl=null,assistantText='',composing=false,convPreview='';
+  let me=null,admin=false,gateOn=false,admOn=false,repSince='30d';
   function shortTitle(t){t=(t||'').trim();return t?(t.length>18?t.slice(0,18)+'…':t):'尚未送出訊息';}
   function setCurrent(id,preview){conv=id;convPreview=preview||'';
     $('#chip-conv').textContent=id?'對話：'+shortTitle(convPreview):'對話：尚未建立';
@@ -888,7 +1227,12 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
     opts=opts||{};const headers=Object.assign({'Content-Type':'application/json','X-XHarness-Client':'1'},opts.headers||{});
     if(token)headers['Authorization']='Bearer '+token;
     const r=await fetch(path,{method:opts.method||'GET',headers,body:opts.body?JSON.stringify(opts.body):undefined});
-    if(r.status===401){token=prompt('這個伺服器需要存取權杖，請貼上啟動時設定的 token：');if(token)return api(path,opts);}
+    if(r.status===401){
+      let d={};try{d=await r.json()}catch(e){}
+      if(d.auth==='users'){showGate();throw new Error('請先登入');}
+      token=prompt('這個伺服器需要存取權杖，請貼上啟動時設定的 token：');
+      if(token){saveToken();return api(path,opts);}
+    }
     if(!r.ok){let d={};try{d=await r.json()}catch(e){}throw new Error(d.error||('HTTP '+r.status));}
     return r.status===204?null:r.json();
   }
@@ -1098,9 +1442,214 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
     if(on){renderFleet();loadUsage();fleetTimer=setInterval(()=>{if(!document.hidden)renderFleet();},2000);}}
   $('#btn-fleet').onclick=()=>toggleFleet(!fleetOn);
 
+  // --- identity ---------------------------------------------------
+  function saveToken(){try{token?localStorage.setItem('xh-token',token):localStorage.removeItem('xh-token')}catch(e){}}
+  function loadToken(){try{token=localStorage.getItem('xh-token')||null}catch(e){token=null}}
+  function showGate(on){gateOn=on!==false;$('#gate').classList.toggle('on',gateOn);
+    if(gateOn)setTimeout(()=>$('#gate-user').focus(),50);}
+  async function signIn(user,password){
+    const r=await fetch('/api/login',{method:'POST',
+      headers:{'Content-Type':'application/json','X-XHarness-Client':'1'},
+      body:JSON.stringify({user,password})});
+    let d={};try{d=await r.json()}catch(e){}
+    if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+    token=d.token;saveToken();return d.user;
+  }
+  // The submit is driven by Enter, so an IME confirming a candidate must not send
+  // a half-typed form: three checks, any one of them is enough.
+  let gateComposing=false;
+  $('#gate-pass').addEventListener('compositionstart',()=>{gateComposing=true;});
+  $('#gate-user').addEventListener('compositionstart',()=>{gateComposing=true;});
+  ['#gate-user','#gate-pass'].forEach(sel=>{
+    $(sel).addEventListener('compositionend',()=>{gateComposing=false;});
+    $(sel).addEventListener('keydown',e=>{
+      if(e.key==='Enter'&&(gateComposing||e.isComposing||e.keyCode===229))e.preventDefault();
+    });
+  });
+  $('#gate-form').addEventListener('submit',async e=>{
+    e.preventDefault();
+    if(gateComposing)return;
+    const btn=$('#gate-go');btn.disabled=true;$('#gate-err').textContent='';
+    try{
+      await signIn($('#gate-user').value.trim(),$('#gate-pass').value);
+      $('#gate-pass').value='';showGate(false);location.reload();
+    }catch(err){$('#gate-err').textContent=err.message;}
+    finally{btn.disabled=false;}
+  });
+  $('#btn-logout').onclick=async()=>{
+    try{await api('/api/logout',{method:'POST',body:{}})}catch(e){}
+    token=null;saveToken();location.reload();
+  };
+
+  function applyMeta(m){
+    $('#chip-model').textContent='model: '+m.model+(m.sandbox?' · sandbox '+m.sandbox:'')+' · approval '+m.approval;
+    me=m.user;admin=!!m.admin;
+    if(m.identity&&me){
+      $('#chip-user').hidden=false;$('#chip-user').textContent=me.display+(me.role==='admin'?'（管理者）':'');
+      $('#btn-logout').hidden=false;
+    }
+    $('#btn-admin').hidden=!admin;
+    refreshQuota();
+  }
+  async function refreshQuota(){
+    if(!me)return;
+    try{
+      const d=await api('/api/me');
+      const q=d.quota&&d.quota.day;
+      if(q&&q.limit){
+        $('#chip-quota').hidden=false;
+        $('#chip-quota').textContent='今日配額 '+Math.round(q.used/q.limit*100)+'%（剩 '+q.remaining.toLocaleString()+' tokens）';
+      }
+    }catch(e){}
+  }
+
+  // --- admin ------------------------------------------------------
+  function admShow(which){
+    ['sec','rep','usr'].forEach(k=>{$('#adm-'+k).hidden=(k!==which);});
+    document.querySelectorAll('[data-adm]').forEach(b=>b.classList.toggle('primary',b.dataset.adm===which));
+    if(which==='sec')loadSecurity();
+    if(which==='rep')loadReport();
+    if(which==='usr')loadUsers();
+  }
+  function toggleAdmin(on){
+    admOn=on;$('#admin').classList.toggle('on',on);
+    $('#transcript').hidden=on;$('#hero').hidden=on||!!conv;$('#fleet').classList.remove('on');
+    document.querySelector('.composer').style.display=on?'none':'';
+    if(on){if(fleetOn)toggleFleet(false);admShow('sec');}
+  }
+  $('#btn-admin').onclick=()=>toggleAdmin(!admOn);
+  document.querySelectorAll('[data-adm]').forEach(b=>{b.onclick=()=>admShow(b.dataset.adm);});
+
+  const VERDICT={pass:'通過',warn:'有建議事項',fail:'有必須修正的項目'};
+  async function loadSecurity(){
+    const box=$('#sec-list');box.textContent='';
+    try{
+      const d=await api('/api/security-check');
+      $('#sec-verdict').textContent='檢查結果：'+(VERDICT[d.verdict]||d.verdict)+
+        '（通過 '+d.summary.pass+'、建議 '+d.summary.warn+'、必修 '+d.summary.fail+'）';
+      d.items.forEach(it=>{
+        const row=document.createElement('div');row.className='chk';
+        const st=document.createElement('span');st.className='st '+it.state;
+        st.textContent={pass:'通過',warn:'建議',fail:'必修'}[it.state]||it.state;
+        const bd=document.createElement('div');bd.className='bd';
+        const ti=document.createElement('div');ti.className='ti';ti.textContent=it.title;
+        const de=document.createElement('div');de.className='de';de.textContent=it.detail;
+        bd.appendChild(ti);bd.appendChild(de);
+        if(it.fix){const fx=document.createElement('div');fx.className='fx';fx.textContent='修法：'+it.fix;bd.appendChild(fx);}
+        row.appendChild(st);row.appendChild(bd);box.appendChild(row);
+      });
+    }catch(e){$('#sec-verdict').textContent='檢查失敗：'+e.message;}
+  }
+  $('#sec-rerun').onclick=loadSecurity;
+
+  function card(title,value,meta){
+    const b=document.createElement('div');b.className='b';
+    const h=document.createElement('h3');h.textContent=title;
+    const n=document.createElement('div');n.className='n';n.textContent=value;
+    const m=document.createElement('div');m.className='m';m.textContent=meta||'';
+    b.appendChild(h);b.appendChild(n);b.appendChild(m);return b;
+  }
+  async function loadReport(){
+    const cards=$('#rep-cards'),detail=$('#rep-detail');cards.textContent='';detail.textContent='';
+    try{
+      const d=await api('/api/usage-report?since='+encodeURIComponent(repSince));
+      $('#rep-range').textContent='近 '+d.since+'，產生於 '+d.generated.slice(0,19).replace('T',' ')+' UTC';
+      cards.appendChild(card('多少人在用',String(d.people.active),
+        d.people.accounts+' 個帳號・身分驗證 '+(d.people.identity==='on'?'已啟用':'未啟用')));
+      cards.appendChild(card('花多少',d.spend.tokens.toLocaleString()+' tokens',
+        d.spend.cost.estimate!=null?('估算 '+d.spend.cost.estimate.toLocaleString()):d.spend.cost.assumption));
+      cards.appendChild(card('自建 vs 外購',d.hosting.self_hosted.tokens.toLocaleString()+' / '+d.hosting.external.tokens.toLocaleString(),
+        '地端自建 / 外購 API（tokens）'));
+      cards.appendChild(card('設備',String(d.machines.configured_nodes)+' 個節點',
+        d.machines.unreachable.length?('連不上 '+d.machines.unreachable.join('、')):'全部可連線'));
+      cards.appendChild(card('對外串接',d.outbound.unsafe.length?'有缺口':'無缺口',
+        d.outbound.unsafe.length?d.outbound.unsafe.join('、'):'沙箱、身分、對外連線皆符合建議'));
+      cards.appendChild(card('健康與治理',String(d.health.issues.length)+' 項待處理',
+        d.health.errors+' 次失敗・'+d.health.failed_signins+' 次登入失敗'));
+
+      const table=document.createElement('table');table.className='tbl';
+      table.innerHTML='<tr><th>使用者</th><th>任務</th><th>tokens</th><th>工具呼叫</th></tr>';
+      d.people.top.forEach(r=>{
+        const tr=document.createElement('tr');
+        [r.user,r.tasks,r.tokens.toLocaleString(),r.tool_calls].forEach(v=>{
+          const td=document.createElement('td');td.textContent=v;tr.appendChild(td);});
+        table.appendChild(tr);
+      });
+      const h=document.createElement('div');h.className='nodehead';h.innerHTML='<h2>用量前幾名</h2>';
+      detail.appendChild(h);detail.appendChild(table);
+      if(d.health.issues.length){
+        const h2=document.createElement('div');h2.className='nodehead';
+        h2.innerHTML='<h2>待處理事項</h2><span class="m">報表不是只報喜：這些是系統自己的問題</span>';
+        detail.appendChild(h2);
+        d.health.issues.forEach(it=>{
+          const row=document.createElement('div');row.className='chk';
+          const st=document.createElement('span');st.className='st warn';st.textContent='待處理';
+          const bd=document.createElement('div');bd.className='bd';
+          const ti=document.createElement('div');ti.className='ti';ti.textContent=it.item;
+          const de=document.createElement('div');de.className='de';de.textContent=it.detail;
+          const fx=document.createElement('div');fx.className='fx';fx.textContent='建議：'+it.action;
+          bd.appendChild(ti);bd.appendChild(de);bd.appendChild(fx);
+          row.appendChild(st);row.appendChild(bd);detail.appendChild(row);
+        });
+      }
+    }catch(e){cards.textContent='';detail.textContent='報告產生失敗：'+e.message;}
+  }
+  document.querySelectorAll('#adm-rep [data-since]').forEach(b=>{
+    b.onclick=()=>{repSince=b.dataset.since;
+      document.querySelectorAll('#adm-rep [data-since]').forEach(x=>x.classList.toggle('primary',x===b));
+      loadReport();};
+  });
+  $('#rep-json').onclick=async()=>{
+    try{
+      const d=await api('/api/usage-report?since='+encodeURIComponent(repSince));
+      const url=URL.createObjectURL(new Blob([JSON.stringify(d,null,2)],{type:'application/json'}));
+      const a=document.createElement('a');a.href=url;a.download='xharness-usage-report.json';a.click();
+      URL.revokeObjectURL(url);
+    }catch(e){alert('下載失敗：'+e.message);}
+  };
+
+  async function loadUsers(){
+    const box=$('#usr-list');box.textContent='';
+    try{
+      const d=await api('/api/users');
+      const table=document.createElement('table');table.className='tbl';
+      table.innerHTML='<tr><th>帳號</th><th>顯示名稱</th><th>角色</th><th>每日上限</th><th>狀態</th><th></th></tr>';
+      d.users.forEach(u=>{
+        const tr=document.createElement('tr');
+        const cells=[u.name,u.display,u.role==='admin'?'管理者':'一般',
+          u.quota_tokens_per_day?u.quota_tokens_per_day.toLocaleString():'無限制',
+          u.disabled?'已停用':'使用中'];
+        cells.forEach(v=>{const td=document.createElement('td');td.textContent=v;tr.appendChild(td);});
+        const td=document.createElement('td');
+        if(!u.disabled){
+          const b=document.createElement('button');b.className='btn sm';b.textContent='停用';
+          b.onclick=async()=>{
+            if(!confirm('停用 '+u.name+'？歷史用量會保留，帳號不會被刪除。'))return;
+            try{await api('/api/users',{method:'POST',body:{action:'disable',user:u.name}});loadUsers();}
+            catch(e){$('#usr-err').textContent=e.message;}
+          };
+          td.appendChild(b);
+        }
+        tr.appendChild(td);table.appendChild(tr);
+      });
+      box.appendChild(table);
+    }catch(e){box.textContent='讀取失敗：'+e.message;}
+  }
+  $('#usr-form').addEventListener('submit',async e=>{
+    e.preventDefault();$('#usr-err').textContent='';
+    try{
+      await api('/api/users',{method:'POST',body:{action:'add',
+        user:$('#usr-name').value.trim(),password:$('#usr-pass').value,
+        role:$('#usr-role').value,display:$('#usr-display').value.trim()}});
+      $('#usr-name').value='';$('#usr-pass').value='';$('#usr-display').value='';
+      loadUsers();
+    }catch(err){$('#usr-err').textContent=err.message;}
+  });
+
   (async function init(){
-    try{const m=await api('/api/meta');$('#chip-model').textContent='model: '+m.model+(m.sandbox?' · sandbox '+m.sandbox:'')+' · approval '+m.approval;}
-    catch(e){el('error','錯誤',e.message);}
+    loadToken();
+    try{applyMeta(await api('/api/meta'));}
+    catch(e){if(!gateOn)el('error','錯誤',e.message);}
   })();
 })();
 </script>
