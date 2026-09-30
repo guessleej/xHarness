@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.4.2 — 2026-09-30
+
+- 修正 1.4.0 引入的問題：節點綁在對外位址並以 `[auth]` 取代共用 token 時，首頁被 `forbidden host` 擋住，等於開了帳號就進不了 UI。防 DNS rebinding 的 Host 檢查現在只在「完全沒有憑證」的安裝上生效——有 token 或有登入機制時，首頁照常提供（頁面本身不含任何資料，所有 `/api` 路由仍然要求憑證）。
+- Fix a 1.4.0 regression: a node bound to a non-loopback address that uses `[auth]` instead of a shared token had its index page refused with `forbidden host`, so enabling accounts made the UI unreachable. The DNS-rebinding Host check now applies only to an install with no credential at all; with a token or sign-in configured the page is served (it holds no data, and every `/api` route still demands a credential).
+
 ## 1.4.1 — 2026-09-30
 
 - 服務使用報告的「沙箱」項目改為**實際探測**後端，而不是照設定值回報：`auto` 在沒有可用後端的機器上（常見於 Ubuntu 24.04 停用未授權 user namespaces）會被列為未達建議設定並進入待處理事項，不再顯示「本期無異常」。報告的價值在於說出系統自己的問題，這一項原本說反了。

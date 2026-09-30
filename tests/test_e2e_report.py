@@ -252,3 +252,25 @@ def test_report_reports_a_working_sandbox_as_safe(server, monkeypatch):
     report = client.call("GET", "/api/usage-report")[1]
     sandbox = next(item for item in report["outbound"]["items"] if item["name"] == "沙箱")
     assert sandbox["safe"] is True and "bwrap" in sandbox["state"]
+
+
+def test_index_is_served_to_a_non_loopback_host_when_accounts_are_on(server):
+    """A node bound to the network with [auth] must serve its own UI: the sign-in
+    page is the credential prompt, and every /api route still requires one."""
+    client, _ = server
+    conn = http.client.HTTPConnection("127.0.0.1", client.port, timeout=10)
+    conn.request("GET", "/", headers={"Host": "school-node.example.edu:3080"})
+    response = conn.getresponse()
+    body = response.read().decode("utf-8", "replace")
+    conn.close()
+    assert response.status == 200 and "<!doctype html>" in body.lower()
+
+
+def test_api_still_refuses_that_host_without_a_credential(server):
+    client, _ = server
+    conn = http.client.HTTPConnection("127.0.0.1", client.port, timeout=10)
+    conn.request("GET", "/api/conversations", headers={"Host": "school-node.example.edu:3080"})
+    response = conn.getresponse()
+    response.read()
+    conn.close()
+    assert response.status == 401

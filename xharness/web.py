@@ -552,7 +552,12 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             parts = [p for p in url.path.split("/") if p]
             query = parse_qs(url.query)
             if not parts:
-                if not token and not self._host_ok():
+                # The loopback-Host check defeats DNS rebinding for an install with
+                # no credential at all. A token or a sign-in is a stronger answer to
+                # the same attack -- the page itself holds nothing, and every /api
+                # route still demands one -- so requiring both would only mean a
+                # node with accounts could never serve its own UI.
+                if not token and not app.users.enabled and not self._host_ok():
                     self._json(403, {"error": "forbidden host"})
                     return
                 self._html(INDEX_HTML)
