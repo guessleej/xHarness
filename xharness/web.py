@@ -356,8 +356,9 @@ class WebApp:
             return 404, {"error": "no such node"}
         return forward(target, conv_id, action, body)
 
-    def tools(self) -> dict[str, Any]:
-        """Every tool an agent here would get, grouped by source; the probe harness is built once."""
+    def tools(self, user: Any = None) -> dict[str, Any]:
+        """Every tool an agent here would get, grouped by source; the probe harness is
+        built once. A restricted tier is shown its own list, not everyone's."""
         with self.lock:
             convs = list(self.conversations.values())
         harness = convs[0].harness if convs else getattr(self, "_probe", None)
@@ -379,8 +380,12 @@ class WebApp:
         for name in (getattr(self.config, "mcp_servers", None) or {}):
             count = sum(1 for item in items if item["server"] == name)
             servers.append({"name": name, "tools": count, "ok": count > 0})
+        denied = set(getattr(user, "denied_tools", ()) or ())
+        if denied:
+            items = [item for item in items if item["name"] not in denied]
         sandbox = harness.ctx.optional("sandbox")
-        return {"tools": items, "mcp_servers": servers, "sandbox": sandbox.name if sandbox else None}
+        return {"tools": items, "mcp_servers": servers, "sandbox": sandbox.name if sandbox else None,
+                "denied": sorted(denied)}
 
     def memory_index(self) -> list[dict[str, Any]]:
         """Read-only view of what the agent remembers, straight from disk."""
@@ -680,7 +685,7 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 self._json(200, app.memory_index())
                 return
             if parts[1:] == ["tools"]:
-                self._json(200, app.tools())
+                self._json(200, app.tools(self.principal))
                 return
             if parts[1:] == ["usage"]:
                 since = (query.get("since") or ["7d"])[0]

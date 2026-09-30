@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.6.1 — 2026-09-30
+
+- `GET /api/tools`（側面板的「工具」區）改為依呼叫者的層級過濾：受限帳號不會再看到自己永遠拿不到的工具。清單本來就不該宣傳做不到的事。
+- `GET /api/tools` now filters by the caller's tier, so a restricted account no longer sees tools it will never be given. A capability list should not advertise what it cannot do.
+
 ## 1.6.0 — 2026-09-30
 
 使用者分層，以及檔案終於能從瀏覽器進來。1.4.0 把對話與用量隔離到人，但**檔案系統還是共用的**——同一台機器上的兩個帳號，一個 `write` 另一個就 `read` 得到。這一版補上。

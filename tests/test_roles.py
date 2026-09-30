@@ -91,3 +91,24 @@ def test_public_payload_exposes_the_tier(store):
     data = profile(store, "s", "student").public()
     assert data["role_label"] == "學生" and data["admin"] is False
     assert "bash" in data["denied_tools"]
+
+
+def test_tool_listing_hides_what_the_tier_cannot_use(tmp_path, monkeypatch):
+    """The side panel must not advertise tools a restricted account will never get."""
+    from xharness.web import WebApp
+
+    monkeypatch.setenv("XHARNESS_HOME", str(tmp_path))
+    store = UserStore(AUTH)
+    store.add("s", "a-long-password", role="student")
+    student, _ = store.authenticate("s", "a-long-password")
+    store.add("t", "a-long-password", role="teacher")
+    teacher, _ = store.authenticate("t", "a-long-password")
+
+    app = WebApp(CONFIG, approval_mode="auto")
+    try:
+        for_student = {item["name"] for item in app.tools(student)["tools"]}
+        for_teacher = {item["name"] for item in app.tools(teacher)["tools"]}
+        assert "bash" not in for_student and "bash" in for_teacher
+        assert "read" in for_student
+    finally:
+        app.dispose()
