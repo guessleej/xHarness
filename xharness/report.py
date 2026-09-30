@@ -23,6 +23,7 @@ from typing import Any
 
 from . import __version__
 from .identity import UserStore
+from .sandbox import resolve_sandbox
 from .session import session_owners
 from .usage import parse_since, task_records
 
@@ -185,7 +186,22 @@ def collect(
 
 def _outbound_posture(config: Any, users: UserStore | None) -> dict[str, Any]:
     """Block five: every way this install can reach something other than its model."""
-    sandbox = (getattr(config, "sandbox", {}) or {}).get("mode", "auto")
+    mode = str((getattr(config, "sandbox", {}) or {}).get("mode", "auto"))
+    # `auto` is a promise only where a backend actually probes clean. Asking the
+    # configuration is not enough: bwrap is often installed but unusable (Ubuntu
+    # 24.04 restricts unprivileged user namespaces), and a report that called
+    # that "safe" would be telling the customer the opposite of the truth.
+    try:
+        resolved = resolve_sandbox(getattr(config, "sandbox", None))
+        active = resolved.name if resolved else None
+    except (RuntimeError, ValueError):
+        active = None
+    sandbox_detail = {
+        "require": f"沒有後端就拒絕啟動，目前生效的是 {active}。",
+        "auto": (f"目前生效的是 {active}。" if active
+                 else "這台機器沒有可用的沙箱後端（常見原因：未裝 bwrap，或 Ubuntu 24.04 停用了未授權的 user namespaces），bash 工具的指令並未被圈住。"),
+        "off": "沙箱關閉，bash 工具可以寫到工作目錄以外的任何地方。",
+    }.get(mode, "設定值無法辨識。")
     items = [
         {
             "name": "模型端點",
@@ -201,8 +217,8 @@ def _outbound_posture(config: Any, users: UserStore | None) -> dict[str, Any]:
          "detail": f"{len(getattr(config, 'mcp_servers', None) or {})} 個 server，未標唯讀者一律走審批", "safe": True},
         {"name": "Telegram 通道", "state": "on" if (getattr(config, "channels", {}) or {}).get("telegram") else "off",
          "detail": "只服務 allowed_chats 名單", "safe": True},
-        {"name": "沙箱", "state": str(sandbox),
-         "detail": "require 才保證圈住；auto 在沒有後端的機器會退回無沙箱", "safe": sandbox != "off"},
+        {"name": "沙箱", "state": f"{mode}（{active}）" if active else f"{mode}（無後端）",
+         "detail": sandbox_detail, "safe": bool(active)},
         {"name": "使用者身分", "state": "on" if (users and users.enabled) else "off",
          "detail": "關閉時用量與稽核歸不到人", "safe": bool(users and users.enabled)},
         {"name": "遙測外傳", "state": "off", "detail": "xHarness 不對外回傳任何使用資料", "safe": True},
@@ -256,11 +272,15 @@ def _issues(
             "detail": f"本期有 {unattributed['tokens']} tokens／{unattributed['tasks']} 個任務落在共用目錄，多半來自直接執行 CLI 的人。",
             "action": "請這些使用者改由 Web UI 登入後操作，或為排程任務建立專用帳號。",
         })
-    for name in outbound["unsafe"]:
+    for item in outbound["items"]:
+        if item["safe"]:
+            continue
         issues.append({
-            "item": f"{name} 未達建議設定",
-            "detail": "這一項目前的設定會讓稽核或隔離出現缺口。",
-            "action": "見「對外串接」一節的說明欄。",
+            "item": f"{item['name']} 未達建議設定",
+            "detail": item["detail"],
+            "action": ("裝上 bwrap 並確認 user namespaces 可用，或依機關政策改寫 AppArmor profile；"
+                       "見交付指南「沙箱」一節。" if item["name"] == "沙箱"
+                       else "見「對外串接」一節的說明欄。"),
         })
     for node in machines["unreachable"]:
         issues.append({

@@ -2,6 +2,13 @@
 
 中文 | English below
 
+## 1.4.1 — 2026-09-30
+
+- 服務使用報告的「沙箱」項目改為**實際探測**後端，而不是照設定值回報：`auto` 在沒有可用後端的機器上（常見於 Ubuntu 24.04 停用未授權 user namespaces）會被列為未達建議設定並進入待處理事項，不再顯示「本期無異常」。報告的價值在於說出系統自己的問題，這一項原本說反了。
+- 新增 [學校與公部門部署指南](docs/deployment-school.zh.md)：三層架構、模型來源國確認、多使用者節點與 LDAP 設定、桌面版發佈、Ubuntu 24.04 的 user namespaces 問題與三條處理路徑、九項交付前檢查清單、每月例行工作。
+- The usage report's sandbox entry now **probes** the backend instead of trusting the configured mode: `auto` on a machine with no working backend (commonly Ubuntu 24.04, which restricts unprivileged user namespaces) is reported as below the recommended setting and raised as an issue, rather than contributing to "no anomalies this period". A report exists to state the system's own problems, and this one had it backwards.
+- New [deployment guide for schools and public-sector sites](docs/deployment-school.zh.md): the three-layer architecture, confirming a model's country of origin, multi-user and LDAP configuration, shipping the desktop build, the Ubuntu 24.04 user-namespace problem with three ways out, a nine-item acceptance checklist, and the monthly routine.
+
 ## 1.4.0 — 2026-09-30
 
 多使用者與交付治理：一台機器可以同時服務一群人，而且說得出誰用了什麼、花了多少、安不安全。

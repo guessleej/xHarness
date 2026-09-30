@@ -223,3 +223,32 @@ def test_csrf_header_still_required(server):
     conn.request("POST", "/api/login", body="{}", headers={"Host": f"127.0.0.1:{client.port}"})
     assert conn.getresponse().status == 403
     conn.close()
+
+
+def test_report_does_not_call_an_unusable_sandbox_safe(server, monkeypatch):
+    """`auto` with no working backend means commands are not contained; the report
+    must say so rather than showing a clean bill of health."""
+    import xharness.report as report_module
+
+    client, _ = server
+    client.sign_in("admin1", "a-long-password")
+    monkeypatch.setattr(report_module, "resolve_sandbox", lambda _config: None)
+    report = client.call("GET", "/api/usage-report")[1]
+    sandbox = next(item for item in report["outbound"]["items"] if item["name"] == "沙箱")
+    assert sandbox["safe"] is False
+    assert "沙箱" in report["outbound"]["unsafe"]
+    assert any("沙箱" in issue["item"] for issue in report["health"]["issues"])
+
+
+def test_report_reports_a_working_sandbox_as_safe(server, monkeypatch):
+    import xharness.report as report_module
+
+    class Backend:
+        name = "bwrap"
+
+    client, _ = server
+    client.sign_in("admin1", "a-long-password")
+    monkeypatch.setattr(report_module, "resolve_sandbox", lambda _config: Backend())
+    report = client.call("GET", "/api/usage-report")[1]
+    sandbox = next(item for item in report["outbound"]["items"] if item["name"] == "沙箱")
+    assert sandbox["safe"] is True and "bwrap" in sandbox["state"]
