@@ -2,6 +2,22 @@
 
 中文 | English below
 
+## 1.5.0 — 2026-09-30
+
+Web UI 重新排版。舊版把狀態晶片和導覽按鈕塞在同一列，人一多、晶片一長就擠成三行把按鈕推開；空狀態只有兩行字，中間留一大片白。
+
+- **導覽列改成三段式且永不換行**：左邊 logo，中間橫向導覽（新對話／艦隊／管理／紀錄，目前所在用淡色底標示），右邊使用者選單。模型、沙箱、審批模式與今日配額（含進度條）收進使用者選單，不再佔用工具列。
+- **空狀態重做**：置中的標題與說明，下方四張建議任務卡（點一下直接送出），內容在視窗內垂直置中，緩慢漂移的品牌光暈給深色以外的層次。有對話之後這一整區收起，換成一條狀態列顯示目前對話、執行狀態與用量。
+- **行動版**：導覽在 375px 下原本重疊，現在第一列放 logo 與使用者頭像、第二列放可橫向捲動的導覽；建議卡改單欄，hero 字級與間距一併調整。
+- 尊重 `prefers-reduced-motion`：關閉光暈漂移與卡片進場動畫。
+
+The Web UI has been re-laid out. The old toolbar mixed status chips with navigation buttons, so a longer chip pushed the buttons onto a third row; the empty state was two lines of text above a large blank area.
+
+- **Three-zone toolbar that never wraps**: wordmark, horizontal navigation (new chat / fleet / admin / history, with the current view on a tinted background), and a user menu. Model, sandbox, approval mode and today's quota (with a meter) moved into that menu instead of crowding the toolbar.
+- **Rebuilt empty state**: a centred heading and description over four starter cards that send their task on click, vertically centred in the viewport, with a slow brand-coloured glow for depth. Once a conversation starts the whole area collapses into a single status row.
+- **Phone layout**: the toolbar used to overlap at 375px; the wordmark and avatar now share the first row and the navigation scrolls sideways on the second. Starter cards go single-column, with hero type and spacing adjusted to match.
+- `prefers-reduced-motion` turns off the glow and the card entrance animation.
+
 ## 1.4.2 — 2026-09-30
 
 - 修正 1.4.0 引入的問題：節點綁在對外位址並以 `[auth]` 取代共用 token 時，首頁被 `forbidden host` 擋住，等於開了帳號就進不了 UI。防 DNS rebinding 的 Host 檢查現在只在「完全沒有憑證」的安裝上生效——有 token 或有登入機制時，首頁照常提供（頁面本身不含任何資料，所有 `/api` 路由仍然要求憑證）。

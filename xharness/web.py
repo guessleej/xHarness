@@ -922,7 +922,35 @@ a{color:var(--brand)}
   background:rgba(244,247,249,.72);transition:box-shadow .25s,background .25s}
 :root[data-theme="dark"] .nav{background:rgba(13,25,34,.66)}
 .nav.scrolled{box-shadow:var(--shadow-sm)}
-.nav .in{max-width:1080px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.nav .in{max-width:1180px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.nav .sp{flex:1}
+.navlinks{display:flex;gap:2px;align-items:center;min-width:0}
+.navlink{font:inherit;font-size:14px;font-weight:600;padding:8px 13px;border-radius:10px;border:0;cursor:pointer;
+  background:transparent;color:var(--ink-2);white-space:nowrap;transition:background .2s,color .2s}
+.navlink:hover{background:var(--tint);color:var(--ink)}
+.navlink.on{background:var(--tint);color:var(--brand)}
+/* user menu: identity and the things that belong to it, out of the toolbar */
+.who-wrap{position:relative}
+.whobtn{display:flex;align-items:center;gap:8px;font:inherit;font-size:14px;padding:6px 10px 6px 6px;border-radius:999px;
+  border:0;cursor:pointer;background:var(--tint);color:var(--ink);white-space:nowrap}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;
+  font-size:13px;font-weight:700;flex:none}
+.menu{position:absolute;right:0;top:calc(100% + 8px);min-width:248px;background:var(--card);border-radius:14px;
+  box-shadow:var(--shadow);padding:8px;display:none;z-index:40}
+.menu.open{display:block}
+.menu .mhead{padding:10px 12px 8px}
+.menu .mname{font-weight:700}
+.menu .mrole{font-size:13px;color:var(--ink-3)}
+.menu .mrow{padding:9px 12px;font-size:14px;color:var(--ink-2);display:flex;justify-content:space-between;gap:12px}
+.menu .mitem{width:100%;text-align:left;font:inherit;font-size:14px;padding:9px 12px;border-radius:9px;border:0;
+  cursor:pointer;background:transparent;color:var(--ink)}
+.menu .mitem:hover{background:var(--tint)}
+.menu .msep{height:1px;background:rgba(107,122,133,.16);margin:6px 8px}
+.meter{height:5px;border-radius:99px;background:rgba(107,122,133,.18);overflow:hidden;margin-top:6px}
+.meter i{display:block;height:100%;background:var(--brand);border-radius:99px}
+/* run status lives with the transcript, not in the toolbar */
+.statusbar{display:none;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 14px}
+.statusbar.on{display:flex}
 .brand{font-weight:800;font-size:20px;letter-spacing:.2px;color:var(--brand);text-decoration:none}
 .chips{display:flex;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
 .chip{font-size:13px;padding:4px 10px;border-radius:999px;background:var(--tint);color:var(--ink-2);white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
@@ -970,10 +998,27 @@ a{color:var(--brand)}
 .uform input,.uform select{font:inherit;font-size:14px;padding:8px 10px;border-radius:10px;background:var(--card);
   color:var(--ink);border:1px solid rgba(107,122,133,.3)}
 @media (max-width:640px){
-  /* Chips carry status, not decoration: on a phone they scroll sideways in
-     their own row instead of stacking one character wide. */
-  .chips{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;flex-basis:100%;order:3}
-  .chips::-webkit-scrollbar{display:none}
+  /* Phone layout: identity stays on the first row next to the wordmark, the
+     navigation drops to its own scrollable row. Nothing overlaps, and no
+     hamburger hides four buttons that fit on one line. */
+  .nav .in{flex-wrap:wrap;gap:6px;padding:8px 16px}
+  .nav .sp{display:none}
+  .brand{order:1}
+  .who-wrap{order:2;margin-left:auto}
+  .whobtn{padding:4px}
+  #who-name{display:none}
+  .navlinks{order:3;flex-basis:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .navlinks::-webkit-scrollbar{display:none}
+  .navlink{flex:none}
+  .menu{right:0;min-width:min(280px,calc(100vw - 32px))}
+  .hero{padding:24px 0 20px}
+  .hero h1{font-size:30px}
+  .hero p{font-size:15px}
+  .starters{grid-template-columns:1fr;gap:10px}
+  .starter{min-height:0}
+  main{padding-bottom:196px}   /* the composer is two lines tall on a phone */
+  body.landing main{min-height:0;display:block;padding-top:16px}
+  .statusbar{margin-bottom:10px}
   .chip{max-width:none;flex-shrink:0}
   .scroll{max-height:none;overflow:visible}
   .tbl{display:block;overflow-x:auto;white-space:nowrap}
@@ -985,10 +1030,33 @@ a{color:var(--brand)}
 .btn.primary{background:var(--brand);color:#fff}
 .btn.primary:hover{background:var(--brand-dark)}
 .btn:disabled{opacity:.55;cursor:not-allowed}
-main{max-width:1080px;margin:0 auto;padding:22px 16px 160px}
-.hero{padding:26px 0 8px}
-.hero h1{margin:0 0 4px;font-size:30px;line-height:1.2}
-.hero p{margin:0;color:var(--ink-3);font-size:15px}
+main{max-width:1080px;margin:0 auto;padding:10px 16px 170px}
+body.landing main{min-height:calc(100vh - 210px);display:flex;flex-direction:column;justify-content:center;padding-bottom:40px}
+body.landing .hero{padding-top:0}
+.hero{position:relative;padding:64px 0 30px;text-align:center;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:-40% -20% auto;height:420px;pointer-events:none;z-index:-1;
+  background:radial-gradient(closest-side,rgba(191,24,31,.13),transparent 70%);
+  animation:drift 26s ease-in-out infinite}
+@keyframes drift{0%,100%{transform:translate3d(-4%,0,0) scale(1)}50%{transform:translate3d(6%,3%,0) scale(1.12)}}
+.hero h1{margin:0 0 10px;font-size:40px;line-height:1.15;letter-spacing:-.5px}
+.hero p{margin:0 auto;color:var(--ink-3);font-size:16px;max-width:560px}
+.starters{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:12px;margin:26px 0 8px}
+.starter{display:flex;flex-direction:column;gap:6px;text-align:left;font:inherit;padding:16px 18px;min-height:104px;
+  border-radius:15px;border:0;cursor:pointer;
+  background:var(--card);color:var(--ink);box-shadow:var(--shadow-sm);
+  transition:transform .22s cubic-bezier(.22,.8,.3,1),box-shadow .22s;
+  opacity:0;transform:translateY(16px);animation:rise .6s cubic-bezier(.22,.8,.3,1) forwards}
+.starter:nth-child(2){animation-delay:.07s}
+.starter:nth-child(3){animation-delay:.14s}
+.starter:nth-child(4){animation-delay:.21s}
+.starter:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+.starter .sk{display:block;font-size:12px;font-weight:700;letter-spacing:.4px;color:var(--brand)}
+.starter .sv{display:block;font-size:15px;line-height:1.5}
+@keyframes rise{to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  .hero::before{animation:none}
+  .starter{animation:none;opacity:1;transform:none}
+}
 .msg{background:var(--card);border-radius:16px;padding:16px 18px;margin:14px 0;box-shadow:var(--shadow-sm);
   opacity:0;transform:translateY(14px);animation:rv .45s cubic-bezier(.22,.8,.3,1) forwards}
 @keyframes rv{to{opacity:1;transform:none}}
@@ -1007,11 +1075,11 @@ main{max-width:1080px;margin:0 auto;padding:22px 16px 160px}
 @keyframes blink{50%{opacity:0}}
 .composer{position:fixed;left:0;right:0;bottom:0;z-index:15;backdrop-filter:blur(14px);background:rgba(244,247,249,.82)}
 :root[data-theme="dark"] .composer{background:rgba(13,25,34,.8)}
-.composer .in{max-width:1080px;margin:0 auto;padding:14px 16px;display:flex;gap:10px;align-items:flex-end}
-textarea{flex:1;font:inherit;font-size:15px;line-height:1.5;padding:12px 14px;border:0;border-radius:14px;resize:none;min-height:48px;max-height:220px;
-  background:var(--card);color:var(--ink);box-shadow:var(--shadow-sm);outline:none}
+.composer .in{max-width:860px;margin:0 auto;padding:16px;display:flex;gap:10px;align-items:flex-end}
+textarea{flex:1;font:inherit;font-size:15px;line-height:1.5;padding:14px 16px;border:0;border-radius:16px;resize:none;min-height:54px;max-height:220px;
+  background:var(--card);color:var(--ink);box-shadow:var(--shadow);outline:none}
 textarea:focus{box-shadow:0 0 0 3px rgba(191,24,31,.18),var(--shadow-sm)}
-.hint{font-size:12px;color:var(--ink-3);max-width:1080px;margin:0 auto;padding:0 16px 10px}
+.hint{font-size:12px;color:var(--ink-3);max-width:860px;margin:0 auto;padding:0 16px 12px;text-align:center}
 .panel{position:fixed;top:0;right:0;bottom:0;width:min(420px,92vw);z-index:30;background:var(--card);box-shadow:var(--shadow);
   transform:translateX(105%);transition:transform .35s cubic-bezier(.22,.8,.3,1);display:flex;flex-direction:column}
 .panel.open{transform:none}
@@ -1030,7 +1098,7 @@ textarea:focus{box-shadow:0 0 0 3px rgba(191,24,31,.18),var(--shadow-sm)}
 .sec{font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-3);padding:12px 12px 4px}
 #fleet{display:none}
 body.fleet #fleet{display:block}
-body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
+body.fleet #transcript,body.fleet #hero,body.fleet #starters,body.fleet #statusbar,body.fleet .composer{display:none}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0}
 .kpi{background:var(--card);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow-sm)}
 .kpi .n{font-size:28px;font-weight:800;line-height:1.1}
@@ -1100,27 +1168,67 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
 
 <nav class="nav" id="nav"><div class="in">
   <a class="brand" href="#">xHarness</a>
-  <div class="chips">
-    <span class="chip" id="chip-model">model: -</span>
-    <span class="chip" id="chip-usage">usage: 0 tokens</span>
-    <span class="chip" id="chip-status">閒置</span>
-    <span class="chip" id="chip-conv" title="目前對話">對話：尚未建立</span>
-    <span class="chip" id="chip-quota" hidden title="本期配額"></span>
-    <span class="chip" id="chip-user" hidden></span>
+  <div class="navlinks">
+    <button class="navlink on" id="btn-new">新對話</button>
+    <button class="navlink" id="btn-fleet">艦隊</button>
+    <button class="navlink" id="btn-admin" hidden>管理</button>
+    <button class="navlink" id="btn-list">紀錄</button>
   </div>
-  <button class="btn" id="btn-new">新對話</button>
-  <button class="btn" id="btn-fleet">艦隊</button>
-  <button class="btn" id="btn-admin" hidden>管理</button>
-  <button class="btn" id="btn-list">對話與紀錄</button>
-  <button class="btn" id="btn-theme" aria-label="切換主題">主題</button>
-  <button class="btn" id="btn-logout" hidden>登出</button>
+  <span class="sp"></span>
+  <div class="who-wrap">
+    <button class="whobtn" id="btn-who" aria-haspopup="true" aria-expanded="false">
+      <span class="avatar" id="who-initial">X</span>
+      <span id="who-name">本機操作者</span>
+    </button>
+    <div class="menu" id="who-menu" role="menu">
+      <div class="mhead">
+        <div class="mname" id="menu-name">本機操作者</div>
+        <div class="mrole" id="menu-role">未啟用帳號</div>
+      </div>
+      <div class="msep"></div>
+      <div class="mrow"><span>模型</span><span id="menu-model">-</span></div>
+      <div class="mrow"><span>沙箱</span><span id="menu-sandbox">-</span></div>
+      <div class="mrow" id="menu-quota-row" hidden>
+        <span style="flex:1">今日配額
+          <div class="meter"><i id="menu-quota-bar" style="width:0%"></i></div>
+        </span>
+        <span id="menu-quota-text"></span>
+      </div>
+      <div class="msep"></div>
+      <button class="mitem" id="btn-theme">切換深色／淺色</button>
+      <button class="mitem" id="btn-logout" hidden>登出</button>
+    </div>
+  </div>
 </div></nav>
 
 <main>
   <section class="hero" id="hero">
     <h1>管得住的 agent。</h1>
-    <p>輸入任務，模型會用工具讀寫檔案與執行指令；有副作用的動作會先問你。</p>
+    <p>輸入任務，模型會用工具讀寫檔案與執行指令。有副作用的動作一律先問過你，每一步都留下記錄。</p>
   </section>
+  <div class="starters" id="starters">
+    <button class="starter" data-task="摘要這個工作目錄在做什麼，先看有哪些檔案再回答。">
+      <span class="sk">認識專案</span>
+      <span class="sv">摘要這個工作目錄在做什麼</span>
+    </button>
+    <button class="starter" data-task="列出這個目錄最近修改過的 10 個檔案，說明各自的用途。">
+      <span class="sk">找東西</span>
+      <span class="sv">最近改過哪些檔案，各自在做什麼</span>
+    </button>
+    <button class="starter" data-task="對這個目錄跑一次 security_scan，並用白話解釋每一項發現。">
+      <span class="sk">資安</span>
+      <span class="sv">掃一次這個專案的資安問題</span>
+    </button>
+    <button class="starter" data-task="這個專案如果要交給新同事接手，最需要先讀的三個檔案是哪些？為什麼？">
+      <span class="sk">交接</span>
+      <span class="sv">新同事接手該先讀哪三個檔案</span>
+    </button>
+  </div>
+  <div class="statusbar" id="statusbar">
+    <span class="chip" id="chip-conv">對話：尚未建立</span>
+    <span class="chip" id="chip-status">閒置</span>
+    <span class="chip" id="chip-usage">usage: 0 tokens</span>
+  </div>
   <div id="transcript"></div>
   <section id="fleet">
     <div class="hero"><h1>艦隊視圖</h1><p>所有進行中的對話與子代理，一眼看完狀態、用量與等待中的許可；可就地審批或停止。</p></div>
@@ -1217,8 +1325,20 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   let me=null,admin=false,gateOn=false,admOn=false,repSince='30d';
   function shortTitle(t){t=(t||'').trim();return t?(t.length>18?t.slice(0,18)+'…':t):'尚未送出訊息';}
   function setCurrent(id,preview){conv=id;convPreview=preview||'';
-    $('#chip-conv').textContent=id?'對話：'+shortTitle(convPreview):'對話：尚未建立';
-    $('#btn-fleet').textContent=fleetOn?(id?'回到對話：'+shortTitle(convPreview):'離開艦隊'):'艦隊';}
+    $('#chip-conv').textContent=id?'對話：'+shortTitle(convPreview):'對話：尚未建立';}
+  // The empty state (hero + starters) and the run status are mutually exclusive:
+  // a toolbar full of chips before anything has happened is noise.
+  function showEmptyState(on){
+    $('#hero').style.display=on?'':'none';
+    $('#starters').style.display=on?'':'none';
+    $('#statusbar').classList.toggle('on',!on);
+    document.body.classList.toggle('landing',on);
+  }
+  function setNav(which){
+    [['chat','#btn-new'],['fleet','#btn-fleet'],['admin','#btn-admin']].forEach(([key,sel])=>{
+      const el=$(sel); if(el)el.classList.toggle('on',key===which);
+    });
+  }
   let fleetTimer=null,fleetOn=false;
 
   // theme
@@ -1251,8 +1371,8 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   function finishAssistant(){if(assistantEl){const c=assistantEl.querySelector('.cursor');if(c)c.remove();}assistantEl=null;assistantText='';}
 
   function handle(ev){
-    if(ev.type==='user'){$('#hero').style.display='none';el('user','你',ev.text);setStatus('執行中…',true);if(!convPreview)setCurrent(conv,ev.text);}
-    else if(ev.type==='history'){$('#hero').style.display='none';el(ev.role==='user'?'user':'assistant',ev.role==='user'?'你':'xHarness',ev.text);if(ev.role==='user'&&!convPreview)setCurrent(conv,ev.text);}
+    if(ev.type==='user'){showEmptyState(false);el('user','你',ev.text);setStatus('執行中…',true);if(!convPreview)setCurrent(conv,ev.text);}
+    else if(ev.type==='history'){showEmptyState(false);el(ev.role==='user'?'user':'assistant',ev.role==='user'?'你':'xHarness',ev.text);if(ev.role==='user'&&!convPreview)setCurrent(conv,ev.text);}
     else if(ev.type==='delta'){
       if(!assistantEl){assistantEl=el('assistant','xHarness','');const c=document.createElement('span');c.className='cursor';assistantEl.querySelector('.body').appendChild(c);}
       assistantText+=ev.text;const body=assistantEl.querySelector('.body');body.textContent=assistantText;const c=document.createElement('span');c.className='cursor';body.appendChild(c);
@@ -1287,7 +1407,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
 
   async function newConversation(resume){
     const c=await api('/api/conversations',{method:'POST',body:resume?{resume}:{}});
-    setCurrent(c.id,'');transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display=resume?'none':'';
+    setCurrent(c.id,'');transcript.innerHTML='';assistantEl=null;assistantText='';showEmptyState(!resume);
     hint.textContent='對話 '+c.id+' · session '+c.session;setStatus('閒置',false);await connect(conv,0);refreshList();closePanel();if(fleetOn)toggleFleet(false);input.focus();return c;
   }
 
@@ -1309,7 +1429,10 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   function autosize(){input.style.height='auto';input.style.height=Math.min(220,input.scrollHeight)+'px';}
   input.addEventListener('input',autosize);
   $('#btn-send').onclick=send;
-  $('#btn-new').onclick=()=>newConversation();
+  $('#btn-new').onclick=()=>{if(admOn)toggleAdmin(false);if(fleetOn)toggleFleet(false);setNav('chat');newConversation();};
+  document.querySelectorAll('.starter').forEach(button=>{
+    button.onclick=()=>{input.value=button.dataset.task;input.focus();send();};
+  });
 
   // panel
   const panel=$('#panel'),backdrop=$('#backdrop');
@@ -1325,7 +1448,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
         d.innerHTML='<div class="t"></div><div class="m"><span class="dot'+(c.running?' run':'')+'"></span><span></span></div>';
         d.querySelector('.t').textContent=c.preview||'(尚未送出訊息)';
         d.querySelector('.m span:last-child').textContent=(c.usage?c.usage.total_tokens+' tokens · ':'')+'session '+c.session;
-        d.onclick=async()=>{if(c.id===conv){closePanel();if(fleetOn)toggleFleet(false);return;}setCurrent(c.id,c.preview);transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display='none';hint.textContent='對話 '+c.id+' · session '+c.session;await connect(conv,0);closePanel();if(fleetOn)toggleFleet(false);};
+        d.onclick=async()=>{if(c.id===conv){closePanel();if(fleetOn)toggleFleet(false);return;}setCurrent(c.id,c.preview);transcript.innerHTML='';assistantEl=null;assistantText='';showEmptyState(false);hint.textContent='對話 '+c.id+' · session '+c.session;await connect(conv,0);closePanel();if(fleetOn)toggleFleet(false);};
         box.appendChild(d);});
       const sessions=await api('/api/sessions');const sb=$('#sessions');sb.innerHTML='';
       sessions.slice(0,30).forEach(s=>{const d=document.createElement('div');d.className='item';
@@ -1391,7 +1514,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
         const acts=c.querySelector('.acts');
         const open=document.createElement('button');open.className='btn sm'+((!node&&it.id===conv)?' primary':'');open.textContent=node?'在節點開啟':((it.id===conv)?'回到此對話':'開啟');
         if(node){open.onclick=()=>window.open(node.url,'_blank','noopener');}
-        else{open.onclick=async()=>{setCurrent(it.id,it.preview);transcript.innerHTML='';assistantEl=null;assistantText='';$('#hero').style.display='none';hint.textContent='對話 '+it.id+' · session '+it.session;await connect(conv,0);toggleFleet(false);};}
+        else{open.onclick=async()=>{setCurrent(it.id,it.preview);transcript.innerHTML='';assistantEl=null;assistantText='';showEmptyState(false);hint.textContent='對話 '+it.id+' · session '+it.session;await connect(conv,0);toggleFleet(false);};}
         acts.appendChild(open);
         if(it.running){const st=document.createElement('button');st.className='btn ghost sm';st.textContent='停止';st.onclick=()=>api(base+'/stop',{method:'POST',body:{}}).then(renderFleet);acts.appendChild(st);}
         return c;}
@@ -1445,7 +1568,7 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   function toggleFleet(on){fleetOn=on;document.body.classList.toggle('fleet',on);setCurrent(conv,convPreview);
     if(fleetTimer){clearInterval(fleetTimer);fleetTimer=null;}
     if(on){renderFleet();loadUsage();fleetTimer=setInterval(()=>{if(!document.hidden)renderFleet();},2000);}}
-  $('#btn-fleet').onclick=()=>toggleFleet(!fleetOn);
+  $('#btn-fleet').onclick=()=>{if(admOn)toggleAdmin(false);toggleFleet(!fleetOn);setNav(fleetOn?'fleet':'chat');};
 
   // --- identity ---------------------------------------------------
   function saveToken(){try{token?localStorage.setItem('xh-token',token):localStorage.removeItem('xh-token')}catch(e){}}
@@ -1487,10 +1610,14 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   };
 
   function applyMeta(m){
-    $('#chip-model').textContent='model: '+m.model+(m.sandbox?' · sandbox '+m.sandbox:'')+' · approval '+m.approval;
+    $('#menu-model').textContent=m.model;
+    $('#menu-sandbox').textContent=(m.sandbox||'無')+' · 審批 '+m.approval;
     me=m.user;admin=!!m.admin;
     if(m.identity&&me){
-      $('#chip-user').hidden=false;$('#chip-user').textContent=me.display+(me.role==='admin'?'（管理者）':'');
+      $('#who-name').textContent=me.display;
+      $('#who-initial').textContent=(me.display||me.name).trim().charAt(0);
+      $('#menu-name').textContent=me.display;
+      $('#menu-role').textContent=me.role==='admin'?'管理者':'一般使用者';
       $('#btn-logout').hidden=false;
     }
     $('#btn-admin').hidden=!admin;
@@ -1502,8 +1629,10 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
       const d=await api('/api/me');
       const q=d.quota&&d.quota.day;
       if(q&&q.limit){
-        $('#chip-quota').hidden=false;
-        $('#chip-quota').textContent='今日配額 '+Math.round(q.used/q.limit*100)+'%（剩 '+q.remaining.toLocaleString()+' tokens）';
+        const pct=Math.min(100,Math.round(q.used/q.limit*100));
+        $('#menu-quota-row').hidden=false;
+        $('#menu-quota-bar').style.width=pct+'%';
+        $('#menu-quota-text').textContent=pct+'%';
       }
     }catch(e){}
   }
@@ -1518,11 +1647,12 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
   }
   function toggleAdmin(on){
     admOn=on;$('#admin').classList.toggle('on',on);
-    $('#transcript').hidden=on;$('#hero').hidden=on||!!conv;$('#fleet').classList.remove('on');
+    $('#transcript').hidden=on;$('#hero').hidden=on;$('#starters').hidden=on;$('#statusbar').hidden=on;
+    $('#fleet').classList.remove('on');
     document.querySelector('.composer').style.display=on?'none':'';
     if(on){if(fleetOn)toggleFleet(false);admShow('sec');}
   }
-  $('#btn-admin').onclick=()=>toggleAdmin(!admOn);
+  $('#btn-admin').onclick=()=>{if(fleetOn)toggleFleet(false);toggleAdmin(!admOn);setNav(admOn?'admin':'chat');};
   document.querySelectorAll('[data-adm]').forEach(b=>{b.onclick=()=>admShow(b.dataset.adm);});
 
   const VERDICT={pass:'通過',warn:'有建議事項',fail:'有必須修正的項目'};
@@ -1651,7 +1781,20 @@ body.fleet #transcript,body.fleet #hero,body.fleet .composer{display:none}
     }catch(err){$('#usr-err').textContent=err.message;}
   });
 
+  const whoMenu=$('#who-menu');
+  $('#btn-who').onclick=e=>{
+    e.stopPropagation();
+    const open=whoMenu.classList.toggle('open');
+    $('#btn-who').setAttribute('aria-expanded',String(open));
+    if(open)refreshQuota();
+  };
+  document.addEventListener('click',e=>{
+    if(!whoMenu.contains(e.target))whoMenu.classList.remove('open');
+  });
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')whoMenu.classList.remove('open');});
+
   (async function init(){
+    document.body.classList.add('landing');   // nothing has happened yet ('empty' is taken by the empty-list style)
     loadToken();
     try{applyMeta(await api('/api/meta'));}
     catch(e){if(!gateOn)el('error','錯誤',e.message);}
