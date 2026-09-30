@@ -110,3 +110,36 @@ model = "your-model-id"
 # node = true
 # node_port = 3080
 # token_file = "~/.xharness/desktop-node-token"   # 不存在會自動產生（chmod 600）
+
+# ── 使用者分層 ──────────────────────────────────────────────
+# 內建兩層 admin／user 一直都在；下面可以定義學校實際需要的層級。
+# 每一層可以設：顯示名稱、是不是管理者、拿不到哪些工具、預設配額。
+# [auth.roles.principal]
+# label = "校長室"
+# admin = true                  # 看得到管理頁與全體用量報告
+#
+# [auth.roles.itadmin]
+# label = "資訊中心"
+# admin = true
+#
+# [auth.roles.teacher]
+# label = "教師"
+# quota_tokens_per_day = 200000
+#
+# [auth.roles.student]
+# label = "學生"
+# quota_tokens_per_day = 30000
+# deny_tools = ["bash", "write", "edit", "security_scan", "subagent", "subagent_batch"]
+#   ↑ 拿不到的工具是「不存在」不是「被拒絕」：它們根本不會出現在模型的工具清單裡，
+#     所以學生問「幫我刪掉這個檔案」時，模型不會先答應再失敗。
+
+# ── 上傳檔案 ────────────────────────────────────────────────
+# 啟用 [auth] 後，每個人有自己的工作目錄（$XHARNESS_HOME/workspaces/u/<帳號>/），
+# 從瀏覽器上傳的檔案落在它的 uploads/ 底下，agent 就在這個目錄裡工作。
+# 沒有啟用 [auth] 時，agent 使用啟動伺服器時的工作目錄，行為與以前相同。
+# [files]
+# max_file_mb = 25             # 單檔上限
+# max_total_mb = 500           # 每個人的總量上限
+# retention_days = 0           # 0 = 不自動刪除
+# allowed_extensions = ["pdf", "docx", "xlsx", "csv", "txt", "md", "png", "jpg"]
+#   ↑ 不設就用內建白名單（文件、資料、圖片、常見程式碼檔）。可執行檔一律不在內。

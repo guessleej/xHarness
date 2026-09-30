@@ -37,6 +37,7 @@ from .memory import MemoryStore, default_memory_dir
 from .presets import build_harness
 from .quota import QuotaGuard
 from .redact import scrub
+from . import multipart, workspace
 from .report import collect as collect_report
 from . import seccheck
 from .sandbox import resolve_sandbox
@@ -178,6 +179,7 @@ class WebApp:
         self.nodes = {node.name: node for node in load_nodes(config.fleet)}
         self.telegram: TelegramBridge | None = None
         self.users = UserStore(getattr(config, "auth", {}) or {})
+        self.file_rules = workspace.FileRules.from_config(getattr(config, "files", None))
         #: Recorded for the security self-check, which has to know how we are exposed.
         self.bound_host: str | None = None
         self.has_token = False
@@ -221,6 +223,7 @@ class WebApp:
         agent = Agent(
             harness.ctx,
             AgentOptions(
+                cwd=workspace.ensure(principal_name(user)),
                 system_prompt=self.config.system_prompt,
                 system_suffix=extra_system,
                 max_turns=self.config.max_turns or AgentOptions.max_turns,
@@ -418,6 +421,37 @@ class WebApp:
         if entry is None or entry[0] <= time.time():
             return False, None
         return True, entry[1]
+
+    def store_upload(self, user: Any, filename: str, data: bytes) -> dict[str, Any]:
+        """Land one uploaded file in its owner's uploads directory and audit it."""
+        name = principal_name(user)
+        if not name:
+            raise workspace.UploadRefused("這個伺服器沒有啟用帳號，無法接收上傳")
+        workspace.ensure(name)
+        record = workspace.store(name, filename, data, self.file_rules)
+        self.users.audit("upload", name, True, f"{record['name']} ({record['bytes']} bytes)")
+        return record
+
+    def files(self, user: Any) -> dict[str, Any]:
+        name = principal_name(user)
+        items = workspace.listing(name) if name else []
+        return {
+            "files": items,
+            "used_bytes": sum(item["bytes"] for item in items),
+            "max_total_bytes": self.file_rules.max_total_bytes,
+            "max_file_bytes": self.file_rules.max_file_bytes,
+            "extensions": list(self.file_rules.extensions),
+            "workspace": bool(name),
+        }
+
+    def delete_file(self, user: Any, filename: str) -> bool:
+        name = principal_name(user)
+        if not name:
+            return False
+        removed = workspace.remove(name, filename)
+        if removed:
+            self.users.audit("upload-delete", name, True, workspace.safe_name(filename))
+        return removed
 
     def usage_report(self, since: str = "30d") -> dict[str, Any]:
         """The six-block service usage report; admin-only at the route level."""
@@ -632,7 +666,10 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 if not self._admin_only():
                     return
                 self._json(200, {"users": app.users.accounts(), "backend": app.users.backend,
-                                 "sessions": app.users.sessions()})
+                                 "roles": app.users.roles(), "sessions": app.users.sessions()})
+                return
+            if parts[1:] == ["files"]:
+                self._json(200, app.files(self.principal))
                 return
             if parts[1:] == ["access-audit"]:
                 if not self._admin_only():
@@ -710,6 +747,14 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             if not self.headers.get(CSRF_HEADER):
                 self._json(403, {"error": f"missing {CSRF_HEADER} header"})
                 return
+            # Uploads are multipart, not JSON, so they are handled before the
+            # JSON body reader (which would reject them) and read with their
+            # own, larger size limit.
+            if parts[1:] == ["files"] and (self.headers.get("Content-Type") or "").lower().startswith("multipart/"):
+                if not self._guard():
+                    return
+                self._upload()
+                return
             body = self._body()
             if body is None:
                 return
@@ -730,6 +775,14 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 if not self._admin_only():
                     return
                 self._manage_user(body)
+                return
+            if parts[1:] == ["files"]:
+                name = str(body.get("name") or "")
+                if str(body.get("action") or "delete") != "delete" or not name:
+                    self._json(400, {"error": "action must be delete, with a name"})
+                    return
+                ok = app.delete_file(self.principal, name)
+                self._json(200 if ok else 404, {"ok": ok})
                 return
             if parts[1:] == ["notify"]:
                 text = str(body.get("text") or "").strip()
@@ -784,6 +837,33 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 self._json(status, payload if payload is not None else {})
                 return
             self._json(404, {"error": "not found"})
+
+        def _upload(self) -> None:
+            length = int(self.headers.get("Content-Length") or 0)
+            # One request may carry several files; allow the per-file limit plus
+            # room for the encoding overhead, and refuse anything larger outright.
+            ceiling = app.file_rules.max_file_bytes * 4 + 1_000_000
+            if length <= 0 or length > ceiling:
+                self._json(413, {"error": "上傳內容過大"})
+                return
+            raw = self.rfile.read(length)
+            try:
+                parts = multipart.files(multipart.parse(raw, self.headers.get("Content-Type") or ""))
+            except multipart.MultipartError as error:
+                self._json(400, {"error": f"上傳格式無法解析：{error}"})
+                return
+            if not parts:
+                self._json(400, {"error": "沒有收到檔案"})
+                return
+            stored, refused = [], []
+            for part in parts:
+                try:
+                    stored.append(app.store_upload(self.principal, part.filename or "upload", part.data))
+                except workspace.UploadRefused as error:
+                    refused.append({"name": part.filename, "reason": str(error)})
+                except OSError as error:
+                    refused.append({"name": part.filename, "reason": f"寫入失敗：{error}"})
+            self._json(200 if stored else 400, {"stored": stored, "refused": refused})
 
         # --- identity routes ------------------------------------------
         def _login(self, body: dict[str, Any]) -> None:
@@ -1082,6 +1162,22 @@ textarea{flex:1;font:inherit;font-size:15px;line-height:1.5;padding:14px 16px;bo
   background:var(--card);color:var(--ink);box-shadow:var(--shadow);outline:none}
 textarea:focus{box-shadow:0 0 0 3px rgba(191,24,31,.18),var(--shadow-sm)}
 .hint{font-size:12px;color:var(--ink-3);max-width:860px;margin:0 auto;padding:0 16px 12px;text-align:center}
+.attach{font:inherit;font-size:14px;padding:0;width:54px;height:54px;border-radius:16px;border:0;cursor:pointer;
+  background:var(--card);color:var(--ink-2);box-shadow:var(--shadow);flex:none;display:grid;place-items:center}
+.attach:hover{color:var(--brand)}
+.attach svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round}
+.composer.over .in{outline:2px dashed var(--brand);outline-offset:-8px;border-radius:18px}
+.queued{max-width:860px;margin:0 auto;padding:0 16px 8px;display:flex;gap:8px;flex-wrap:wrap}
+.qfile{display:flex;align-items:center;gap:8px;font-size:13px;padding:5px 10px;border-radius:999px;
+  background:var(--tint);color:var(--ink-2)}
+.qfile button{font:inherit;font-size:13px;line-height:1;border:0;background:transparent;color:var(--ink-3);cursor:pointer;padding:0}
+.qfile button:hover{color:var(--brand)}
+.frow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px}
+.frow:hover{background:var(--tint)}
+.frow .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.frow .fz{font-size:12px;color:var(--ink-3);white-space:nowrap}
+.frow button{font:inherit;font-size:13px;border:0;background:transparent;color:var(--ink-3);cursor:pointer}
+.frow button:hover{color:var(--brand)}
 .panel{position:fixed;top:0;right:0;bottom:0;width:min(420px,92vw);z-index:30;background:var(--card);box-shadow:var(--shadow);
   transform:translateX(105%);transition:transform .35s cubic-bezier(.22,.8,.3,1);display:flex;flex-direction:column}
 .panel.open{transform:none}
@@ -1305,8 +1401,13 @@ body:not(.view-chat) .composer{display:none}
   </section>
 </main>
 
-<div class="composer">
+<div class="composer" id="composer">
+  <div class="queued" id="queued"></div>
   <div class="in">
+    <button class="attach" id="btn-attach" title="附加檔案" aria-label="附加檔案">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg>
+    </button>
+    <input type="file" id="file-input" multiple hidden>
     <textarea id="input" rows="1" placeholder="輸入任務…（Enter 送出，Shift+Enter 換行）"></textarea>
     <button class="btn primary" id="btn-send">送出</button>
   </div>
@@ -1323,6 +1424,8 @@ body:not(.view-chat) .composer{display:none}
     <div id="sessions"></div>
     <div class="sec">工具（agent 能做什麼）</div>
     <div id="tools"></div>
+    <div class="sec">我的檔案（上傳後 agent 讀得到）</div>
+    <div id="files"></div>
     <div class="sec">記憶（agent 記得什麼）</div>
     <div id="memory"></div>
   </div>
@@ -1423,7 +1526,11 @@ body:not(.view-chat) .composer{display:none}
   }
 
   async function send(){
-    const text=input.value.trim();if(!text)return;
+    const typed=input.value.trim();
+    // Attached files are named in the message itself, so the agent knows they
+    // exist and where they are without any special protocol.
+    const text=typed+takeQueued();
+    if(!text.trim())return;
     if(!conv)await newConversation();
     try{await api('/api/conversations/'+conv+'/messages',{method:'POST',body:{text}});input.value='';autosize();}
     catch(e){el('error','錯誤',e.message);}
@@ -1447,7 +1554,7 @@ body:not(.view-chat) .composer{display:none}
 
   // panel
   const panel=$('#panel'),backdrop=$('#backdrop');
-  function openPanel(){panel.classList.add('open');backdrop.classList.add('open');refreshList();}
+  function openPanel(){panel.classList.add('open');backdrop.classList.add('open');refreshList();loadFiles();}
   function closePanel(){panel.classList.remove('open');backdrop.classList.remove('open');}
   $('#btn-list').onclick=openPanel;$('#btn-close').onclick=closePanel;backdrop.onclick=closePanel;
 
@@ -1796,6 +1903,92 @@ body:not(.view-chat) .composer{display:none}
     }catch(err){$('#usr-err').textContent=err.message;}
   });
 
+  // --- uploads ----------------------------------------------------
+  const KB=1024,MB=KB*1024;
+  function humanSize(n){return n>=MB?(n/MB).toFixed(1)+' MB':n>=KB?Math.round(n/KB)+' KB':n+' B';}
+  let uploadsOn=false;
+  async function uploadFiles(fileList){
+    const list=[...fileList];
+    if(!list.length)return;
+    if(!uploadsOn){hint.textContent='這台伺服器沒有啟用帳號，無法上傳檔案。';return;}
+    const form=new FormData();
+    list.forEach(f=>form.append('file',f,f.name));
+    hint.textContent='上傳中：'+list.map(f=>f.name).join('、');
+    try{
+      const headers={'X-XHarness-Client':'1'};      // no Content-Type: the browser adds the boundary
+      if(token)headers['Authorization']='Bearer '+token;
+      const r=await fetch('/api/files',{method:'POST',headers,body:form});
+      const d=await r.json().catch(()=>({}));
+      (d.refused||[]).forEach(item=>el('error','上傳未完成',item.name+'：'+item.reason));
+      const stored=d.stored||[];
+      if(stored.length){
+        stored.forEach(f=>queued.push(f));
+        renderQueued();
+        loadFiles();
+        hint.textContent='已上傳 '+stored.length+' 個檔案，送出訊息時會一併告訴 agent。';
+      }else if(!d.refused||!d.refused.length){
+        hint.textContent='上傳失敗：'+(d.error||('HTTP '+r.status));
+      }
+    }catch(err){hint.textContent='上傳失敗：'+err.message;}
+  }
+  const queued=[];
+  function renderQueued(){
+    const box=$('#queued');box.textContent='';
+    queued.forEach((f,index)=>{
+      const chip=document.createElement('span');chip.className='qfile';
+      const label=document.createElement('span');label.textContent=f.name+'（'+humanSize(f.bytes)+'）';
+      const drop=document.createElement('button');drop.textContent='×';drop.title='不要附這個檔案';
+      drop.onclick=()=>{queued.splice(index,1);renderQueued();};
+      chip.appendChild(label);chip.appendChild(drop);box.appendChild(chip);
+    });
+  }
+  function takeQueued(){
+    if(!queued.length)return '';
+    const lines=queued.map(f=>'- '+f.path).join('\n');
+    queued.length=0;renderQueued();
+    return '\n\n我已上傳以下檔案，請用 read 工具讀取：\n'+lines;
+  }
+  $('#btn-attach').onclick=()=>$('#file-input').click();
+  $('#file-input').onchange=e=>{uploadFiles(e.target.files);e.target.value='';};
+  const composer=$('#composer');
+  ['dragenter','dragover'].forEach(type=>composer.addEventListener(type,e=>{
+    e.preventDefault();composer.classList.add('over');}));
+  ['dragleave','drop'].forEach(type=>composer.addEventListener(type,e=>{
+    e.preventDefault();if(type==='drop'||!composer.contains(e.relatedTarget))composer.classList.remove('over');}));
+  composer.addEventListener('drop',e=>{if(e.dataTransfer&&e.dataTransfer.files)uploadFiles(e.dataTransfer.files);});
+
+  async function loadFiles(){
+    const box=$('#files');box.textContent='';
+    try{
+      const d=await api('/api/files');
+      uploadsOn=!!d.workspace;
+      $('#btn-attach').style.display=uploadsOn?'':'none';
+      if(!uploadsOn){box.textContent='未啟用帳號，agent 直接使用伺服器的工作目錄。';return;}
+      if(!d.files.length){
+        box.textContent='還沒有上傳任何檔案。上限：單檔 '+humanSize(d.max_file_bytes)+'，總共 '+humanSize(d.max_total_bytes)+'。';
+        return;
+      }
+      const head=document.createElement('div');head.className='frow';
+      head.innerHTML='<span class="fn" style="color:var(--ink-3);font-size:13px">已用 '+humanSize(d.used_bytes)+' / '+humanSize(d.max_total_bytes)+'</span>';
+      box.appendChild(head);
+      d.files.forEach(f=>{
+        const row=document.createElement('div');row.className='frow';
+        const name=document.createElement('span');name.className='fn';name.textContent=f.path;name.title=f.path;
+        const size=document.createElement('span');size.className='fz';size.textContent=humanSize(f.bytes);
+        const attach=document.createElement('button');attach.textContent='附加';
+        attach.onclick=()=>{queued.push(f);renderQueued();closePanel();};
+        const drop=document.createElement('button');drop.textContent='刪除';
+        drop.onclick=async()=>{
+          if(!confirm('刪除 '+f.name+'？'))return;
+          try{await api('/api/files',{method:'POST',body:{action:'delete',name:f.name}});loadFiles();}
+          catch(e){box.textContent='刪除失敗：'+e.message;}
+        };
+        row.appendChild(name);row.appendChild(size);row.appendChild(attach);row.appendChild(drop);
+        box.appendChild(row);
+      });
+    }catch(e){box.textContent='讀取失敗：'+e.message;}
+  }
+
   const whoMenu=$('#who-menu');
   $('#btn-who').onclick=e=>{
     e.stopPropagation();
@@ -1810,6 +2003,7 @@ body:not(.view-chat) .composer{display:none}
 
   (async function init(){
     showView('chat');
+    loadFiles();   // also decides whether the attach button is shown
     document.body.classList.add('landing');   // nothing has happened yet ('empty' is taken by the empty-list style)
     loadToken();
     try{applyMeta(await api('/api/meta'));}

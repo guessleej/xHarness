@@ -44,7 +44,16 @@ DEFAULT_SESSION_HOURS = 12
 LOCKOUT_THRESHOLD = 5
 LOCKOUT_SECONDS = 300
 SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
-ROLES = ("admin", "user")
+SAFE_ROLE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
+#: Always available, so an install with no [auth.roles] behaves as before.
+BUILTIN_ROLES = {
+    "admin": {"label": "管理者", "admin": True},
+    "user": {"label": "一般使用者", "admin": False},
+}
+#: What a restricted role (a student, a guest) should not be handed. Tools are
+#: removed from the registry rather than refused at call time, so the model is
+#: never even told they exist.
+SUGGESTED_RESTRICTED_TOOLS = ("bash", "write", "edit", "security_scan", "subagent", "subagent_batch")
 
 
 def users_file() -> str:
@@ -79,16 +88,25 @@ class User:
     role: str = "user"
     quota_tokens_per_day: int | None = None
     quota_tokens_per_month: int | None = None
+    #: Human-readable name of the tier, e.g. 教師, 學生.
+    role_label: str = ""
+    #: True when this tier may see the admin surfaces and everyone's usage.
+    administrator: bool = False
+    #: Tools this tier never receives.
+    denied_tools: tuple[str, ...] = ()
 
     @property
     def is_admin(self) -> bool:
-        return self.role == "admin"
+        return self.administrator
 
     def public(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "display": self.display or self.name,
             "role": self.role,
+            "role_label": self.role_label or self.role,
+            "admin": self.administrator,
+            "denied_tools": list(self.denied_tools),
             "quota_tokens_per_day": self.quota_tokens_per_day,
             "quota_tokens_per_month": self.quota_tokens_per_month,
         }
@@ -143,23 +161,44 @@ class UserStore:
         entry = (self.settings.get("users") or {}).get(name)
         return entry if isinstance(entry, dict) else {}
 
+    def roles(self) -> dict[str, dict[str, Any]]:
+        """Tiers defined in [auth.roles], over the two built-in ones."""
+        merged = {name: dict(spec) for name, spec in BUILTIN_ROLES.items()}
+        for name, spec in (self.settings.get("roles") or {}).items():
+            if not SAFE_ROLE.match(str(name)) or not isinstance(spec, dict):
+                continue
+            merged.setdefault(name, {}).update(spec)
+        return merged
+
+    def role_spec(self, role: str) -> dict[str, Any]:
+        return self.roles().get(role, BUILTIN_ROLES["user"])
+
     def _profile(self, name: str, stored: dict[str, Any] | None = None) -> User:
-        """Config wins over the account file, so an admin can change a role without a re-register."""
+        """Config wins over the account file, so an admin can change a tier without a re-register."""
         stored = stored or {}
         configured = self._configured(name)
+        roles = self.roles()
         role = str(configured.get("role") or stored.get("role") or self.settings.get("default_role") or "user")
-        if role not in ROLES:
+        if role not in roles:
             role = "user"
+        spec = roles[role]
+
         def quota(key: str) -> int | None:
-            for source in (configured, stored, self.settings):
+            # Most specific first: the person, then their stored record, then
+            # their tier, then the site default.
+            for source in (configured, stored, spec, self.settings):
                 if key in source and source[key] is not None:
                     return int(source[key]) or None
             default = self.settings.get(f"default_{key}")
             return int(default) if default else None
+
         return User(
             name=name,
             display=str(configured.get("display") or stored.get("display") or name),
             role=role,
+            role_label=str(spec.get("label") or role),
+            administrator=bool(spec.get("admin", role == "admin")),
+            denied_tools=tuple(str(item) for item in (spec.get("deny_tools") or ())),
             quota_tokens_per_day=quota("quota_tokens_per_day"),
             quota_tokens_per_month=quota("quota_tokens_per_month"),
         )
@@ -189,8 +228,8 @@ class UserStore:
             raise ValueError("username may contain only letters, digits, dot, underscore and hyphen")
         if len(password) < 8:
             raise ValueError("password must be at least 8 characters")
-        if role not in ROLES:
-            raise ValueError(f"role must be one of: {', '.join(ROLES)}")
+        if role not in self.roles():
+            raise ValueError(f"role must be one of: {', '.join(sorted(self.roles()))}")
         data = self._read()
         data[name] = {
             "hash": hash_password(password, iterations=self.iterations),

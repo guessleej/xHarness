@@ -111,3 +111,35 @@ model = "your-model-id"
 # node = true
 # node_port = 3080
 # token_file = "~/.xharness/desktop-node-token"   # generated (0600) if absent
+
+# ── User tiers ────────────────────────────────────────────────
+# The built-in admin / user tiers are always there; define the ones a site
+# actually needs here. Each tier sets a label, whether it administers, which
+# tools it never receives, and a default quota.
+# [auth.roles.principal]
+# label = "Head of school"
+# admin = true
+#
+# [auth.roles.teacher]
+# label = "Teacher"
+# quota_tokens_per_day = 200000
+#
+# [auth.roles.student]
+# label = "Student"
+# quota_tokens_per_day = 30000
+# deny_tools = ["bash", "write", "edit", "security_scan", "subagent", "subagent_batch"]
+#   Denied tools are absent, not refused: they never appear in the model's tool
+#   list, so a restricted account is never promised something that then fails.
+
+# ── Uploaded files ────────────────────────────────────────────
+# With [auth] on, each person gets their own working directory
+# ($XHARNESS_HOME/workspaces/u/<user>/) and browser uploads land in its
+# uploads/ folder, which is where their agent works. Without [auth] the agent
+# uses the directory the server was started from, exactly as before.
+# [files]
+# max_file_mb = 25
+# max_total_mb = 500
+# retention_days = 0           # 0 keeps uploads until someone deletes them
+# allowed_extensions = ["pdf", "docx", "xlsx", "csv", "txt", "md", "png", "jpg"]
+#   Omit for the built-in allow-list (documents, data, images, common source
+#   files). Executables are never on it.

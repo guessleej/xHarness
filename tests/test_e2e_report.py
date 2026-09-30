@@ -274,3 +274,108 @@ def test_api_still_refuses_that_host_without_a_credential(server):
     response.read()
     conn.close()
     assert response.status == 401
+
+
+def _multipart(fields):
+    """(filename, bytes) pairs -> (body, content_type)."""
+    boundary = "----XHTEST"
+    out = b""
+    for filename, data in fields:
+        out += ("--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\n\r\n" % (boundary, filename)).encode()
+        out += data + b"\r\n"
+    out += ("--%s--\r\n" % boundary).encode()
+    return out, "multipart/form-data; boundary=%s" % boundary
+
+
+def _upload(client, fields):
+    body, content_type = _multipart(fields)
+    conn = http.client.HTTPConnection("127.0.0.1", client.port, timeout=10)
+    headers = {"Host": f"127.0.0.1:{client.port}", "Content-Type": content_type, CSRF_HEADER: "1"}
+    if client.token:
+        headers["Authorization"] = f"Bearer {client.token}"
+    conn.request("POST", "/api/files", body=body, headers=headers)
+    response = conn.getresponse()
+    payload = json.loads(response.read().decode("utf-8"))
+    conn.close()
+    return response.status, payload
+
+
+def test_upload_lands_in_the_owners_workspace(server, tmp_path):
+    client, _ = server
+    client.sign_in("teacher1", "a-long-password")
+    status, payload = _upload(client, [("成績單.csv", b"name,score\nA,90\n")])
+    assert status == 200 and payload["stored"][0]["path"] == "uploads/成績單.csv"
+    stored = tmp_path / "workspaces" / "u" / "teacher1" / "uploads" / "成績單.csv"
+    assert stored.read_bytes() == b"name,score\nA,90\n"
+
+
+def test_uploads_are_private_to_their_owner(server):
+    client, _ = server
+    client.sign_in("teacher1", "a-long-password")
+    _upload(client, [("private.txt", b"mine")])
+    client.sign_in("teacher2", "a-long-password")
+    assert client.call("GET", "/api/files")[1]["files"] == []
+
+
+def test_path_traversal_in_a_filename_is_neutralised(server, tmp_path):
+    client, _ = server
+    client.sign_in("teacher1", "a-long-password")
+    status, payload = _upload(client, [("../../../etc/evil.txt", b"nope")])
+    assert status == 200
+    # The directories are stripped, so the file lands in the uploads directory
+    # under a plain name and nothing is written outside it.
+    assert payload["stored"][0]["name"] == "evil.txt"
+    assert "/" not in payload["stored"][0]["name"]
+    assert (tmp_path / "workspaces" / "u" / "teacher1" / "uploads" / "evil.txt").exists()
+    assert not (tmp_path / "etc").exists()
+
+
+def test_backslash_traversal_also_neutralised(server, tmp_path):
+    client, _ = server
+    client.sign_in("teacher1", "a-long-password")
+    status, payload = _upload(client, [(r"..\..\windows\notes.txt", b"x")])
+    assert status == 200 and payload["stored"][0]["name"] == "notes.txt"
+
+
+def test_file_without_an_extension_refused(server):
+    client, _ = server
+    client.sign_in("teacher1", "a-long-password")
+    status, payload = _upload(client, [("passwd", b"root:x:0:0")])
+    assert status == 400 and payload["stored"] == []
+
+
+def test_disallowed_extension_refused(server):
+    client, _ = server
+    client.sign_in("teacher1", "a-long-password")
+    status, payload = _upload(client, [("evil.exe", b"MZ")])
+    assert status == 400 and payload["refused"][0]["reason"]
+    assert payload["stored"] == []
+
+
+def test_duplicate_names_do_not_overwrite(server):
+    client, _ = server
+    client.sign_in("teacher1", "a-long-password")
+    _upload(client, [("a.txt", b"first")])
+    _upload(client, [("a.txt", b"second")])
+    names = {item["name"] for item in client.call("GET", "/api/files")[1]["files"]}
+    assert names == {"a.txt", "a-1.txt"}
+
+
+def test_delete_removes_only_your_own(server):
+    client, _ = server
+    client.sign_in("teacher1", "a-long-password")
+    _upload(client, [("a.txt", b"x")])
+    client.sign_in("teacher2", "a-long-password")
+    assert client.call("POST", "/api/files", {"action": "delete", "name": "a.txt"})[0] == 404
+    client.sign_in("teacher1", "a-long-password")
+    assert client.call("POST", "/api/files", {"action": "delete", "name": "a.txt"})[0] == 200
+    assert client.call("GET", "/api/files")[1]["files"] == []
+
+
+def test_upload_is_audited(server):
+    client, _ = server
+    client.sign_in("teacher1", "a-long-password")
+    _upload(client, [("note.txt", b"x")])
+    client.sign_in("admin1", "a-long-password")
+    records = client.call("GET", "/api/access-audit")[1]
+    assert any(row["action"] == "upload" and row["user"] == "teacher1" for row in records)

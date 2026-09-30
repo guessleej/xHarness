@@ -112,4 +112,11 @@ def build_harness(
             continue
         plugin = _load_user_plugin(str(entry["module"]))
         harness.use(str(entry["id"]), plugin, config=entry.get("config"))
+
+    # Last, so it covers every registration: built-ins, MCP servers and user
+    # plugins alike. A tool that is removed is never offered to the model, so a
+    # restricted tier cannot ask for it and be refused -- it simply is not there.
+    denied = tuple(getattr(user, "denied_tools", ()) or ())
+    if denied:
+        harness.ctx.get("tools").remove(denied)
     return harness

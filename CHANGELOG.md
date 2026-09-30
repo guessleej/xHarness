@@ -2,6 +2,22 @@
 
 中文 | English below
 
+## 1.6.0 — 2026-09-30
+
+使用者分層，以及檔案終於能從瀏覽器進來。1.4.0 把對話與用量隔離到人，但**檔案系統還是共用的**——同一台機器上的兩個帳號，一個 `write` 另一個就 `read` 得到。這一版補上。
+
+- **每人一個工作目錄**：`$XHARNESS_HOME/workspaces/u/<帳號>/`，agent 的 cwd 就是它，`read`／`write`／`glob`／`bash` 全都在裡面。隔離是檔案系統層級的，不是查詢時過濾。沒有啟用 `[auth]` 時，agent 照舊使用啟動伺服器的工作目錄。
+- **上傳檔案**：輸入框旁的迴紋針，或直接把檔案拖進輸入區。檔案落在自己的 `uploads/`，送出訊息時自動附上路徑告訴 agent；側面板可看清單、用量、重新附加與刪除。`POST /api/files` 走自己寫的 multipart 解析器（`multipart.py`，純標準函式庫，因為 `cgi` 在 Python 3.13 被移除且本專案零相依）。每次上傳寫入存取稽核。
+- **上傳的安全邊界**：檔名先消毒再落地（去掉路徑分隔符號與控制字元，同名加序號不覆蓋，落點驗證在 uploads 目錄內）、副檔名白名單（**可執行檔不在內**，上傳的檔案永不執行）、單檔與每人總量上限、0600 權限。
+- **使用者分層**：`[auth.roles.<層級>]` 自定層級，可設顯示名稱、是否為管理者、`deny_tools`、該層預設配額。被擋的工具是**不存在**而非被拒絕——它不會出現在模型的工具清單裡，所以受限帳號不會先被答應再失敗。配額優先序：個人 → 帳號記錄 → 層級 → 全站預設。內建的 `admin`／`user` 行為不變。
+
+User tiers, and files can finally get in from the browser. 1.4.0 isolated conversations and usage per person but left **the filesystem shared** — one account's `write` was another's `read`. This release closes that.
+
+- **A working directory per person**: `$XHARNESS_HOME/workspaces/u/<user>/` is the agent's cwd, so `read` / `write` / `glob` / `bash` all stay inside it. The isolation is a filesystem boundary, not a query-time filter. Without `[auth]` the agent uses the server's own working directory as before.
+- **File uploads**: a paperclip beside the input, or drop files onto the composer. They land in the uploader's own `uploads/`, and their paths are appended to the message so the agent knows where they are; the side panel lists them with their size and lets you re-attach or delete. `POST /api/files` uses a multipart parser written for this (`multipart.py`, standard library only — `cgi` was removed in Python 3.13 and this project has no runtime dependencies). Every upload is written to the access audit.
+- **Upload trust boundary**: names are sanitised before anything is written (path separators and control characters stripped, repeats numbered rather than overwritten, the destination verified to be inside the uploads directory), an extension allow-list (**no executables**, and uploads are never executed), per-file and per-person size limits, 0600 permissions.
+- **User tiers**: define them under `[auth.roles.<tier>]` with a label, whether they administer, `deny_tools`, and a default quota. A denied tool is **absent** rather than refused — it never reaches the model's tool list, so a restricted account is never promised something that then fails. Quotas resolve person → stored record → tier → site default. The built-in `admin` / `user` behave exactly as before.
+
 ## 1.5.1 — 2026-09-30
 
 修 1.5.0 的兩個排版問題，都出在「同一件事有兩個地方在決定」。

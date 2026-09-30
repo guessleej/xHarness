@@ -50,6 +50,16 @@ class ToolRegistry:
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 
+    def remove(self, names: list[str] | tuple[str, ...]) -> list[str]:
+        """Drop tools a role may not use. Removing beats filtering at call time:
+        a tool that is not in the list is never offered to the model, so it
+        cannot be asked for and then refused."""
+        dropped = []
+        for name in names:
+            if self._tools.pop(name, None) is not None:
+                dropped.append(name)
+        return dropped
+
 
 def _apply_tools(ctx: Context, _config: Any) -> None:
     ctx.provide("tools", ToolRegistry())

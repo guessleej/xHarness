@@ -31,6 +31,7 @@ class ResolvedConfig:
     channels: dict[str, dict[str, Any]] = field(default_factory=dict)
     auth: dict[str, Any] = field(default_factory=dict)
     desktop: dict[str, Any] = field(default_factory=dict)
+    files: dict[str, Any] = field(default_factory=dict)
     browser: str | None = None
     browser_approval: bool = True
 
@@ -108,6 +109,7 @@ def load_config(
         channels=raw.get("channels", {}) or {},
         auth=raw.get("auth", {}) or {},
         desktop=raw.get("desktop", {}) or {},
+        files=raw.get("files", {}) or {},
         browser=_browser_url(raw.get("tools", {}).get("browser")),
         browser_approval=bool(raw.get("tools", {}).get("browser_approval", True)),
     )

@@ -217,6 +217,58 @@ the config. Empty passwords are refused before connecting (an empty simple bind 
 an anonymous bind, which most servers answer with success), DN templates accept a
 strict character set only, and `ldaps://` verifies the certificate chain by default.
 
+## User tiers and uploaded files
+
+With `[auth]` on, each person gets a **working directory** of their own alongside their conversations and quota:
+
+```
+$XHARNESS_HOME/
+  workspaces/u/<user>/          ← where this person's agents work
+       uploads/                  ← files uploaded from the browser
+  sessions/u/<user>/             ← their transcripts
+```
+
+The isolation is a filesystem boundary, not a query-time filter: a teacher's agent has `workspaces/u/teacher_chen/` as its working directory, so `read`, `write`, `glob` and `bash` all stay inside it. Without `[auth]`, the agent uses the directory the server was started from, exactly as a single-operator install always has.
+
+**Uploading**: there is a paperclip button beside the input, and files can be dropped straight onto the composer. Uploaded files are listed under the message and their paths are appended when you send:
+
+```
+Take a look at this grade distribution
+
+I have uploaded these files, please read them with the read tool:
+- uploads/grades.csv
+```
+
+The side panel's file list shows what is stored, how much space it uses, and lets you re-attach or delete. Every upload is written to `access-audit.jsonl`.
+
+```toml
+[files]
+max_file_mb = 25
+max_total_mb = 500
+retention_days = 0           # 0 keeps uploads until someone deletes them
+```
+
+Omitting `allowed_extensions` uses the built-in allow-list (documents, data, images, common source files). **Executables are not on it**, and uploaded files are never executed. Names are sanitised before anything is written: path separators and control characters are stripped, and a repeated name is numbered rather than overwriting.
+
+**Tiers**: the built-in `admin` and `user` are always available; define the ones a site needs under `[auth.roles]`:
+
+```toml
+[auth.roles.principal]
+label = "Head of school"
+admin = true
+
+[auth.roles.teacher]
+label = "Teacher"
+quota_tokens_per_day = 200000
+
+[auth.roles.student]
+label = "Student"
+quota_tokens_per_day = 30000
+deny_tools = ["bash", "write", "edit", "security_scan", "subagent", "subagent_batch"]
+```
+
+A denied tool is **absent**, not refused: it never appears in the model's tool list, so a restricted account is never promised something that then fails. Quotas resolve most-specific-first: the person, their stored record, their tier, then the site default.
+
 ## Service usage report
 
 The one for a dean, a department head or a customer's management. Six blocks,
