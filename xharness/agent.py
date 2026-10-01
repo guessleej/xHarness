@@ -21,25 +21,48 @@ INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md")
 MAX_INSTRUCTIONS_CHARS = 24_000
 
 
-def load_project_instructions(cwd: str) -> str | None:
-    """Read the project's agent instructions (AGENTS.md, then CLAUDE.md).
-
-    First file found in cwd wins. Content is treated like any other repo
-    content: useful context, but a trust decision — see docs/ssdlc.md.
-    """
+def _read_instructions(directory: str) -> tuple[str, str] | None:
+    """(filename, text) of the first instruction file in this directory."""
     for name in INSTRUCTION_FILES:
-        path = os.path.join(cwd, name)
         try:
-            with open(path, encoding="utf-8", errors="replace") as handle:
+            with open(os.path.join(directory, name), encoding="utf-8", errors="replace") as handle:
                 text = handle.read().strip()
         except OSError:
             continue
-        if not text:
-            continue
-        if len(text) > MAX_INSTRUCTIONS_CHARS:
-            text = text[:MAX_INSTRUCTIONS_CHARS] + "\n[instructions truncated]"
-        return f"## Project instructions ({name})\n\n{text}"
+        if text:
+            if len(text) > MAX_INSTRUCTIONS_CHARS:
+                text = text[:MAX_INSTRUCTIONS_CHARS] + "\n[instructions truncated]"
+            return name, text
     return None
+
+
+def load_project_instructions(cwd: str, site_dir: str | None = None) -> str | None:
+    """Agent instructions for this task: the site's, then the working directory's.
+
+    `site_dir` is where the server itself was started. It matters once each
+    person works in their own directory: an operator's AGENTS.md would
+    otherwise stop reaching anybody the moment accounts are switched on,
+    which is exactly when a shared policy is most wanted. The working
+    directory's own file comes second so it can refine the site's.
+
+    Content is treated like any other repo content: useful context, but a
+    trust decision — see docs/ssdlc.md.
+    """
+    sections: list[str] = []
+    seen: set[str] = set()
+    for directory, label in ((site_dir, "site"), (cwd, "project")):
+        if not directory:
+            continue
+        resolved = os.path.realpath(directory)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        found = _read_instructions(directory)
+        if found:
+            name, text = found
+            heading = "Site instructions" if label == "site" else "Project instructions"
+            sections.append(f"## {heading} ({name})\n\n{text}")
+    return "\n\n".join(sections) if sections else None
 
 
 def default_system_prompt(cwd: str, model: str | None = None) -> str:
@@ -80,6 +103,9 @@ class AgentOptions:
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
     #: Read AGENTS.md / CLAUDE.md from cwd into the system prompt.
     project_instructions: bool = True
+    #: Where the server was started; its AGENTS.md applies to everyone, which
+    #: matters once each person works in a directory of their own.
+    site_instructions_dir: str | None = None
     #: Agent name; session events of non-main agents are tagged with it.
     name: str = "main"
     #: Tool names hidden from this agent (e.g. children may not spawn children).
@@ -102,7 +128,7 @@ class Agent:
             if self.options.system_suffix:
                 system = f"{system}\n{self.options.system_suffix}"
             if self.options.project_instructions:
-                instructions = load_project_instructions(cwd)
+                instructions = load_project_instructions(cwd, self.options.site_instructions_dir)
                 if instructions:
                     system = f"{system}\n\n{instructions}"
             self.messages.insert(0, {"role": "system", "content": system})

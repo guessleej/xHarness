@@ -168,3 +168,45 @@ def test_system_prompt_states_the_real_model_identity():
     from xharness.agent import default_system_prompt
 
     assert "operator's own infrastructure" in default_system_prompt(".")
+
+
+def test_site_instructions_reach_a_user_working_elsewhere(tmp_path):
+    """With per-user workspaces the operator's AGENTS.md must still apply."""
+    from xharness.agent import load_project_instructions
+
+    site = tmp_path / "server"
+    workspace = tmp_path / "ws"
+    site.mkdir()
+    workspace.mkdir()
+    (site / "AGENTS.md").write_text("站台規則：不確定就說不確定。", encoding="utf-8")
+
+    text = load_project_instructions(str(workspace), str(site))
+    assert text is not None and "站台規則" in text and "Site instructions" in text
+
+
+def test_project_file_refines_the_site_one(tmp_path):
+    from xharness.agent import load_project_instructions
+
+    site = tmp_path / "server"
+    workspace = tmp_path / "ws"
+    site.mkdir()
+    workspace.mkdir()
+    (site / "AGENTS.md").write_text("站台規則", encoding="utf-8")
+    (workspace / "AGENTS.md").write_text("專案慣例", encoding="utf-8")
+
+    text = load_project_instructions(str(workspace), str(site))
+    assert text.index("站台規則") < text.index("專案慣例")   # site first, project refines
+
+
+def test_same_directory_is_not_read_twice(tmp_path):
+    from xharness.agent import load_project_instructions
+
+    (tmp_path / "AGENTS.md").write_text("只有一份", encoding="utf-8")
+    text = load_project_instructions(str(tmp_path), str(tmp_path))
+    assert text.count("只有一份") == 1
+
+
+def test_no_instructions_anywhere_is_none(tmp_path):
+    from xharness.agent import load_project_instructions
+
+    assert load_project_instructions(str(tmp_path), str(tmp_path)) is None

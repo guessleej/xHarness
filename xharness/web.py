@@ -224,6 +224,9 @@ class WebApp:
             harness.ctx,
             AgentOptions(
                 cwd=workspace.ensure(principal_name(user)),
+                # The operator's AGENTS.md lives where the server was started;
+                # with per-user workspaces nobody would see it otherwise.
+                site_instructions_dir=os.getcwd(),
                 system_prompt=self.config.system_prompt,
                 system_suffix=extra_system,
                 max_turns=self.config.max_turns or AgentOptions.max_turns,

@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.7.1 — 2026-10-01
+
+- 修 1.6.0 的副作用：每人一個工作目錄之後，**操作者放在伺服器啟動目錄的 `AGENTS.md` 就再也沒人讀得到**——而那正是最需要一份共同規範的時候。現在 agent 會先讀伺服器啟動目錄的指示（站台規範），再讀自己工作目錄的（專案慣例），後者可以補充前者。兩邊指到同一個目錄時只讀一次。
+- Fix a 1.6.0 side effect: once each person worked in their own directory, an operator's `AGENTS.md` in the server's own working directory stopped reaching anybody — exactly when a shared policy matters most. An agent now reads the server directory's instructions first (site policy), then its own working directory's (project conventions), which refine them. The same directory is never read twice.
+
 ## 1.7.0 — 2026-10-01
 
 - **供應端可帶自訂請求欄位**：`[providers.X] extra_body = { ... }` 會併進送往端點的 JSON。**reasoning 模型是這個功能存在的理由**——granite 這類模型若不在請求裡關掉 thinking，答案會跑進 `reasoning_content`，`content` 留空，harness 收到的就是一串空回應；而每個家族關閉的寫法都不同（llama.cpp 吃 `chat_template_kwargs = { enable_thinking = false }`）。adapter 自己擁有的欄位（model、messages、stream、stream_options、tools）不會被覆寫。
