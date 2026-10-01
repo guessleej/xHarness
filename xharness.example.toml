@@ -143,3 +143,10 @@ model = "your-model-id"
 # allowed_extensions = ["pdf", "docx", "xlsx", "csv", "txt", "md", "png", "jpg"]
 #   Omit for the built-in allow-list (documents, data, images, common source
 #   files). Executables are never on it.
+
+# Reasoning models need thinking turned off in the request, or the answer lands
+# in reasoning_content and content comes back empty.
+# [providers.granite]
+# base_url = "http://10.0.0.5:8093/v1"
+# model = "granite-4.2-30b"
+# extra_body = { chat_template_kwargs = { enable_thinking = false } }

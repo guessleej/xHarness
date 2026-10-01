@@ -143,3 +143,9 @@ model = "your-model-id"
 # retention_days = 0           # 0 = 不自動刪除
 # allowed_extensions = ["pdf", "docx", "xlsx", "csv", "txt", "md", "png", "jpg"]
 #   ↑ 不設就用內建白名單（文件、資料、圖片、常見程式碼檔）。可執行檔一律不在內。
+
+# reasoning 模型要在請求裡關掉 thinking，否則答案會跑進 reasoning_content、content 留空。
+# [providers.granite]
+# base_url = "http://192.168.10.70:8093/v1"
+# model = "granite-4.2-30b"
+# extra_body = { chat_template_kwargs = { enable_thinking = false } }

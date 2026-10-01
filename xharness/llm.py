@@ -17,6 +17,8 @@ from typing import Any, Callable
 
 from .context import Context, Plugin
 
+#: Fields the adapter owns; extra_body may not touch them.
+RESERVED_BODY_KEYS = frozenset({"model", "messages", "stream", "stream_options", "tools"})
 DEFAULT_TIMEOUT_SECONDS = 600
 
 
@@ -43,6 +45,7 @@ class OpenAIAdapter:
         temperature: float | None = None,
         max_tokens: int | None = None,
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         if not base_url:
@@ -59,6 +62,15 @@ class OpenAIAdapter:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.extra_headers = extra_headers or {}
+        #: Endpoint-specific request fields. Reasoning models are the reason this
+        #: exists: several of them put the answer in `reasoning_content` and leave
+        #: `content` empty unless the request turns thinking off, and every family
+        #: spells that differently (llama.cpp takes
+        #: `chat_template_kwargs = { enable_thinking = false }`). Nothing here may
+        #: overwrite the fields the adapter itself sets.
+        self.extra_body = {
+            key: value for key, value in (extra_body or {}).items() if key not in RESERVED_BODY_KEYS
+        }
         self.timeout_seconds = timeout_seconds
 
     def _wire_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -104,6 +116,7 @@ class OpenAIAdapter:
             headers["Authorization"] = f"Bearer {key}"
 
         body: dict[str, Any] = {
+            **self.extra_body,
             "model": self.model,
             "messages": self._wire_messages(messages),
             "stream": True,

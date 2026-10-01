@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.7.0 — 2026-10-01
+
+- **供應端可帶自訂請求欄位**：`[providers.X] extra_body = { ... }` 會併進送往端點的 JSON。**reasoning 模型是這個功能存在的理由**——granite 這類模型若不在請求裡關掉 thinking，答案會跑進 `reasoning_content`，`content` 留空，harness 收到的就是一串空回應；而每個家族關閉的寫法都不同（llama.cpp 吃 `chat_template_kwargs = { enable_thinking = false }`）。adapter 自己擁有的欄位（model、messages、stream、stream_options、tools）不會被覆寫。
+- **Per-endpoint request fields**: `[providers.X] extra_body = { ... }` is merged into the JSON sent to the endpoint. **Reasoning models are why this exists** — several of them put the answer in `reasoning_content` and leave `content` empty unless the request turns thinking off, and every family spells that differently (llama.cpp takes `chat_template_kwargs = { enable_thinking = false }`). Fields the adapter owns (model, messages, stream, stream_options, tools) cannot be overwritten.
+
 ## 1.6.1 — 2026-09-30
 
 - `GET /api/tools`（側面板的「工具」區）改為依呼叫者的層級過濾：受限帳號不會再看到自己永遠拿不到的工具。清單本來就不該宣傳做不到的事。

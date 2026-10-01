@@ -99,3 +99,32 @@ def test_missing_config_rejected():
 def test_non_http_base_url_rejected():
     with pytest.raises(ValueError, match="http or https"):
         OpenAIAdapter(base_url="file:///etc/passwd", model="m")
+
+
+def test_extra_body_reaches_the_request():
+    """Reasoning models need a per-endpoint flag to put the answer in `content`."""
+    from xharness.llm import OpenAIAdapter
+
+    adapter = OpenAIAdapter(
+        base_url="http://127.0.0.1:1/v1", model="m",
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
+    assert adapter.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+def test_extra_body_cannot_overwrite_what_the_adapter_owns():
+    from xharness.llm import OpenAIAdapter
+
+    adapter = OpenAIAdapter(
+        base_url="http://127.0.0.1:1/v1", model="real-model",
+        extra_body={"model": "hijacked", "messages": [], "tools": [], "stream": False,
+                    "chat_template_kwargs": {"enable_thinking": False}},
+    )
+    assert adapter.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert adapter.model == "real-model"
+
+
+def test_no_extra_body_by_default():
+    from xharness.llm import OpenAIAdapter
+
+    assert OpenAIAdapter(base_url="http://127.0.0.1:1/v1", model="m").extra_body == {}
