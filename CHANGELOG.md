@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## 1.7.2 — 2026-10-05
+
+- 修 1.7.0 的 `extra_body` 根本沒送出去：設定檔載入時 `apply_preset()` 只留 `PROVIDER_KEYS` 白名單裡的欄位，而 `extra_body` 不在名單上，於是 `[providers.X] extra_body = { ... }` 被靜默丟掉，reasoning 模型照樣回空 `content`。補進白名單，並加一個測試鎖住白名單與 `OpenAIAdapter` 的參數一致，下次新增參數忘了登記會直接失敗。
+- Fix 1.7.0's `extra_body` never reaching the endpoint: `apply_preset()` keeps only keys in `PROVIDER_KEYS` when the config loads, `extra_body` was not on that list, so `[providers.X] extra_body = { ... }` was silently dropped and reasoning models still came back with empty `content`. It is on the list now, and a test pins the list to `OpenAIAdapter`'s parameters so the next new parameter cannot be forgotten the same way.
+
 ## 1.7.1 — 2026-10-01
 
 - 修 1.6.0 的副作用：每人一個工作目錄之後，**操作者放在伺服器啟動目錄的 `AGENTS.md` 就再也沒人讀得到**——而那正是最需要一份共同規範的時候。現在 agent 會先讀伺服器啟動目錄的指示（站台規範），再讀自己工作目錄的（專案慣例），後者可以補充前者。兩邊指到同一個目錄時只讀一次。
