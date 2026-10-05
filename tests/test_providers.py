@@ -75,3 +75,32 @@ def test_cli_presets_needs_no_config(tmp_path, monkeypatch, capsys):
     assert main(["providers", "presets"]) == 0
     out = capsys.readouterr().out
     assert "ollama" in out and "hosted" in out and "OPENAI_API_KEY" in out
+
+
+def test_provider_keys_match_adapter_parameters():
+    """A key the adapter takes but the whitelist lacks is silently dropped at load time (1.7.0's extra_body)."""
+    import inspect
+
+    from xharness.llm import OpenAIAdapter
+    from xharness.providers import PROVIDER_KEYS
+
+    assert PROVIDER_KEYS == set(inspect.signature(OpenAIAdapter.__init__).parameters) - {"self"}
+
+
+def test_extra_body_from_toml_reaches_the_request(tmp_path, monkeypatch):
+    from xharness.llm import OpenAIAdapter
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "xharness.toml").write_text(
+        '[providers.x]\nbase_url = "http://127.0.0.1:1/v1"\nmodel = "m"\nextra_body = { reasoning_budget_tokens = 1024 }\n',
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_urlopen(request, timeout=None):
+        captured["body"] = json.loads(request.data)
+        return FakeResponse(b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n')
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    OpenAIAdapter(**load_config().provider).stream([{"role": "user", "content": "hi"}], [])
+    assert captured["body"]["reasoning_budget_tokens"] == 1024
