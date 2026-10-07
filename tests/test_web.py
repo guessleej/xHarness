@@ -295,3 +295,41 @@ def test_notify_endpoint_requires_text_and_reports_reach(server_factory):
     app.telegram = Channel()
     assert client.request("POST", "/api/notify", {"text": "hello"}) == (200, {"reached": 1})
     assert client.request("POST", "/api/notify", {"text": "hello"}, csrf=False)[0] == 403
+
+
+# --- the sign-in gate (1.7.2) -------------------------------------------
+# These scan the page source rather than drive a browser, the same way the
+# modal and IME guards elsewhere do: cheap, and they fail the moment someone
+# reintroduces the pattern.
+
+def _script() -> str:
+    from xharness.web import INDEX_HTML
+    return INDEX_HTML.split("<script>", 1)[1]
+
+
+def test_no_native_prompt_for_credentials():
+    """A native prompt() per failing request stacked two boxes on page load,
+    and cancelling either left a bare "HTTP 401"."""
+    import re
+    assert not re.search(r"(?<![\w.])prompt\(", _script().replace("prompt() used", ""))
+
+
+def test_saved_credential_is_loaded_before_the_first_request():
+    """loadFiles() used to run before loadToken(), so a stored token was never
+    sent and every reload asked for it again."""
+    init = _script().split("async function init(){", 1)[1].split("})();", 1)[0]
+    assert init.index("loadToken()") < init.index("await api(")
+    assert init.index("loadToken()") < init.index("loadFiles()")
+
+
+def test_gate_offers_a_token_field_for_token_mode():
+    from xharness.web import INDEX_HTML
+    assert 'id="gate-token"' in INDEX_HTML
+    assert "showGate(true,d.auth==='users'?'users':'token')" in INDEX_HTML
+
+
+def test_token_mode_401_tells_the_page_which_credential(server_factory):
+    client, _ = server_factory([], token="node-secret")
+    client.token = None
+    status, payload = client.request("GET", "/api/meta")
+    assert status == 401 and payload["auth"] == "token"
