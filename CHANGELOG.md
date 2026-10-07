@@ -2,6 +2,20 @@
 
 中文 | English below
 
+## 1.7.3 — 2026-10-07
+
+權杖模式的節點（`--token` 或 `XHARNESS_WEB_TOKEN_FILE`，沒有 `[auth]`）從瀏覽器幾乎進不去。
+
+- **存好的權杖用不到，每次重新載入都要再貼一次。** 1.6.0 加上傳時，`loadFiles()` 被放在 `loadToken()` 前面，第一個請求不帶權杖就出去了。現在先讀權杖、再打第一個請求。
+- **兩個原生 `prompt()` 疊在一起，取消任何一個就只剩裸的 `HTTP 401`。** 頁面載入時檔案清單與 meta 同時 401，各跳一個框；取消後掉進通用錯誤分支，回應已讀過一次，只剩狀態碼，沒說要什麼、去哪拿。
+- **改法：權杖模式也走正式的登入頁**，換成一個「存取權杖」欄位並說明權杖存放在哪、該向誰要。送出前先拿去打 `/api/meta` 驗證，錯的不存。瀏覽器裡存著已失效的權杖（節點輪換過）時會自動清掉並回到登入頁。`prompt()` 整個拿掉。
+
+Token-mode nodes (`--token` or `XHARNESS_WEB_TOKEN_FILE`, no `[auth]`) were close to unusable from a browser.
+
+- **A saved token was never used, so every reload asked again.** When uploads arrived in 1.6.0, `loadFiles()` was placed before `loadToken()`, so the first request went out without a credential. The saved token is now read before anything is sent.
+- **Two native `prompt()` boxes stacked, and cancelling either left a bare `HTTP 401`.** On page load the file list and the meta request both failed and each opened a box; cancelling fell through to the generic error branch with the response already consumed, leaving only a status code.
+- **Token mode now uses the real sign-in page**, with a single access-token field that says where the token lives and who to ask. The value is checked against `/api/meta` before it is kept, so a wrong one is never stored; a stale saved token (after rotation) is cleared and the page returns to sign-in. `prompt()` is gone.
+
 ## 1.7.2 — 2026-10-05
 
 - 修 1.7.0 的 `extra_body` 根本沒送出去：設定檔載入時 `apply_preset()` 只留 `PROVIDER_KEYS` 白名單裡的欄位，而 `extra_body` 不在名單上，於是 `[providers.X] extra_body = { ... }` 被靜默丟掉，reasoning 模型照樣回空 `content`。補進白名單，並加一個測試鎖住白名單與 `OpenAIAdapter` 的參數一致，下次新增參數忘了登記會直接失敗。

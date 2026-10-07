@@ -1272,10 +1272,16 @@ body:not(.view-chat) .composer{display:none}
   <h1>xHarness</h1>
   <p id="gate-sub">請以你的帳號登入。</p>
   <form id="gate-form" autocomplete="on">
-    <label for="gate-user">帳號</label>
-    <input id="gate-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required>
-    <label for="gate-pass">密碼</label>
-    <input id="gate-pass" name="password" type="password" autocomplete="current-password" required>
+    <div id="gate-users">
+      <label for="gate-user">帳號</label>
+      <input id="gate-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+      <label for="gate-pass">密碼</label>
+      <input id="gate-pass" name="password" type="password" autocomplete="current-password" required>
+    </div>
+    <div id="gate-token-box" hidden>
+      <label for="gate-token">存取權杖</label>
+      <input id="gate-token" name="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required disabled>
+    </div>
     <div class="err" id="gate-err"></div>
     <button class="btn primary" id="gate-go" type="submit">登入</button>
   </form>
@@ -1475,10 +1481,13 @@ body:not(.view-chat) .composer{display:none}
     if(token)headers['Authorization']='Bearer '+token;
     const r=await fetch(path,{method:opts.method||'GET',headers,body:opts.body?JSON.stringify(opts.body):undefined});
     if(r.status===401){
+      // Every credential request is the gate, styled and shown once. A native
+      // prompt() used to appear per failing request -- two at once on page
+      // load -- and cancelling either left a bare "HTTP 401" with no way on.
       let d={};try{d=await r.json()}catch(e){}
-      if(d.auth==='users'){showGate();throw new Error('請先登入');}
-      token=prompt('這個伺服器需要存取權杖，請貼上啟動時設定的 token：');
-      if(token){saveToken();return api(path,opts);}
+      token=null;saveToken();   // whatever was sent is missing or no longer valid
+      showGate(true,d.auth==='users'?'users':'token');
+      throw new Error(d.auth==='users'?'請先登入':'需要存取權杖');
     }
     if(!r.ok){let d={};try{d=await r.json()}catch(e){}throw new Error(d.error||('HTTP '+r.status));}
     return r.status===204?null:r.json();
@@ -1703,8 +1712,24 @@ body:not(.view-chat) .composer{display:none}
   // --- identity ---------------------------------------------------
   function saveToken(){try{token?localStorage.setItem('xh-token',token):localStorage.removeItem('xh-token')}catch(e){}}
   function loadToken(){try{token=localStorage.getItem('xh-token')||null}catch(e){token=null}}
-  function showGate(on){gateOn=on!==false;$('#gate').classList.toggle('on',gateOn);
-    if(gateOn)setTimeout(()=>$('#gate-user').focus(),50);}
+  let gateMode='users';
+  function showGate(on,mode){
+    gateOn=on!==false;
+    if(mode)gateMode=mode;
+    const tokenMode=gateMode==='token';
+    $('#gate-users').hidden=tokenMode;
+    $('#gate-token-box').hidden=!tokenMode;
+    // A hidden field marked required silently blocks the submit; disabled
+    // fields are left out of validation, so disable whichever is not shown.
+    $('#gate-user').disabled=$('#gate-pass').disabled=tokenMode;
+    $('#gate-token').disabled=!tokenMode;
+    $('#gate-sub').textContent=tokenMode
+      ?'這台節點以存取權杖保護。權杖存放在啟動服務時指定的檔案裡，請向管理者索取。'
+      :'請以你的帳號登入。';
+    $('#gate-go').textContent=tokenMode?'進入':'登入';
+    $('#gate').classList.toggle('on',gateOn);
+    if(gateOn)setTimeout(()=>$(tokenMode?'#gate-token':'#gate-user').focus(),50);
+  }
   async function signIn(user,password){
     const r=await fetch('/api/login',{method:'POST',
       headers:{'Content-Type':'application/json','X-XHarness-Client':'1'},
@@ -1716,9 +1741,8 @@ body:not(.view-chat) .composer{display:none}
   // The submit is driven by Enter, so an IME confirming a candidate must not send
   // a half-typed form: three checks, any one of them is enough.
   let gateComposing=false;
-  $('#gate-pass').addEventListener('compositionstart',()=>{gateComposing=true;});
-  $('#gate-user').addEventListener('compositionstart',()=>{gateComposing=true;});
-  ['#gate-user','#gate-pass'].forEach(sel=>{
+  ['#gate-user','#gate-pass','#gate-token'].forEach(sel=>{
+    $(sel).addEventListener('compositionstart',()=>{gateComposing=true;});
     $(sel).addEventListener('compositionend',()=>{gateComposing=false;});
     $(sel).addEventListener('keydown',e=>{
       if(e.key==='Enter'&&(gateComposing||e.isComposing||e.keyCode===229))e.preventDefault();
@@ -1729,8 +1753,17 @@ body:not(.view-chat) .composer{display:none}
     if(gateComposing)return;
     const btn=$('#gate-go');btn.disabled=true;$('#gate-err').textContent='';
     try{
-      await signIn($('#gate-user').value.trim(),$('#gate-pass').value);
-      $('#gate-pass').value='';showGate(false);location.reload();
+      if(gateMode==='token'){
+        const candidate=$('#gate-token').value.trim();
+        // Check it before keeping it: a wrong token saved to storage would
+        // only bring the gate straight back after the reload.
+        const r=await fetch('/api/meta',{headers:{'Authorization':'Bearer '+candidate,'X-XHarness-Client':'1'}});
+        if(!r.ok)throw new Error('權杖不正確');
+        token=candidate;saveToken();
+      }else{
+        await signIn($('#gate-user').value.trim(),$('#gate-pass').value);
+      }
+      $('#gate-pass').value='';$('#gate-token').value='';showGate(false);location.reload();
     }catch(err){$('#gate-err').textContent=err.message;}
     finally{btn.disabled=false;}
   });
@@ -1927,6 +1960,7 @@ body:not(.view-chat) .composer{display:none}
       if(token)headers['Authorization']='Bearer '+token;
       const r=await fetch('/api/files',{method:'POST',headers,body:form});
       const d=await r.json().catch(()=>({}));
+      if(r.status===401){token=null;saveToken();showGate(true,d.auth==='users'?'users':'token');return;}
       (d.refused||[]).forEach(item=>el('error','上傳未完成',item.name+'：'+item.reason));
       const stored=d.stored||[];
       if(stored.length){
@@ -2011,11 +2045,14 @@ body:not(.view-chat) .composer{display:none}
 
   (async function init(){
     showView('chat');
-    loadFiles();   // also decides whether the attach button is shown
     document.body.classList.add('landing');   // nothing has happened yet ('empty' is taken by the empty-list style)
+    // The saved credential must be loaded before any request goes out: the
+    // file list used to race ahead without it, so a stored token was never
+    // used and every reload asked again.
     loadToken();
     try{applyMeta(await api('/api/meta'));}
-    catch(e){if(!gateOn)el('error','錯誤',e.message);}
+    catch(e){if(!gateOn)el('error','錯誤',e.message);return;}
+    loadFiles();   // also decides whether the attach button is shown
   })();
 })();
 </script>
