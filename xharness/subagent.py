@@ -21,7 +21,10 @@ from .tools import Tool, ToolContext, ToolResult, register_tools
 DEFAULT_MAX_WORKERS = 4
 DEFAULT_CHILD_MAX_TURNS = 20
 MAX_CHILD_OUTPUT = 20_000
-CHILD_TOOLS = {"subagent", "subagent_batch"}
+#: Hidden from children. They cannot spawn children, and they do not question the
+#: person: a parallel batch would bury them in questions. A child that is missing
+#: something says so in its answer, and the parent can ask.
+CHILD_TOOLS = {"subagent", "subagent_batch", "ask_user"}
 
 
 def child_system_prompt(cwd: str, name: str, context: str, model: str | None = None) -> str:

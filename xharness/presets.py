@@ -25,6 +25,7 @@ from .tools.security import security_tool_plugin
 from .tools.todo import todo_tool_plugin
 from .tools.webfetch import webfetch_tool_plugin
 from .tools.browser import browser_tools_plugin
+from .tools.ask import ask_tool_plugin
 
 
 PRIVATE_PREFIXES = ("127.", "10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.",
@@ -76,6 +77,7 @@ def build_harness(
     harness.use("tool-bash", bash_tool_plugin)
     harness.use("tool-todo", todo_tool_plugin)
     harness.use("tool-security", security_tool_plugin)
+    harness.use("tool-ask", ask_tool_plugin)
     harness.use("telemetry", telemetry_plugin(config.telemetry))
     harness.use("subagent", subagent_plugin(config.subagent))
     if config.memory.get("enabled", True):

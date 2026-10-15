@@ -107,6 +107,9 @@ class TelegramBridge:
         self.cwd = cwd or os.getcwd()
         self.chats: dict[int, Any] = {}  # chat id -> Conversation
         self.pending: dict[str, tuple[int, str]] = {}  # approval id -> (chat, conv id)
+        #: chat -> (question id, conv id, options) for the question waiting there.
+        #: While one is open, a plain text message in that chat answers it.
+        self.asking: dict[int, tuple[str, str, list[dict[str, str]]]] = {}
         self.offset = 0
         self.lock = threading.Lock()
         self._stop = threading.Event()
@@ -154,6 +157,15 @@ class TelegramBridge:
         if text.startswith("/"):
             self._command(chat, text)
             return
+        open_question = self.asking.get(chat)
+        if open_question is not None:
+            question_id, conv_id, _options = open_question
+            conv = self.app.get(conv_id)
+            if conv is not None and self.app.answer(conv, question_id, text):
+                self.asking.pop(chat, None)
+                self.send(chat, "收到你的回答，繼續中…")
+                return
+            self.asking.pop(chat, None)  # stale: fall through and treat it as a new task
         conv = self._conversation(chat)
         if not self.app.send(conv, text):
             self.send(chat, "上一個任務還在跑；先 /stop 或等它結束。")
@@ -198,6 +210,9 @@ class TelegramBridge:
         if chat not in self.allowed or ":" not in data:
             return
         verb, approval_id = data.split(":", 1)
+        if verb == "ans":
+            self._on_answer_button(chat, query_id, message, approval_id)
+            return
         target = self.pending.pop(approval_id, None)
         if target is None or target[0] != chat:
             self._answer(query_id, "這個審批已處理或不屬於此對話。")
@@ -213,6 +228,31 @@ class TelegramBridge:
                 self.api("editMessageText", {"chat_id": chat, "message_id": message["message_id"],
                                              "text": f"{message.get('text') or ''}\n\n{verdict}"})
             except Exception as error:  # noqa: BLE001 - cosmetic; the approval itself already went through
+                print(f"[telegram] edit failed: {error}", file=sys.stderr)
+
+    def _on_answer_button(self, chat: int, query_id: str, message: dict[str, Any], payload: str) -> None:
+        """callback_data "ans:<question id>:<option number>"."""
+        question_id, _, number = payload.partition(":")
+        open_question = self.asking.get(chat)
+        if open_question is None or open_question[0] != question_id or not number.isdigit():
+            self._answer(query_id, "這個問題已回答或不屬於此對話。")
+            return
+        _, conv_id, options = open_question
+        index = int(number)
+        conv = self.app.get(conv_id)
+        if not (0 <= index < len(options)) or conv is None:
+            self._answer(query_id, "這個問題已失效。")
+            return
+        label = options[index]["label"]
+        ok = self.app.answer(conv, question_id, label)
+        self.asking.pop(chat, None)
+        verdict = f"你選了：{label}" if ok else "這個問題已失效"
+        self._answer(query_id, verdict)
+        if message.get("message_id"):
+            try:
+                self.api("editMessageText", {"chat_id": chat, "message_id": message["message_id"],
+                                             "text": f"{message.get('text') or ''}\n\n{verdict}"})
+            except Exception as error:  # noqa: BLE001 - cosmetic; the answer itself already went through
                 print(f"[telegram] edit failed: {error}", file=sys.stderr)
 
     def _answer(self, query_id: str, text: str) -> None:
@@ -243,6 +283,25 @@ class TelegramBridge:
                             {"text": "拒絕", "callback_data": f"deny:{event['id']}"},
                         ]]},
                     })
+                elif kind == "question":
+                    options = list(event.get("options") or [])
+                    self.asking[chat] = (event["id"], conv.id, options)
+                    lines = [f"需要你回答：\n{event.get('question')}", ""]
+                    for index, option in enumerate(options, 1):
+                        detail = f"：{option['description']}" if option.get("description") else ""
+                        lines.append(f"{index}. {option['label']}{detail}")
+                    lines += ["", "按下面的按鈕，或直接回覆文字。"]
+                    self.api("sendMessage", {
+                        "chat_id": chat,
+                        "text": "\n".join(lines),
+                        "reply_markup": {"inline_keyboard": [
+                            [{"text": option["label"][:60], "callback_data": f"ans:{event['id']}:{index}"}]
+                            for index, option in enumerate(options)
+                        ]},
+                    })
+                elif kind == "question_resolved":
+                    if self.asking.get(chat, ("",))[0] == event.get("id"):
+                        self.asking.pop(chat, None)
                 elif kind == "done":
                     self.send(chat, str(event.get("answer") or ""))
                     return

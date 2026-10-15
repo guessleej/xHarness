@@ -105,16 +105,20 @@ class SessionLog:
 
 
 def messages_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Rebuild chat messages from logged events, for --resume."""
+    """Rebuild chat messages from logged events, for --resume.
+
+    "context" events (the system prompt a run started with) are not replayed:
+    a resumed session gets today's system prompt, and logs that one.
+    """
     messages: list[dict[str, Any]] = []
     for event in events:
         if event.get("agent") not in (None, "main"):
             continue  # subagent traffic is logged for audit, not replayed
         if event.get("type") == "message":
-            message: dict[str, Any] = {
-                "role": event.get("role", "user"),
-                "content": str(event.get("content") or ""),
-            }
+            content = str(event.get("content") or "")
+            if event.get("context"):
+                content = f"{content}\n\n[{event['context']}]"  # as agent.with_context sent it
+            message: dict[str, Any] = {"role": event.get("role", "user"), "content": content}
             if event.get("tool_calls"):
                 message["tool_calls"] = event["tool_calls"]
             messages.append(message)

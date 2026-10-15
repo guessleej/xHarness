@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -20,6 +22,13 @@ from .context import Context, Plugin
 #: Fields the adapter owns; extra_body may not touch them.
 RESERVED_BODY_KEYS = frozenset({"model", "messages", "stream", "stream_options", "tools"})
 DEFAULT_TIMEOUT_SECONDS = 600
+#: Statuses that mean "try again shortly", not "this request is wrong".
+RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+#: Waits before the 2nd and 3rd attempt. A llama-server behind a load balancer
+#: answers 502 for the seconds it takes a backend to come back; failing the
+#: whole task on that is worse than waiting.
+RETRY_DELAYS = (2.0, 6.0)
+MAX_RETRY_AFTER_SECONDS = 30.0
 
 
 @dataclass
@@ -33,6 +42,14 @@ class AssistantTurn:
     content: str
     tool_calls: list[dict[str, str]] = field(default_factory=list)
     usage: Usage | None = None
+
+
+def _retry_after(value: str | None) -> float | None:
+    """Seconds from a Retry-After header (the delta form), capped."""
+    try:
+        return min(max(float(value), 0.0), MAX_RETRY_AFTER_SECONDS) if value else None
+    except ValueError:
+        return None  # the HTTP-date form; the default delay is close enough
 
 
 class OpenAIAdapter:
@@ -72,6 +89,39 @@ class OpenAIAdapter:
             key: value for key, value in (extra_body or {}).items() if key not in RESERVED_BODY_KEYS
         }
         self.timeout_seconds = timeout_seconds
+        self.sleep: Callable[[float], None] = time.sleep  # replaced in tests
+
+    def _open(self, request: urllib.request.Request) -> Any:
+        """Send the request, retrying transient failures.
+
+        Only failures before the response starts are retried: once tokens have
+        streamed to the user, a second attempt would repeat them.
+        """
+        for attempt in range(len(RETRY_DELAYS) + 1):
+            last = attempt == len(RETRY_DELAYS)
+            try:
+                # Scheme is validated to http/https in __init__, so file:/ and
+                # custom schemes cannot reach this call.
+                return urllib.request.urlopen(request, timeout=self.timeout_seconds)  # nosec B310
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode("utf-8", errors="replace")[:500]
+                if last or error.code not in RETRYABLE_STATUS:
+                    raise RuntimeError(f"LLM request failed: {error.code} {error.reason} {detail}") from error
+                delay = _retry_after(error.headers.get("Retry-After") if error.headers else None)
+                reason = f"{error.code} {error.reason}"
+            except urllib.error.URLError as error:
+                # Refused or reset: the server is restarting. A DNS failure or a
+                # timeout will not fix itself in seconds, so those fail now.
+                if last or not isinstance(error.reason, ConnectionError):
+                    raise RuntimeError(
+                        f"LLM request failed: cannot reach {self.base_url} ({error.reason})"
+                    ) from error
+                delay = None
+                reason = str(error.reason)
+            wait = delay if delay is not None else RETRY_DELAYS[attempt]
+            print(f"[xharness] model request failed ({reason}); retrying in {wait:g}s", file=sys.stderr)
+            self.sleep(wait)
+        raise AssertionError("unreachable")
 
     def _wire_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         wire: list[dict[str, Any]] = []
@@ -145,15 +195,7 @@ class OpenAIAdapter:
             headers=headers,
             method="POST",
         )
-        try:
-            # Scheme is validated to http/https in __init__, so file:/ and custom
-            # schemes cannot reach this call.
-            response = urllib.request.urlopen(request, timeout=self.timeout_seconds)  # nosec B310
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(f"LLM request failed: {error.code} {error.reason} {detail}") from error
-        except urllib.error.URLError as error:
-            raise RuntimeError(f"LLM request failed: cannot reach {self.base_url} ({error.reason})") from error
+        response = self._open(request)
 
         content_parts: list[str] = []
         calls: dict[int, dict[str, str]] = {}

@@ -22,6 +22,10 @@ class ToolContext:
     approve: Callable[[str], bool]
     #: Name of the agent making the call, for audit trails.
     agent: str = "main"
+    #: Puts a multiple-choice question to the person and returns their raw reply,
+    #: or None if nobody answered. None as the channel itself means no person is
+    #: attached (headless run, eval, sub-task) -- see tools/ask.py.
+    ask: Callable[[str, list[dict[str, str]]], str | None] | None = None
 
 
 @dataclass

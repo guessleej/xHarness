@@ -8,7 +8,7 @@ approve / deny / stop actions to the node that owns the conversation.
 Trust model: a node must bind a non-loopback address with --token, and the
 hub keeps that token only in a 0600 file (`token_file`) or an environment
 variable (`token_env`), never in the config itself.
-The hub forwards exactly two actions (approvals, stop) on an allow-list;
+The hub forwards exactly three actions (approvals, answers, stop) on an allow-list;
 the browser never sees node tokens and never talks to nodes directly.
 """
 
@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 DEFAULT_TIMEOUT_SECONDS = 3.0
-FORWARDABLE = {"approvals", "stop"}
+FORWARDABLE = {"approvals", "answers", "stop"}
 
 
 @dataclass
@@ -152,9 +152,11 @@ def format_table(node_reports: list[dict[str, Any]]) -> str:
         for item in report["items"]:
             usage = item.get("usage") or {}
             pending = len(item.get("pending_approvals") or [])
+            asking = len(item.get("pending_questions") or [])
+            flags = (f"pending={pending}  " if pending else "") + (f"asking={asking}  " if asking else "")
             lines.append(
                 f"    {item.get('state', '?'):8} {usage.get('total_tokens', 0):>7} tok  "
-                f"{'pending=' + str(pending) + '  ' if pending else ''}{(item.get('preview') or '(no message)')[:60]}"
+                f"{flags}{(item.get('preview') or '(no message)')[:60]}"
             )
     return "\n".join(lines) if lines else "no fleet nodes configured"
 

@@ -11,7 +11,7 @@ from typing import Any
 from datetime import datetime
 
 from . import __version__
-from .agent import Agent, AgentOptions, default_system_prompt
+from .agent import Agent, AgentOptions
 from .config import load_config
 from .evals import format_report, load_cases, run_suite, write_results
 from .fleet import format_table, load_nodes, poll_all, poll_usage_all
@@ -308,6 +308,20 @@ def _prompt_approval(summary: str) -> bool:
     return answer.strip().lower().startswith("y")
 
 
+def _prompt_question(question: str, options: list[dict[str, str]]) -> str | None:
+    """ask_user in a terminal: numbered options, a number or free text back.
+    The tool maps a bare number to that option's label."""
+    print(f"\n[question] {question}")
+    for index, option in enumerate(options, 1):
+        detail = f" -- {option['description']}" if option.get("description") else ""
+        print(f"  {index}. {option['label']}{detail}")
+    try:
+        answer = input(f"answer [1-{len(options)} or your own words]: ")
+    except EOFError:
+        return None
+    return answer.strip() or None
+
+
 def _run_users(args: Any, config: Any) -> int:
     """Account administration. Passwords are typed, never passed as arguments:
     a command line ends up in shell history, `ps` output and CI logs."""
@@ -460,6 +474,9 @@ def main(argv: list[str] | None = None) -> int:
         approval_mode=approval_mode,
         project_instructions=config.project_instructions and not args.no_instructions,
         prompt=_prompt_approval if sys.stdin.isatty() else None,
+        # A piped or scheduled run has nobody to answer; the tool then says so
+        # at once instead of blocking on stdin.
+        ask=_prompt_question if sys.stdin.isatty() else None,
         initial_messages=initial_messages,
         on_delta=lambda text: (sys.stdout.write(text), sys.stdout.flush()) and None,
         on_tool_start=lambda name, call_args: print(f"\n[tool] {name} {call_args[:200]}"),
@@ -515,12 +532,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{tool.name}{marker} — {tool.description}")
                 continue
             if line == "/clear":
-                agent.messages[:] = [
-                    {
-                        "role": "system",
-                        "content": config.system_prompt or default_system_prompt(options.cwd or ".", str(config.provider["model"])),
-                    }
-                ]
+                agent.reset()
                 print("conversation cleared")
                 continue
             try:

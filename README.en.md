@@ -16,7 +16,7 @@ Left to right: the workspace and the model endpoint feed xHarness; an operator g
 
 ## Why
 
-Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one developer can audit: about 8,100 lines of Python (package code, excluding 3,346 lines of tests), **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a 227-case test suite that finishes in about 20 seconds (most of it spent shutting down test HTTP servers, not computing).
+Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one developer can audit: about 9,500 lines of Python (package code, excluding 4,470 lines of tests), **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a 322-case test suite that finishes in about 27 seconds (most of it spent shutting down test HTTP servers, not computing).
 
 ## Features
 
@@ -104,6 +104,7 @@ xharness --resume 2026-08-22-ab12cd34   # continue a session
 | `memory_verify` | yes | Confirm a stale memory is still true; resets its verification date |
 | `memory_consolidate` | yes | Tidy one topic: find duplicates / contradictions / stale entries and merge; without `apply` it only returns the plan |
 | `security_scan` | no | Run bandit / pip-audit / gitleaks against a directory (missing scanners are skipped) |
+| `ask_user` | no | Put a 2-4 option question to the person and wait (they may also type their own answer); with nobody attached it says so at once instead of blocking |
 | `web_search` | configurable | Opens the DuckDuckGo results page in a real browser and returns up to 10 results as title / URL / snippet; present only when `[tools] browser` is set |
 | `browser_open` | configurable | Opens a page in a real browser and returns the rendered visible text (truncated at 40k); present only when `[tools] browser` is set |
 | `webfetch` | yes | Fetch an http(s) URL as readable text; **disabled by default** (`[tools] webfetch = true`) — enabling it is the only egress besides the model endpoint, and every fetch goes through approval |
@@ -216,6 +217,40 @@ a password is right. No searching, no attribute mapping — roles and quotas sta
 the config. Empty passwords are refused before connecting (an empty simple bind is
 an anonymous bind, which most servers answer with success), DN templates accept a
 strict character set only, and `ldaps://` verifies the certificate chain by default.
+
+## Letting the model ask instead of guess
+
+When a model is missing a fact -- how this system works, which of two files you meant -- its default is to fill the gap with something plausible, and an invented command or path costs far more than a question. `ask_user` gives it a legitimate alternative: put a 2-4 option question to you and carry on with the same task once you answer.
+
+The question appears wherever you are:
+
+| Front end | How to answer |
+|---|---|
+| Web UI / desktop | A question card in the transcript; click an option or type your own (IME-safe input) |
+| Fleet view | Answer on the card, for this machine or any node (the hub forwards it) |
+| Telegram | One button per option; a plain text reply also counts and does not start a new task |
+| Terminal | Numbered options; type a number or your own words |
+| Unattended (pipelines, schedules, evals) | The model is told at once that nobody is there, and asked to state its assumption or stop -- it never blocks waiting |
+
+The default system prompt also asks the model, when a task gives a relative date ("next Friday", "in two weeks") that will be written into a file or message, to work out the exact date and confirm it with you before writing. Measured: granite turned "下週五" (next Friday) into the wrong date in 8 of 8 runs; you catch that at a glance, a file does not.
+
+If nobody answers within 15 minutes or the task is stopped, the model is told there was no answer and not to ask again. Subagents do not get the tool: a parallel batch asking you questions at once would bury you, so they report what they are missing to the parent, which decides whether to ask.
+
+The default system prompt tells the model to use `ask_user` rather than end its turn with a question, and never to fill such a gap with an invented command, path or fact. In practice models do not always comply and often still ask in prose -- that works too (reply with your next message), it just loses the option buttons and is invisible to an unattended run. To make the tool stick, say it again in the project's `AGENTS.md`.
+
+## Long tasks that do not wedge themselves
+
+These follow patterns from [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), aimed at what self-hosted models in a school server room actually do:
+
+| Situation | What xHarness does |
+|---|---|
+| Model server restarting, load balancer answering 502/503, rate limit 429 | Retries twice (2 s, then 6 s; honours `Retry-After` up to 30 s). Only before the response starts, so streamed text is never repeated. 400, 401 and unknown hosts fail at once |
+| One command printing tens of thousands of characters | Tool output over 16,000 characters is saved in full under `.xharness/spill/` in the working directory; the model sees the head, the tail and the file name, and can `read` the middle in pages. The directory carries its own `.gitignore` and keeps the latest 20 files |
+| A conversation outgrowing the model's context | When the model reports the context is exceeded, older tool outputs are replaced by a one-line note and the request is sent again, keeping the latest two; the originals stay in the session log |
+| The model calling the same tool with the same arguments again and again | Calls 3, 5 and 8 get a note that the result will not change and to try something else or ask -- advice only, nothing is blocked |
+| A conversation left open overnight | The first message after the date changes carries today's date, so the model does not take yesterday for today |
+
+Everything the model sees goes into the session log, the system prompt (identity, date, `AGENTS.md`) included, so "what was the model told" has an answer afterwards.
 
 ## User tiers and uploaded files
 

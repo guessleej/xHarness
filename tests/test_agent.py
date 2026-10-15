@@ -210,3 +210,189 @@ def test_no_instructions_anywhere_is_none(tmp_path):
     from xharness.agent import load_project_instructions
 
     assert load_project_instructions(str(tmp_path), str(tmp_path)) is None
+
+
+def test_date_line_spells_out_the_weekday_and_offset():
+    from datetime import datetime, timedelta, timezone
+    from xharness.agent import current_date_line
+    taipei = timezone(timedelta(hours=8))
+    line = current_date_line(datetime(2026, 10, 14, 20, 27, tzinfo=taipei))
+    assert "2026-10-14 (Wednesday)" in line and "UTC+08:00" in line and "CST" not in line
+
+
+def test_system_prompt_carries_today_even_when_custom():
+    """Without it the model assumes a date from training data and writes it into files."""
+    from datetime import datetime
+    from xharness.agent import Agent, AgentOptions
+    from xharness.context import Harness
+    from xharness.llm import AssistantTurn
+    from xharness.tools import tools_plugin
+
+    class Echo:
+        model = "m"
+        def __init__(self): self.seen = None
+        def stream(self, messages, tools, on_delta=None):
+            self.seen = messages
+            return AssistantTurn(content="ok")
+
+    harness = Harness()
+    harness.use("tools", tools_plugin)
+    llm = Echo()
+    harness.ctx.provide("llm", llm)
+    Agent(harness.ctx, AgentOptions(system_prompt="custom prompt", project_instructions=False)).run("hi")
+    system = llm.seen[0]["content"]
+    assert system.startswith("custom prompt") and datetime.now().strftime("%Y-%m-%d") in system
+
+
+
+class Recorder:
+    def __init__(self):
+        self.events = []
+
+    def append(self, event):
+        self.events.append(event)
+
+
+def call(name, arguments, call_id="c"):
+    return {"id": call_id, "name": name, "arguments": arguments}
+
+
+def test_system_prompt_is_logged_once_as_context():
+    harness, _adapter = build([AssistantTurn(content="a"), AssistantTurn(content="b")])
+    log = Recorder()
+    harness.ctx.provide("session", log)
+    agent = Agent(harness.ctx, AgentOptions())
+    agent.run("one")
+    agent.run("two")
+    context = [event for event in log.events if event["type"] == "context"]
+    assert len(context) == 1
+    assert context[0]["content"] == agent.messages[0]["content"]
+    assert "Today is" in context[0]["content"]
+
+
+def test_new_day_is_told_with_the_message_and_logged(monkeypatch):
+    import datetime as real
+
+    from xharness import agent as agent_module
+    from xharness.session import messages_from_events
+
+    harness, adapter = build([AssistantTurn(content="a"), AssistantTurn(content="b")])
+    log = Recorder()
+    harness.ctx.provide("session", log)
+    agent = Agent(harness.ctx, AgentOptions())
+    agent.run("same day")
+    assert adapter.seen[0][-1]["content"] == "same day"
+
+    class Tomorrow(real.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real.datetime.now(tz) + real.timedelta(days=1)
+
+    monkeypatch.setattr(agent_module, "datetime", Tomorrow)
+    agent.run("next day")
+    sent = adapter.seen[1][-1]["content"]
+    assert sent.startswith("next day\n\n[Today is ")
+    logged = [event for event in log.events if event.get("role") == "user"][-1]
+    assert logged["content"] == "next day" and logged["context"]
+    # Resume replays what the model was sent, not just what the person typed.
+    assert messages_from_events(log.events)[-2]["content"] == sent
+
+
+def test_repeated_identical_calls_get_a_note_at_three():
+    same = '{"text": "x"}'
+    turns = [AssistantTurn(content="", tool_calls=[call("echo", same, f"c{i}")]) for i in range(3)]
+    harness, _adapter = build(turns + [AssistantTurn(content="done")])
+    agent = Agent(harness.ctx, AgentOptions())
+    agent.run("loop")
+    results = [message["content"] for message in agent.messages if message["role"] == "tool"]
+    assert "call 3 in a row" not in results[1]
+    assert "call 3 in a row to echo" in results[2]
+
+
+def test_argument_order_does_not_hide_a_repeat():
+    turns = [
+        AssistantTurn(content="", tool_calls=[call("echo", '{"text": "x", "n": 1}', "a")]),
+        AssistantTurn(content="", tool_calls=[call("echo", '{"n": 1, "text": "x"}', "b")]),
+        AssistantTurn(content="", tool_calls=[call("echo", '{"text":"x","n":1}', "c")]),
+        AssistantTurn(content="done"),
+    ]
+    harness, _adapter = build(turns)
+    agent = Agent(harness.ctx, AgentOptions())
+    agent.run("loop")
+    assert "in a row" in [m for m in agent.messages if m["role"] == "tool"][-1]["content"]
+
+
+def test_oversized_output_is_spilled_to_a_readable_file(tmp_path):
+    from xharness.agent import INLINE_OUTPUT_CHARS, SPILL_HEAD_CHARS, spill_output
+
+    small = "x" * INLINE_OUTPUT_CHARS
+    assert spill_output(small, str(tmp_path)) == small
+    big = "H" * SPILL_HEAD_CHARS + "M" * 50_000 + "TAIL"
+    shown = spill_output(big, str(tmp_path))
+    assert len(shown) < INLINE_OUTPUT_CHARS + 500
+    from xharness.agent import SPILL_TAIL_CHARS
+
+    assert shown.startswith("H" * SPILL_HEAD_CHARS + "\n\n[... the full output")
+    assert shown.endswith("TAIL") and shown.count("M") == SPILL_TAIL_CHARS - len("TAIL")
+    spilled = list((tmp_path / ".xharness" / "spill").iterdir())
+    assert len(spilled) == 1 and spilled[0].read_text() == big
+    assert spilled[0].name in shown
+    assert (tmp_path / ".xharness" / ".gitignore").read_text() == "*\n"
+
+
+def test_spill_keeps_only_recent_files(tmp_path):
+    from xharness.agent import INLINE_OUTPUT_CHARS, SPILL_KEEP_FILES, spill_output
+
+    for _ in range(SPILL_KEEP_FILES + 3):
+        spill_output("y" * (INLINE_OUTPUT_CHARS + 1), str(tmp_path))
+    assert len(list((tmp_path / ".xharness" / "spill").iterdir())) == SPILL_KEEP_FILES
+
+
+class OverflowOnce(FakeAdapter):
+    def stream(self, messages, tools, on_delta=None):
+        if not getattr(self, "overflowed", False) and len(self.seen) == 3:
+            self.overflowed = True
+            self.seen.append(None)
+            raise RuntimeError("LLM request failed: 400 Bad Request the request exceeds the available context size")
+        return super().stream(messages, tools, on_delta)
+
+
+def test_context_overflow_prunes_old_tool_results_and_retries():
+    turns = [AssistantTurn(content="", tool_calls=[call("echo", f'{{"text": "{i}"}}', f"c{i}")]) for i in range(3)]
+    harness, adapter = build(turns + [AssistantTurn(content="fits now")])
+    adapter.__class__ = OverflowOnce
+    log = Recorder()
+    harness.ctx.provide("session", log)
+    agent = Agent(harness.ctx, AgentOptions())
+    assert agent.run("go") == "fits now"
+    contents = [m["content"] for m in agent.messages if m["role"] == "tool"]
+    assert contents[0].startswith("[output removed")
+    assert contents[1:] == ["echo:1", "echo:2"]
+    assert {"type": "context-pruned", "tool_results": 1} in log.events
+    # The log keeps the original output.
+    assert [e["output"] for e in log.events if e["type"] == "tool-result"][0] == "echo:0"
+
+
+def test_other_model_errors_are_not_mistaken_for_overflow():
+    from xharness.agent import is_context_overflow
+
+    assert is_context_overflow(RuntimeError("This model's maximum context length is 32768 tokens"))
+    assert is_context_overflow(RuntimeError("context_length_exceeded"))
+    assert not is_context_overflow(RuntimeError("LLM request failed: 401 Unauthorized"))
+    assert not is_context_overflow(RuntimeError("cannot reach http://x (refused)"))
+
+
+def test_reset_keeps_a_dated_system_prompt():
+    harness, _ = build([AssistantTurn(content="a")])
+    agent = Agent(harness.ctx, AgentOptions(system_prompt="custom"))
+    agent.run("hi")
+    agent.reset()
+    assert len(agent.messages) == 1
+    assert agent.messages[0]["content"].startswith("custom\nToday is ")
+
+
+def test_default_prompt_asks_to_confirm_relative_dates():
+    from xharness.agent import default_system_prompt
+
+    prompt = default_system_prompt("/w", "m")
+    assert "relative date" in prompt and "confirm the exact date" in prompt

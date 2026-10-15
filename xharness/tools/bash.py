@@ -9,7 +9,9 @@ from ..context import Context, Plugin
 from ..sandbox import Sandbox
 from . import Tool, ToolContext, ToolResult, register_tools
 
-MAX_OUTPUT = 50_000
+# The agent saves anything past its inline limit to a file the model can read
+# (agent.spill_output); this cap only bounds memory.
+MAX_OUTPUT = 1_000_000
 DEFAULT_TIMEOUT_SECONDS = 120
 MAX_TIMEOUT_SECONDS = 600
 

@@ -2,6 +2,36 @@
 
 中文 | English below
 
+## 1.8.0 — 2026-10-15
+
+讓模型問人而不是猜，並參考 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 補上長任務的幾個防護。
+
+- **`ask_user` 工具**：模型缺一個只有人知道的事實時，提出 2～4 個選項的問題，等回答再繼續同一個任務。Web UI／桌面版是問題卡（選項按鈕＋可自己打字，有輸入法防護）、艦隊視圖可代答其他節點、Telegram 每個選項一顆按鈕且直接回文字也算、終端機列編號選項。無人值守時立刻告訴模型「沒有人在」，不會卡住；15 分鐘沒人回或任務被停止，模型會被告知沒有回答。子代理拿不到這個工具。
+- **system prompt 每次帶今天日期與星期**（含 UTC 偏移），自訂 system prompt 也帶。實測沒有它時 granite 認定今天是 2025-04-21，並把錯的日期寫進檔案。對話開著過夜，換日後第一則訊息會附上新日期。
+- **相對日期寫入前先確認**：任務有「下週五」這類日期又要寫進檔案時，先算出確切日期並跟人確認。實測 granite 換算「下週五」8 次錯 8 次（給了日曆也一樣，所以日曆沒留）；加上這條後 8 次裡有 6 次在動手前把算出的日期講出來讓人看，把錯日期直接寫進檔案的從 3 次降到 1 次。這是安全網，不是讓模型算對。
+- **先看再問、用同一種字體回答**：要問「哪一份」之前先用工具看工作目錄；繁體中文提問用繁體中文回答。
+- **模型請求自動重試**：502／503／504／500／429 與連線被拒，等 2 秒、6 秒各重試一次（照 `Retry-After`，最多 30 秒）。只在回應開始前重試，已串流的字不會重複；400、401、找不到主機不重試。
+- **大輸出改存檔**：超過 16,000 字的工具輸出全文存到工作目錄的 `.xharness/spill/`（自帶 `.gitignore`，留最近 20 份），模型只看開頭、結尾與檔名，中間可用 `read` 分段讀。bash 原本 50,000 字就截斷丟棄。
+- **context 爆了自救一次**：模型回「超出 context」時，把較舊的工具輸出換成一行說明後重送，保留最近兩筆，原文仍在 session 記錄。
+- **重複呼叫提醒**：同工具同參數連續第 3、5、8 次時，在結果後附註「結果不會變」。只提醒，不擋。
+- **模型看到的都進記錄**：system prompt（身分、日期、`AGENTS.md`）以 `context` 事件寫進 session，事後查得到模型當時被告知什麼。
+- 修：終端機 `/clear` 之後的 system prompt 少了日期、站台與專案指示。
+- 問題卡與審批卡拿掉左側色條，改用淡色底。
+
+Letting the model ask instead of guess, plus long-task safeguards modelled on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
+
+- **`ask_user` tool**: when the model is missing a fact only the person has, it puts a 2-4 option question and carries on with the same task once answered. Web UI / desktop show a question card (option buttons plus free text, IME-safe); the fleet view answers for any node; Telegram gives one button per option and a plain reply also counts; the terminal lists numbered options. Unattended runs tell the model at once that nobody is there, so nothing blocks; no answer within 15 minutes, or a stopped task, is reported as no answer. Subagents do not get the tool.
+- **Today's date and weekday in every system prompt** (with the UTC offset), custom prompts included. Without it granite took today to be 2025-04-21 and wrote that wrong date into a file. A conversation left open overnight gets the new date with its first message of the day.
+- **Confirm relative dates before writing them**: when a task gives a date like "next Friday" that will go into a file, work it out and confirm it with the person. Measured: granite resolved "下週五" wrongly in 8 of 8 runs (with or without a calendar, so the calendar was dropped); with this rule it stated its date before acting in 6 of 8 runs, and wrote a wrong date straight into the file in 1 of 8, down from 3. A safety net, not a fix for the arithmetic.
+- **Look before asking, answer in the same script**: check the working directory before asking "which one"; answer Traditional Chinese in Traditional Chinese.
+- **Model requests retry**: 502/503/504/500/429 and refused connections retry after 2 s and 6 s (`Retry-After` honoured up to 30 s), only before the response starts, so streamed text is never repeated; 400, 401 and unknown hosts fail at once.
+- **Large output is saved, not dropped**: tool output over 16,000 characters is saved in full under `.xharness/spill/` (own `.gitignore`, latest 20 kept); the model sees head, tail and file name and can `read` the middle. bash used to cut at 50,000 characters and discard the rest.
+- **Recovering once from a full context**: when the model reports the context exceeded, older tool outputs become a one-line note and the request is resent, keeping the latest two; the originals stay in the session log.
+- **Repeat-call note**: the 3rd, 5th and 8th identical call in a row gets a note that the result will not change. Advice only.
+- **What the model sees is logged**: the system prompt (identity, date, `AGENTS.md`) is written to the session as a `context` event.
+- Fix: after `/clear` in the terminal the system prompt lost the date and the site and project instructions.
+- Question and approval cards drop the left colour bar for a tinted background.
+
 ## 1.7.3 — 2026-10-07
 
 權杖模式的節點（`--token` 或 `XHARNESS_WEB_TOKEN_FILE`，沒有 `[auth]`）從瀏覽器幾乎進不去。

@@ -63,8 +63,64 @@ def test_http_error_raises_with_status_and_detail(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     adapter = OpenAIAdapter(base_url="http://localhost:9/v1", model="m1")
+    adapter.sleep = lambda seconds: None
     with pytest.raises(RuntimeError, match="429.*quota exceeded"):
         adapter.stream([{"role": "user", "content": "x"}], [])
+
+
+def flaky(monkeypatch, failures):
+    """urlopen that raises each of `failures` in turn, then streams "ok"."""
+    calls = []
+
+    def fake_urlopen(request, timeout=None):
+        calls.append(request)
+        if len(calls) <= len(failures):
+            raise failures[len(calls) - 1](request)
+        return sse([json.dumps({"choices": [{"delta": {"content": "ok"}}]}), "[DONE]"])
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    adapter = OpenAIAdapter(base_url="http://localhost:9/v1", model="m1")
+    waits = []
+    adapter.sleep = waits.append
+    return adapter, calls, waits
+
+
+def http_error(code, headers=None):
+    import email.message
+
+    message = email.message.Message()
+    for key, value in (headers or {}).items():
+        message[key] = value
+    return lambda request: urllib.error.HTTPError(request.full_url, code, "x", hdrs=message, fp=io.BytesIO(b""))
+
+
+def test_transient_failures_are_retried_with_backoff(monkeypatch):
+    refused = lambda request: urllib.error.URLError(ConnectionRefusedError(61, "refused"))
+    adapter, calls, waits = flaky(monkeypatch, [http_error(502), refused])
+    assert adapter.stream([{"role": "user", "content": "x"}], []).content == "ok"
+    assert len(calls) == 3
+    assert waits == [2.0, 6.0]
+
+
+def test_retry_after_is_honoured_and_capped(monkeypatch):
+    adapter, _calls, waits = flaky(monkeypatch, [http_error(429, {"Retry-After": "3"}), http_error(503, {"Retry-After": "999"})])
+    adapter.stream([{"role": "user", "content": "x"}], [])
+    assert waits == [3.0, 30.0]
+
+
+def test_a_bad_request_is_not_retried(monkeypatch):
+    adapter, calls, waits = flaky(monkeypatch, [http_error(400)])
+    with pytest.raises(RuntimeError, match="400"):
+        adapter.stream([{"role": "user", "content": "x"}], [])
+    assert len(calls) == 1 and waits == []
+
+
+def test_unknown_host_is_not_retried(monkeypatch):
+    dns = lambda request: urllib.error.URLError("nodename nor servname provided")
+    adapter, calls, _waits = flaky(monkeypatch, [dns])
+    with pytest.raises(RuntimeError, match="cannot reach"):
+        adapter.stream([{"role": "user", "content": "x"}], [])
+    assert len(calls) == 1
 
 
 def test_tool_messages_serialize_to_wire_format(monkeypatch):

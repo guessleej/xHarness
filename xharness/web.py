@@ -51,6 +51,8 @@ LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 OPERATOR = "operator"
 NODE = "node"
 APPROVAL_TIMEOUT_SECONDS = 600
+#: Longer than an approval: answering takes thought, a yes/no does not.
+QUESTION_TIMEOUT_SECONDS = 900
 TICKET_TTL_SECONDS = 60
 MAX_BODY_BYTES = 1_000_000
 CSRF_HEADER = "X-XHarness-Client"
@@ -79,6 +81,20 @@ class Approval:
     decision: bool | None = None
 
 
+@dataclass
+class Question:
+    """A question from the ask_user tool, waiting for the person."""
+
+    question: str
+    options: list[dict[str, str]]
+    event: threading.Event = field(default_factory=threading.Event)
+    answer: str | None = None
+    settled: bool = False
+
+    def public(self, key: str) -> dict[str, Any]:
+        return {"id": key, "question": self.question, "options": self.options}
+
+
 class Conversation:
     def __init__(
         self,
@@ -97,6 +113,7 @@ class Conversation:
         self.cond = threading.Condition()
         self.running = False
         self.approvals: dict[str, Approval] = {}
+        self.questions: dict[str, Question] = {}
         self.preview = ""
         self.created = time.time()
         self.started_at: float | None = None
@@ -129,8 +146,9 @@ class Conversation:
             for key, approval in self.approvals.items()
             if approval.decision is None
         ]
+        asking = [q.public(key) for key, q in self.questions.items() if not q.settled]
         if self.running:
-            state = "waiting" if pending else "running"
+            state = "waiting" if (pending or asking) else "running"
         else:
             state = "idle"
         quota = self.harness.ctx.optional("quota")
@@ -150,6 +168,7 @@ class Conversation:
             "children": [{"name": name, "task": task[:120]} for name, task in self.children.items()],
             "tool_calls": self.turns,
             "pending_approvals": pending,
+            "pending_questions": asking,
         }
 
 
@@ -209,6 +228,17 @@ class WebApp:
         initial = messages_from_events(SessionLog.load(resume, principal_name(user))) if resume else []
         holder: dict[str, Conversation] = {}
 
+        def ask(question: str, options: list[dict[str, str]]) -> str | None:
+            conv = holder["conv"]
+            question_id = secrets.token_hex(4)
+            pending = Question(question=question, options=options)
+            conv.questions[question_id] = pending
+            conv.push({"type": "question", **pending.public(question_id)})
+            pending.event.wait(QUESTION_TIMEOUT_SECONDS)
+            pending.settled = True
+            conv.push({"type": "question_resolved", "id": question_id, "answer": pending.answer})
+            return pending.answer
+
         def prompt(summary: str) -> bool:
             conv = holder["conv"]
             approval_id = secrets.token_hex(4)
@@ -233,6 +263,7 @@ class WebApp:
                 approval_mode=self.approval_mode,
                 project_instructions=self.config.project_instructions,
                 prompt=prompt,
+                ask=ask,
                 initial_messages=initial,
                 on_delta=lambda text: holder["conv"].push({"type": "delta", "text": text}),
                 on_tool_start=lambda name, args: holder["conv"].push(
@@ -318,8 +349,20 @@ class WebApp:
         approval.event.set()
         return True
 
+    def answer(self, conv: Conversation, question_id: str, text: str) -> bool:
+        """Settle a pending question. The raw reply goes to the tool, which maps a
+        bare option number to its label and caps the length."""
+        pending = conv.questions.get(question_id)
+        if pending is None or pending.settled or not str(text or "").strip():
+            return False
+        pending.answer = str(text)
+        pending.settled = True
+        pending.event.set()
+        return True
+
     def stop(self, conv: Conversation) -> bool:
-        """Operator brake: stop before the next model call and deny pending approvals."""
+        """Operator brake: stop before the next model call, deny pending approvals
+        and leave pending questions unanswered."""
         if not conv.running:
             return False
         conv.agent.stop()
@@ -327,6 +370,10 @@ class WebApp:
             if approval.decision is None:
                 approval.decision = False
                 approval.event.set()
+        for pending in conv.questions.values():
+            if not pending.settled:
+                pending.settled = True
+                pending.event.set()
         conv.push({"type": "stop_requested"})
         return True
 
@@ -834,6 +881,10 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     ok = app.approve(conv, str(body.get("id") or ""), bool(body.get("allow")))
                     self._json(200 if ok else 404, {"ok": ok})
                     return
+                if parts[3] == "answers":
+                    ok = app.answer(conv, str(body.get("id") or ""), str(body.get("answer") or ""))
+                    self._json(200 if ok else 404, {"ok": ok})
+                    return
                 if parts[3] == "stop":
                     ok = app.stop(conv)
                     self._json(200 if ok else 409, {"ok": ok})
@@ -1157,9 +1208,28 @@ body.view-chat.landing #hero{padding-top:0}
 .msg.tool summary{cursor:pointer;font-family:var(--font);font-size:14px;color:var(--ink)}
 .msg.tool pre{margin:8px 0 0;white-space:pre-wrap;word-break:break-word;max-height:280px;overflow:auto}
 .msg.tool .ok{color:#2e7d32}.msg.tool .bad{color:var(--brand)}
-.msg.approval{position:relative;padding-top:20px}
-.msg.approval:before{content:"";position:absolute;left:18px;right:18px;top:0;height:3px;border-radius:0 0 3px 3px;background:var(--brand)}
+/* approvals and questions are set apart by a tinted block, never a colour bar */
+.msg.approval,.msg.question{background:var(--tint);box-shadow:none}
 .msg.approval .actions{display:flex;gap:10px;margin-top:12px}
+.qopts{display:grid;gap:8px;margin-top:12px}
+.qopt{display:flex;flex-direction:column;gap:2px;text-align:left;font:inherit;padding:10px 14px;border-radius:12px;
+  border:0;cursor:pointer;background:var(--card);color:var(--ink);box-shadow:var(--shadow-sm);transition:transform .15s}
+.qopt:hover:not(:disabled){transform:translateY(-1px)}
+.qopt:disabled{cursor:default;opacity:.55}
+.qopt.chosen{opacity:1;background:var(--brand);color:#fff}
+.qopt.chosen .qd{color:rgba(255,255,255,.85)}
+.qopt .ql{font-weight:700;font-size:15px}
+.qopt .qd{font-size:13px;color:var(--ink-3)}
+.qfree{display:flex;gap:8px;margin-top:10px}
+.qfree input{flex:1;min-width:0;font:inherit;font-size:14px;padding:9px 12px;border-radius:10px;
+  background:var(--card);color:var(--ink);border:1px solid rgba(107,122,133,.3)}
+.qfree input:focus{outline:none;border-color:var(--brand)}
+.qerr{font-size:13px;color:var(--brand);margin-top:6px}
+.fc .qbox{font-size:13px;background:var(--tint);border-radius:10px;padding:8px 10px;margin-top:6px}
+.fc .qbox .qq{font-weight:700;margin-bottom:6px}
+.fc .qbox .qrow{display:flex;gap:6px;flex-wrap:wrap}
+.fc .qbox input{font:inherit;font-size:13px;padding:5px 8px;border-radius:8px;flex:1;min-width:120px;
+  background:var(--card);color:var(--ink);border:1px solid rgba(107,122,133,.3)}
 .msg.error{color:var(--brand)}
 .cursor{display:inline-block;width:8px;height:1.1em;vertical-align:-2px;background:var(--brand);animation:blink 1s steps(2) infinite;border-radius:2px}
 @keyframes blink{50%{opacity:0}}
@@ -1499,6 +1569,53 @@ body:not(.view-chat) .composer{display:none}
     const b=document.createElement('div');b.className='body';if(body!=null)b.textContent=body;d.appendChild(b);transcript.appendChild(d);d.scrollIntoView({block:'end',behavior:'smooth'});return d;}
   function setStatus(t,running){$('#chip-status').textContent=t;$('#btn-send').disabled=!!running;}
   function setUsage(u){if(!u)return;$('#chip-usage').textContent='usage: '+u.total_tokens+' tokens · '+u.calls+' calls · '+u.tool_calls+' tools';}
+  // --- questions from the ask_user tool ------------------------------------
+  // Same shape as an approval: a tinted card in the transcript, answered by a
+  // click or in the person's own words. Everything the model wrote is set with
+  // textContent, never as HTML.
+  function imeSafeEnter(input,onEnter){
+    let composing=false;
+    input.addEventListener('compositionstart',()=>{composing=true;});
+    input.addEventListener('compositionend',()=>{composing=false;});
+    input.addEventListener('keydown',e=>{
+      if(e.key!=='Enter')return;
+      if(composing||e.isComposing||e.keyCode===229)return;   // the IME is confirming a candidate
+      e.preventDefault();onEnter();
+    });
+  }
+  function renderQuestion(ev){
+    const card=el('question','需要你的回答',ev.question);
+    card.dataset.qid=ev.id;
+    const opts=document.createElement('div');opts.className='qopts';
+    const free=document.createElement('div');free.className='qfree';
+    const input=document.createElement('input');input.placeholder='或用自己的話回答…';input.setAttribute('aria-label','自己輸入回答');
+    const go=document.createElement('button');go.className='btn sm';go.textContent='送出';
+    const err=document.createElement('div');err.className='qerr';
+    const controls=()=>[...card.querySelectorAll('button,input')];
+    const send=async answer=>{
+      answer=(answer||'').trim();if(!answer)return;
+      controls().forEach(x=>x.disabled=true);err.textContent='';
+      try{await api('/api/conversations/'+conv+'/answers',{method:'POST',body:{id:ev.id,answer}});}
+      catch(e){controls().forEach(x=>x.disabled=false);err.textContent='送出失敗：'+e.message;}
+    };
+    (ev.options||[]).forEach(o=>{
+      const b=document.createElement('button');b.className='qopt';b.dataset.label=o.label;
+      const l=document.createElement('span');l.className='ql';l.textContent=o.label;b.appendChild(l);
+      if(o.description){const s=document.createElement('span');s.className='qd';s.textContent=o.description;b.appendChild(s);}
+      b.onclick=()=>send(o.label);opts.appendChild(b);
+    });
+    go.onclick=()=>send(input.value);
+    imeSafeEnter(input,()=>send(input.value));
+    free.append(input,go);card.append(opts,free,err);
+  }
+  function settleQuestion(id,answer){
+    const card=transcript.querySelector('.msg.question[data-qid="'+id+'"]');
+    if(!card)return;
+    card.querySelectorAll('button,input').forEach(x=>x.disabled=true);
+    card.querySelector('.who').textContent=answer?'你的回答：'+answer:'未回答（逾時或工作已停止）';
+    card.querySelectorAll('.qopt').forEach(b=>b.classList.toggle('chosen',b.dataset.label===answer));
+  }
+
   function finishAssistant(){if(assistantEl){const c=assistantEl.querySelector('.cursor');if(c)c.remove();}assistantEl=null;assistantText='';}
 
   function handle(ev){
@@ -1520,6 +1637,8 @@ body:not(.view-chat) .composer{display:none}
       const decide=async allow=>{ok.disabled=no.disabled=true;await api('/api/conversations/'+conv+'/approvals',{method:'POST',body:{id:ev.id,allow}});d.querySelector('.who').textContent=allow?'已允許':'已拒絕';};
       ok.onclick=()=>decide(true);no.onclick=()=>decide(false);a.append(ok,no);d.appendChild(a);}
     else if(ev.type==='approval_resolved'){}
+    else if(ev.type==='question'){finishAssistant();renderQuestion(ev);}
+    else if(ev.type==='question_resolved'){settleQuestion(ev.id,ev.answer);}
     else if(ev.type==='subagent_start'){finishAssistant();const d=el('tool','子代理啟動',ev.name+'：'+ev.task);}
     else if(ev.type==='subagent_end'){el('tool','子代理結束',ev.name+'：'+(ev.ok?'完成':'失敗'));}
     else if(ev.type==='stop_requested'){el('error','操作者要求停止','將在下一次模型呼叫前停止；等待中的許可一律拒絕。');}
@@ -1646,6 +1765,17 @@ body:not(.view-chat) .composer{display:none}
           ok.onclick=()=>api(base+'/approvals',{method:'POST',body:{id:a.id,allow:true}}).then(renderFleet);
           no.onclick=()=>api(base+'/approvals',{method:'POST',body:{id:a.id,allow:false}}).then(renderFleet);
           d.append(ok,no);ap.appendChild(d);});
+        (it.pending_questions||[]).forEach(q=>{
+          const box=document.createElement('div');box.className='qbox';
+          const qq=document.createElement('div');qq.className='qq';qq.textContent=q.question;box.appendChild(qq);
+          const row=document.createElement('div');row.className='qrow';
+          const reply=answer=>{answer=(answer||'').trim();if(!answer)return;
+            api(base+'/answers',{method:'POST',body:{id:q.id,answer}}).then(renderFleet).catch(e=>{qq.textContent=q.question+'（送出失敗：'+e.message+'）';});};
+          q.options.forEach(o=>{const b=document.createElement('button');b.className='btn sm';b.textContent=o.label;
+            if(o.description)b.title=o.description;b.onclick=()=>reply(o.label);row.appendChild(b);});
+          const input=document.createElement('input');input.placeholder='或自己輸入';
+          imeSafeEnter(input,()=>reply(input.value));
+          row.appendChild(input);box.appendChild(row);ap.appendChild(box);});
         const acts=c.querySelector('.acts');
         const open=document.createElement('button');open.className='btn sm'+((!node&&it.id===conv)?' primary':'');open.textContent=node?'在節點開啟':((it.id===conv)?'回到此對話':'開啟');
         if(node){open.onclick=()=>window.open(node.url,'_blank','noopener');}

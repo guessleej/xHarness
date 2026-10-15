@@ -7,8 +7,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import sys
 import threading
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Callable
 
 from .context import Context
@@ -17,6 +21,23 @@ from .session import SessionLog
 from .tools import ToolContext, ToolRegistry, ToolResult
 
 DEFAULT_MAX_TURNS = 40
+#: Tool output beyond this many characters is saved to a file and the model
+#: gets the head, the tail and the path. Granite on .70 serves 32k tokens; one
+#: 50k-character build log used to fill most of that by itself.
+INLINE_OUTPUT_CHARS = 16_000
+SPILL_HEAD_CHARS = 12_000
+SPILL_TAIL_CHARS = 3_000
+SPILL_KEEP_FILES = 20
+#: Same tool, same arguments, this many times in a row: tell the model the
+#: answer will not change. Advice only -- the call still runs.
+REPEAT_WARNINGS = (3, 5, 8)
+#: Tool results kept verbatim when the conversation no longer fits the model.
+KEEP_RECENT_TOOL_RESULTS = 2
+PRUNED_OUTPUT = "[output removed to fit the context window; run the tool again if you need it]"
+_CONTEXT_OVERFLOW = re.compile(
+    r"exceed\w*.{0,40}context|context.{0,20}(length|size|window)|maximum context|too many tokens|prompt is too long",
+    re.IGNORECASE,
+)
 INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md")
 MAX_INSTRUCTIONS_CHARS = 24_000
 
@@ -65,6 +86,63 @@ def load_project_instructions(cwd: str, site_dir: str | None = None) -> str | No
     return "\n\n".join(sections) if sections else None
 
 
+WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def current_date_line(now: datetime | None = None) -> str:
+    """Today in the server's local time zone, with the weekday.
+
+    Without it the model assumes a date from its training data: asked on
+    2026-10-14 to move a notice to "next Friday", granite stated today was
+    2025-04-21. This line fixes the year and the day. It does not make the
+    model good at date arithmetic -- measured 2026-10-14, granite still got
+    "下週五" wrong in 8 of 8 runs even with every date of this week and next
+    listed beside it, so that calendar was removed rather than kept as a
+    remedy that does not work.
+    """
+    now = now or datetime.now().astimezone()
+    # Offset only: zone abbreviations are ambiguous (Taipei reports "CST",
+    # which is also US Central and China Standard Time).
+    offset = now.strftime("%z")
+    zone = f" (UTC{offset[:3]}:{offset[3:]})" if offset else ""
+    return (f"Today is {now:%Y-%m-%d} ({WEEKDAYS[now.weekday()]}), local time {now:%H:%M}{zone}. "
+            "Use this date; do not assume one.")
+
+
+def spill_output(output: str, cwd: str) -> str:
+    """Keep an oversized tool result out of the context, but not out of reach.
+
+    The full text goes to .xharness/spill/ in the working directory, where the
+    read tool can page through it; the model sees the head, the tail (where
+    build errors usually are) and the path. Dropping the rest, as the tools
+    used to, left the model nothing to go back to.
+    """
+    if len(output) <= INLINE_OUTPUT_CHARS:
+        return output
+    directory = os.path.join(cwd, ".xharness", "spill")
+    name = f"{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}.txt"
+    try:
+        os.makedirs(directory, exist_ok=True)
+        ignore = os.path.join(cwd, ".xharness", ".gitignore")
+        if not os.path.exists(ignore):
+            with open(ignore, "w", encoding="utf-8") as handle:
+                handle.write("*\n")  # never shows up in the user's git status
+        with open(os.path.join(directory, name), "w", encoding="utf-8") as handle:
+            handle.write(output)
+        old = sorted(entry for entry in os.listdir(directory) if entry.endswith(".txt"))
+        for entry in old[:-SPILL_KEEP_FILES]:
+            os.remove(os.path.join(directory, entry))
+        where = (f"the full output ({len(output):,} characters) is in .xharness/spill/{name}; "
+                 "read it with offset and limit if you need the middle")
+    except OSError:
+        where = f"the middle was dropped ({len(output):,} characters in all)"
+    return (f"{output[:SPILL_HEAD_CHARS]}\n\n[... {where} ...]\n\n{output[-SPILL_TAIL_CHARS:]}")
+
+
+def is_context_overflow(error: Exception) -> bool:
+    return bool(_CONTEXT_OVERFLOW.search(str(error)))
+
+
 def default_system_prompt(cwd: str, model: str | None = None) -> str:
     identity = (
         f"You run on the model '{model}', an open-weight model served on the operator's own "
@@ -81,7 +159,28 @@ def default_system_prompt(cwd: str, model: str | None = None) -> str:
             f"Working directory: {cwd}",
             "Use the available tools to inspect and change files and to run commands.",
             "Prefer small verified steps: read before you edit, run checks after you change.",
-            "When the task is done, reply with a concise summary in the language the user used.",
+            # Measured: half the runs of an ambiguous file task asked without
+            # listing the directory, where the candidates were sitting.
+            "Look before you ask: when the answer might be in the working directory (which file, "
+            "what is already there), check with your tools first, then ask only about what is "
+            "still unclear.",
+            # Without this the model asks in prose and ends its turn, which a
+            # headless run never sees and a phone gets as a wall of text.
+            "If you need something only the person can tell you -- which of several things they "
+            "meant, a preference, a fact you cannot find with your tools -- and an ask_user tool is "
+            "available, call it instead of ending your turn with a question. Never fill such a gap "
+            "with an invented command, file path or fact.",
+            # Measured 2026-10-14: granite turned "下週五" into the wrong date in
+            # 8 of 8 runs, even with the calendar beside it. A person catches
+            # that in one glance; a file does not.
+            "When the task gives a relative date (next Friday, in two weeks, 下週五) and you will "
+            "write it into a file or message, work it out from today's date, then confirm the exact "
+            "date with the person before writing it -- with ask_user if available, otherwise by "
+            "stating the date you used in your reply.",
+            # "Chinese" is one language to the model; left alone it answers a
+            # Traditional-Chinese user in Simplified.
+            "When the task is done, reply with a concise summary in the language the user used, "
+            "in the same script: Traditional Chinese for a user writing Traditional Chinese.",
         ]
     )
 
@@ -96,6 +195,9 @@ class AgentOptions:
     approval_mode: str = "auto"
     #: Asks the human. Absent under approval_mode "prompt" means deny.
     prompt: Callable[[str], bool] | None = None
+    #: Puts a question from the ask_user tool to the human; returns their reply
+    #: or None. Absent means nobody is there to answer, and the tool says so.
+    ask: Callable[[str, list[dict[str, str]]], str | None] | None = None
     on_delta: Callable[[str], None] | None = None
     on_tool_start: Callable[[str, str], None] | None = None
     on_tool_end: Callable[[str, str, bool], None] | None = None
@@ -112,6 +214,11 @@ class AgentOptions:
     exclude_tools: set[str] = field(default_factory=set)
 
 
+def with_context(text: str, context: str | None) -> str:
+    """A user message as the model receives it, with any harness context."""
+    return f"{text}\n\n[{context}]" if context else text
+
+
 class Agent:
     def __init__(self, ctx: Context, options: AgentOptions | None = None) -> None:
         self.ctx = ctx
@@ -119,19 +226,38 @@ class Agent:
         self.messages: list[dict[str, Any]] = []
         self.total_usage = Usage()
         self._stop = threading.Event()
-        cwd = self.options.cwd or os.getcwd()
+        #: The date the model was last told; None means it has not been told.
+        self._told_date: Any = None
+        self._system_logged = False
+        self._repeat: tuple[str, int] = ("", 0)
         if self.options.initial_messages:
             self.messages.extend(self.options.initial_messages)
         if not any(message.get("role") == "system" for message in self.messages):
-            llm = ctx.optional("llm")
-            system = self.options.system_prompt or default_system_prompt(cwd, getattr(llm, "model", None))
-            if self.options.system_suffix:
-                system = f"{system}\n{self.options.system_suffix}"
-            if self.options.project_instructions:
-                instructions = load_project_instructions(cwd, self.options.site_instructions_dir)
-                if instructions:
-                    system = f"{system}\n\n{instructions}"
-            self.messages.insert(0, {"role": "system", "content": system})
+            self.messages.insert(0, {"role": "system", "content": self.build_system_prompt()})
+
+    def build_system_prompt(self) -> str:
+        cwd = self.options.cwd or os.getcwd()
+        llm = self.ctx.optional("llm")
+        system = self.options.system_prompt or default_system_prompt(cwd, getattr(llm, "model", None))
+        # Always, even under a custom system prompt: without it the model
+        # assumes a date from its training data. Measured 2026-10-14 -- asked
+        # to move a notice to "next Friday", granite stated today was
+        # 2025-04-21 and wrote that wrong date into the file.
+        system = f"{system}\n{current_date_line()}"
+        self._told_date = datetime.now().astimezone().date()
+        if self.options.system_suffix:
+            system = f"{system}\n{self.options.system_suffix}"
+        if self.options.project_instructions:
+            instructions = load_project_instructions(cwd, self.options.site_instructions_dir)
+            if instructions:
+                system = f"{system}\n\n{instructions}"
+        return system
+
+    def reset(self) -> None:
+        """Forget the conversation, keeping a fresh system prompt."""
+        self.messages[:] = [{"role": "system", "content": self.build_system_prompt()}]
+        self._system_logged = False
+        self._repeat = ("", 0)
 
     def stop(self) -> None:
         """Ask a running task to stop before its next model call or tool.
@@ -151,9 +277,25 @@ class Agent:
         registry: ToolRegistry = self.ctx.get("tools")
         session: SessionLog | None = self.ctx.optional("session")
 
-        self.messages.append({"role": "user", "content": task})
+        # Everything the model sees is in the log (a rule taken from DeepSeek
+        # Harness): the system prompt -- identity, date, AGENTS.md -- included,
+        # so a transcript shows what the model was actually told.
+        if session and not self._system_logged and self.messages and self.messages[0].get("role") == "system":
+            session.append({"type": "context", "source": "system", "content": self.messages[0]["content"], **self._tag()})
+        self._system_logged = True
+        # A conversation left open overnight still carries yesterday's date in
+        # its system prompt; tell the model the new one with the message.
+        context = None
+        today = datetime.now().astimezone().date()
+        if self._told_date != today:
+            context = current_date_line()
+            self._told_date = today
+        self.messages.append({"role": "user", "content": with_context(task, context)})
         if session:
-            session.append({"type": "message", "role": "user", "content": task, **self._tag()})
+            event = {"type": "message", "role": "user", "content": task, **self._tag()}
+            if context:
+                event["context"] = context
+            session.append(event)
         self.ctx.emit("agent/task-start", {"task": task})
 
         for turn in range(self.options.max_turns):
@@ -165,14 +307,7 @@ class Agent:
                 for tool in registry.list()
                 if tool.name not in self.options.exclude_tools
             ]
-            payload = {"messages": self.messages, "tools": schemas}
-            reply: AssistantTurn = self.ctx.invoke(
-                "llm/stream",
-                payload,
-                lambda current: llm.stream(
-                    current["messages"], current["tools"], on_delta=self.options.on_delta
-                ),
-            )
+            reply = self._call_model(llm, schemas, session)
             if reply.usage:
                 self.total_usage.prompt_tokens += reply.usage.prompt_tokens
                 self.total_usage.completion_tokens += reply.usage.completion_tokens
@@ -202,6 +337,9 @@ class Agent:
                     result = ToolResult("skipped: stopped by operator", is_error=True)
                 else:
                     result = self._execute_call(registry, call)
+                    note = self._repeat_note(call)
+                    if note:
+                        result = ToolResult(f"{result.output}\n\n{note}", is_error=result.is_error)
                 self.messages.append(
                     {"role": "tool", "content": result.output, "tool_call_id": call["id"]}
                 )
@@ -222,6 +360,54 @@ class Agent:
             {"turns": self.options.max_turns, "usage": self.total_usage, "stopped": True},
         )
         return "[stopped: max turns reached]"
+
+    def _call_model(self, llm: Any, schemas: list[dict[str, Any]], session: SessionLog | None) -> AssistantTurn:
+        def send() -> AssistantTurn:
+            return self.ctx.invoke(
+                "llm/stream",
+                {"messages": self.messages, "tools": schemas},
+                lambda current: llm.stream(current["messages"], current["tools"], on_delta=self.options.on_delta),
+            )
+
+        try:
+            return send()
+        except RuntimeError as error:
+            if not is_context_overflow(error):
+                raise
+            pruned = self._prune_tool_results()
+            if not pruned:
+                raise
+            if session:
+                session.append({"type": "context-pruned", "tool_results": pruned, **self._tag()})
+            print(f"[xharness] context full; removed {pruned} older tool results and retried", file=sys.stderr)
+            return send()
+
+    def _prune_tool_results(self) -> int:
+        """Blank all but the latest tool results. Returns how many changed.
+
+        Deterministic, so a resumed session that overflows again prunes the
+        same way; the log keeps the originals.
+        """
+        results = [message for message in self.messages if message.get("role") == "tool"]
+        changed = 0
+        for message in results[:-KEEP_RECENT_TOOL_RESULTS] if KEEP_RECENT_TOOL_RESULTS else results:
+            if message.get("content") != PRUNED_OUTPUT:
+                message["content"] = PRUNED_OUTPUT
+                changed += 1
+        return changed
+
+    def _repeat_note(self, call: dict[str, str]) -> str | None:
+        try:
+            canonical = json.dumps(json.loads(call["arguments"] or "{}"), sort_keys=True, ensure_ascii=False)
+        except (json.JSONDecodeError, TypeError):
+            canonical = call["arguments"] or ""
+        key = f"{call['name']}\0{canonical}"
+        count = self._repeat[1] + 1 if self._repeat[0] == key else 1
+        self._repeat = (key, count)
+        if count not in REPEAT_WARNINGS:
+            return None
+        return (f"[note: this is call {count} in a row to {call['name']} with the same arguments, and the "
+                "result will not change. Try something different, or ask the person if you are stuck.]")
 
     def _tag(self) -> dict[str, str]:
         return {"agent": self.options.name} if self.options.name != "main" else {}
@@ -244,13 +430,19 @@ class Agent:
                 return False
             return self.options.prompt(summary)
 
-        tool_ctx = ToolContext(cwd=self.options.cwd or os.getcwd(), approve=approve, agent=self.options.name)
+        tool_ctx = ToolContext(
+            cwd=self.options.cwd or os.getcwd(),
+            approve=approve,
+            agent=self.options.name,
+            ask=self.options.ask,
+        )
         if self.options.on_tool_start:
             self.options.on_tool_start(call["name"], call["arguments"])
         try:
             result = tool.execute(args, tool_ctx)
         except Exception as error:  # noqa: BLE001 - a broken tool must not kill the loop
             result = ToolResult(f"tool failed: {error}", is_error=True)
+        result = ToolResult(spill_output(result.output, tool_ctx.cwd), is_error=result.is_error)
         if self.options.on_tool_end:
             self.options.on_tool_end(call["name"], result.output, result.is_error)
         return result
