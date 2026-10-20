@@ -2,6 +2,30 @@
 
 中文 | English below
 
+## 1.9.0 — 2026-10-20
+
+Web UI 照 Codex 的工作方式重做，並修正一個遮罩漏洞。
+
+- **三塊版面**：左邊可收起的任務清單（等你回應／進行中／這次開啟的／較早的任務，可搜尋，點一下接續；有任務等你許可時頂列顯示數字），中間對話，右邊檢視面板（變更／檔案／工具／記憶）。固定左側欄不用，寬螢幕預設展開、窄螢幕滑出。
+- **步驟**：每個工具呼叫一行，例如「讀取 README.md」「修改 notes.md +3 −1」，有進行中、完成、失敗與秒數，點開看參數與結果；一輪做完自動收合，有失敗的保持展開。
+- **審批直接看差異**：write／edit 開始時伺服器先算出 unified diff（新事件 `change`），許可卡片裡就是修改前後的對照；檢視面板列出這個任務改過的每個檔案與狀態（等你許可／已套用／已拒絕／沒有套用）。超過 512 KB 的檔案只列名稱，差異最多 400 行，內容一樣過遮罩。預覽失敗不會影響任務。
+- `tool_start`／`tool_end`／`approval_request` 帶同一個 `call` 編號，前端不再用工具名稱猜是哪一次呼叫。
+- 模型回覆照 markdown 顯示（表格、清單、粗體、程式碼），用 DOM 節點組出來，模型輸出永遠不會變成 HTML。
+- 任務進行中送出鈕變成停止鈕；首頁有深色主視覺、進行中／等你回應／近 24 小時用量三格數字、建議任務與「接續最近的任務」；`/api/sessions` 多回第一則提問當預覽。
+- 艦隊與管理頁換成同一套外觀，拿掉卡片色條，原生確認框換成自己的對話框，提示改用 toast；深淺色預設跟著系統。
+- 修：`scrub()` 只遮到 `sk-proj`／`sk-ant` 這段前綴，後面真正的金鑰原樣留在日誌與錯誤訊息裡；`.env` 寫法（`OPENAI_API_KEY=...`、`DB_PASSWORD="..."`）完全沒遮。現在整把金鑰都遮，大寫環境變數名稱的指派也遮，`max_tokens=16384` 這類一般文字不受影響。
+
+The Web UI is rebuilt around how Codex works, and a masking gap is closed.
+
+- **Three parts**: a collapsible task list on the left (waiting for you / running / opened this session / earlier, searchable, one click to resume; the top bar counts tasks waiting for approval), the conversation in the middle, and a review pane on the right (changes / files / tools / memory). No fixed sidebar: open by default on wide screens, a slide-over on narrow ones.
+- **Steps**: one line per tool call, such as "read README.md" or "edit notes.md +3 −1", with running, done, failed and seconds, opening to arguments and result; a finished turn folds its steps away unless one failed.
+- **Approvals show the diff**: when a write or edit starts, the server computes a unified diff (new `change` event), so the approval card shows the before-and-after; the review pane lists every file the task changed and its state (waiting / applied / denied / not applied). Files over 512 KB are named only, diffs stop at 400 lines, and contents are masked like every other surface. A failing preview never affects the task.
+- `tool_start`, `tool_end` and `approval_request` carry the same `call` number, so the page no longer guesses which call an event belongs to by tool name.
+- Replies render as markdown (tables, lists, bold, code), built as DOM nodes; model output never becomes HTML.
+- While a task runs the send button becomes stop; the landing has a dark hero, running / waiting / last-24-hours counts, suggested tasks and recent tasks to resume; `/api/sessions` returns each session's first request as a preview.
+- Fleet and admin pages share the new look, cards lose their colour bars, native confirm boxes become an in-page dialog, notices become toasts; light and dark follow the system by default.
+- Fix: `scrub()` masked only the `sk-proj` / `sk-ant` prefix and left the actual key in logs and error messages, and `.env` lines (`OPENAI_API_KEY=...`, `DB_PASSWORD="..."`) were not masked at all. The whole key is masked now, as are assignments to upper-case environment names; prose such as `max_tokens=16384` is left alone.
+
 ## 1.8.0 — 2026-10-15
 
 讓模型問人而不是猜，並參考 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 補上長任務的幾個防護。

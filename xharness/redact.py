@@ -29,8 +29,13 @@ PATTERNS = (
     re.compile(r"(Bearer\s+)([A-Za-z0-9._~+/=-]{8,})"),
     # ?api_key=... / &token=... in a URL
     re.compile(r"([?&](?:api[-_]?key|key|token|access_token|password)=)([^&\s\"']{4,})", re.IGNORECASE),
-    # provider-style keys: sk-..., hf_..., ghp_...
-    re.compile(r"\b((?:sk|pk|rk)-[A-Za-z0-9]{2,}|hf_[A-Za-z0-9]{8,}|gh[pousr]_[A-Za-z0-9]{8,})"),
+    # .env style: OPENAI_API_KEY=..., DB_PASSWORD="..." (upper-case names only,
+    # so prose such as "max_tokens=16384" is left alone)
+    re.compile(r"\b([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)\s*=\s*[\"']?)([^\s\"']{6,})"),
+    # provider-style keys: sk-..., sk-proj-..., sk-ant-api03-..., hf_..., ghp_...
+    # The body includes - and _: modern keys carry them, and stopping at the
+    # first dash used to mask "sk-proj" and print the actual secret after it.
+    re.compile(r"\b((?:sk|pk|rk)-[A-Za-z0-9_-]{8,}|hf_[A-Za-z0-9_]{8,}|gh[pousr]_[A-Za-z0-9_]{8,})"),
     # user:password@host
     re.compile(r"(://[^:/\s]+:)([^@/\s]{3,})(?=@)"),
 )

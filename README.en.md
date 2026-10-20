@@ -16,7 +16,7 @@ Left to right: the workspace and the model endpoint feed xHarness; an operator g
 
 ## Why
 
-Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one developer can audit: about 9,500 lines of Python (package code, excluding 4,470 lines of tests), **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a 322-case test suite that finishes in about 27 seconds (most of it spent shutting down test HTTP servers, not computing).
+Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one developer can audit: about 10,100 lines of Python (package code, excluding 4,672 lines of tests), **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a 338-case test suite that finishes in about 27 seconds (most of it spent shutting down test HTTP servers, not computing).
 
 ## Features
 
@@ -145,7 +145,9 @@ xharness web --port 8090 --no-open
 xharness web --host 0.0.0.0 --token <long-random-string>   # non-loopback binding requires a token
 ```
 
-The UI is one zero-dependency page: a glass top bar with model, usage, and status; a live streaming transcript with tool calls folded into cards; approval cards with allow/deny for side effects (`-y` makes it fully automatic); a slide-over listing running conversations, on-disk sessions (resumable), and current memories. The composer guards against IME Enter (no accidental sends mid-composition).
+The UI is one zero-dependency page in three parts: a collapsible **task list** on the left (waiting for you / running / opened this session / earlier, searchable, one click to resume); the **conversation** in the middle, with one line per tool call ("read README.md", "edit notes.md +3 −1") that opens to its arguments and result, and replies rendered as markdown with tables and code; and a **review pane** on the right listing every file the task changed with its diff, plus files, tools and memory.
+
+**Approvals show the diff**: when the agent is about to write or edit a file, the approval card contains the before-and-after, so you allow or deny with the change in front of you (`-y` makes it fully automatic). While a task runs, the send button becomes a stop button. The composer guards against IME Enter (no accidental sends mid-composition); light and dark follow the system and can be switched from the avatar menu.
 
 **Fleet view** (top bar, "艦隊"): one card per conversation — state (running / waiting for approval / idle), task preview, tokens, calls, tool count, elapsed seconds, active subagents — under a row of totals. Pending approvals can be allowed or denied right on the card, and any running agent can be stopped: it halts before its next model call and pending approvals are denied (an in-flight model request cannot be interrupted; the loop exits when it returns).
 

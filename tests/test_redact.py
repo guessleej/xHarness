@@ -56,3 +56,27 @@ def test_mapping_scrubs_values_too():
 def test_mapping_survives_deep_nesting():
     data = {"a": {"b": {"c": {"d": {"e": {"f": {"g": {"token": "x"}}}}}}}}
     assert scrub_mapping(data)  # must not recurse forever
+
+
+def test_modern_provider_keys_are_masked_whole():
+    from xharness.redact import scrub
+
+    for key in ("sk-proj-abcdefghijklmnopqrstuvwxyz0123456789",
+                "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUv_wxyz-0123456789"):
+        out = scrub(f"failed with {key} today")
+        assert key[12:] not in out and out.startswith("failed with ") and out.endswith(" today")
+
+
+def test_env_style_assignments_are_masked():
+    from xharness.redact import scrub
+
+    out = scrub('OPENAI_API_KEY=abcdef123456789 DB_PASSWORD="hunter2hunter2"')
+    assert "abcdef123456789" not in out and "hunter2hunter2" not in out
+    assert out.startswith("OPENAI_API_KEY=")
+
+
+def test_prose_with_token_counts_is_left_alone():
+    from xharness.redact import scrub
+
+    text = "max_tokens=16384 and total_tokens: 5918, sk-learn is a word"
+    assert scrub(text) == text
