@@ -121,6 +121,8 @@ def messages_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             message: dict[str, Any] = {"role": event.get("role", "user"), "content": content}
             if event.get("tool_calls"):
                 message["tool_calls"] = event["tool_calls"]
+            if event.get("images"):
+                message["images"] = list(event["images"])
             messages.append(message)
         elif event.get("type") == "compaction":
             # Same cut the agent made: summary and acknowledgement, then what it kept.

@@ -68,9 +68,12 @@ class Command:
 def providers_for(config: Any, allowed: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     """Configured providers this person may use, without keys or full URLs."""
     rows = []
+    describer = str((getattr(config, "vision", None) or {}).get("provider") or "")
     for name, entry in (getattr(config, "providers", {}) or {}).items():
         if allowed and name not in allowed:
             continue
+        if name == describer:
+            continue   # it describes images for the others; nobody should chat with it
         if not entry.get("model") or not entry.get("base_url"):
             continue
         rows.append({
@@ -79,6 +82,7 @@ def providers_for(config: Any, allowed: tuple[str, ...] = ()) -> list[dict[str, 
             "hosting": hosting_of(entry.get("base_url")),
             "endpoint": endpoint_host(entry.get("base_url")),
             "context_tokens": entry.get("context_tokens"),
+            "vision": bool(entry.get("vision")),
         })
     return rows
 
@@ -199,6 +203,57 @@ def _feedback(host: CommandHost, args: str) -> CommandResult:
     return CommandResult(f"已記下對第 {turn} 則回覆的評價，謝謝。")
 
 
+def _plan(host: CommandHost, args: str) -> CommandResult:
+    word = args.strip().lower()
+    if word in ("on", "開"):
+        on = True
+    elif word in ("off", "關"):
+        on = False
+    elif not word:
+        on = not getattr(host.agent, "plan_mode", False)
+    else:
+        return CommandResult("用法：/plan、/plan on 或 /plan off", ok=False)
+    host.agent.plan_mode = on
+    session = host.ctx.optional("session")
+    if session:
+        session.append({"type": "plan-mode", "on": on})
+    text = ("計畫模式開啟：模型只會查看、提出計畫，不會改任何東西；你核准後再執行。" if on
+            else "計畫模式關閉：模型可以照計畫動手（有副作用的動作仍會先問你）。")
+    return CommandResult(text, data={"plan_mode": on})
+
+
+def _goal(host: CommandHost, args: str) -> CommandResult:
+    from .goal import DEFAULT_ROUNDS, MAX_ROUNDS
+
+    text = args.strip()
+    state = host.ctx.optional("goal")
+    if not text:
+        if state is None or not state.objective:
+            return CommandResult("用法：/goal 目標（預設最多 5 輪），或 /goal --rounds 8 目標")
+        return CommandResult(f"目標：{state.objective}（第 {state.round}/{state.max_rounds} 輪，狀態 {state.status or '未開始'}）"
+                             + (f"\n{state.summary}" if state.summary else ""))
+    if host.running:
+        return CommandResult("任務還在進行，等它結束再設目標。", ok=False)
+    # The round count is explicit: a leading number would swallow goals like
+    # "2026 年的報表" or "3 個檔案要改".
+    rounds = DEFAULT_ROUNDS
+    match = re.match(r"^--rounds\s+(\d+)\s+(.+)$", text, flags=re.DOTALL)
+    if match:
+        rounds, text = max(1, min(int(match.group(1)), MAX_ROUNDS)), match.group(2).strip()
+    return CommandResult(f"開始目標模式（最多 {rounds} 輪）：{text}", action="goal",
+                         data={"objective": text, "rounds": rounds})
+
+
+def _jobs(host: CommandHost, _args: str) -> CommandResult:
+    manager = host.ctx.optional("jobs")
+    jobs = list(manager.jobs.values()) if manager else []
+    if not jobs:
+        return CommandResult("沒有背景工作。模型用 job_start 啟動的長指令會列在這裡。")
+    words = {"running": "執行中", "done": "完成", "failed": "失敗", "stopped": "已停止", "timeout": "逾時被停止"}
+    return CommandResult("\n".join(f"{j.id}　{words.get(j.state, j.state)}　{j.runtime()} 秒　{j.command[:80]}" for j in jobs),
+                         data={"jobs": [j.public() for j in jobs]})
+
+
 def _new(_host: CommandHost, _args: str) -> CommandResult:
     return CommandResult("開始新的任務。", action="new")
 
@@ -217,6 +272,9 @@ COMMANDS: dict[str, Command] = {c.name: c for c in (
     Command("compact", "", "把較早的對話整理成摘要，讓長對話可以繼續", _compact),
     Command("model", "[名稱]", "看目前的模型，或切換到設定檔裡的另一個", _model),
     Command("skills", "", "列出可以用的技能", _skills),
+    Command("plan", "[on|off]", "計畫模式：先看、提計畫，你核准後才動手", _plan),
+    Command("goal", "[--rounds N] 目標", "目標模式：一輪接一輪做到完成或卡住為止", _goal),
+    Command("jobs", "", "列出背景工作", _jobs),
     Command("title", "[標題]", "看或修改這段對話的標題", _title),
     Command("feedback", "up|down [備註]", "評價上一則回覆", _feedback),
     Command("export", "", "把這段對話匯出成 Markdown", _export),

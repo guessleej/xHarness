@@ -45,6 +45,13 @@ SUMMARY_SYSTEM = (
     "and numbers exact; never add anything that is not in the conversation. Plain text, at most 400 words."
 )
 MAX_SUMMARY_SOURCE_CHARS = 60_000
+#: Plan mode: look, propose, and wait for approval before changing anything.
+PLAN_CONTEXT = (
+    "Plan mode is on: do not change anything yet. Tools that write, edit or run commands are switched off. "
+    "Investigate with the read-only tools, then reply with a numbered plan: what you will change and where, "
+    "in what order, and how you will check the result. End your turn there; the person approves the plan "
+    "before anything is changed."
+)
 _CONTEXT_OVERFLOW = re.compile(
     r"exceed\w*.{0,40}context|context.{0,20}(length|size|window)|maximum context|too many tokens|prompt is too long",
     re.IGNORECASE,
@@ -226,6 +233,9 @@ class AgentOptions:
     #: auto: compact before the next model call once the prompt passes
     #: `threshold` of the endpoint's context_tokens.
     compaction: dict[str, Any] = field(default_factory=lambda: {"auto": True, "threshold": 0.8})
+    #: Describes an image for a model that cannot see: (path, request) -> text.
+    describe_image: Callable[[str, str], str] | None = None
+    describer_name: str = ""
 
 
 def render_transcript(messages: list[dict[str, Any]]) -> str:
@@ -264,6 +274,8 @@ class Agent:
         self._system_logged = False
         self._repeat: tuple[str, int] = ("", 0)
         self._compact_due = False
+        #: Plan mode (see PLAN_CONTEXT): the change tools are hidden until it is switched off.
+        self.plan_mode = False
         if self.options.initial_messages:
             self.messages.extend(self.options.initial_messages)
         if not any(message.get("role") == "system" for message in self.messages):
@@ -352,7 +364,35 @@ class Agent:
     def stop_requested(self) -> bool:
         return self._stop.is_set()
 
-    def run(self, task: str) -> str:
+    def hidden_tools(self, registry: ToolRegistry) -> set[str]:
+        """Tools this agent may not use right now: the configured exclusions, the
+        change tools in plan mode, and goal_done when no goal is active."""
+        hidden = set(self.options.exclude_tools)
+        if self.plan_mode:
+            # Subagents too: a child does not inherit plan mode and could change things.
+            hidden |= {tool.name for tool in registry.list() if tool.mutating} | {"subagent", "subagent_batch"}
+        goal = self.ctx.optional("goal")
+        if goal is None or not goal.active:
+            hidden.add("goal_done")
+        return hidden
+
+    def _image_context(self, task: str, images: list[str], llm: Any) -> str | None:
+        if not images or getattr(llm, "vision", False):
+            return None
+        names = ", ".join(os.path.basename(p) for p in images)
+        if self.options.describe_image is None:
+            return (f"The person attached {len(images)} image(s) ({names}), but this model cannot see images and no "
+                    "image-describing model is configured. Say so instead of guessing what they show.")
+        lines = []
+        for index, path in enumerate(images, 1):
+            try:
+                text = self.options.describe_image(path, task)
+            except Exception as error:  # noqa: BLE001 - one failed description must not stop the request
+                text = f"(could not be described: {error})"
+            lines.append(f"Image {index} ({os.path.basename(path)}), as described by {self.options.describer_name or 'a vision model'}:\n{text}")
+        return "\n\n".join(lines)
+
+    def run(self, task: str, extra_context: str | None = None, images: list[str] | None = None) -> str:
         self._stop.clear()
         llm = self.ctx.get("llm")
         registry: ToolRegistry = self.ctx.get("tools")
@@ -364,18 +404,38 @@ class Agent:
         if session and not self._system_logged and self.messages and self.messages[0].get("role") == "system":
             session.append({"type": "context", "source": "system", "content": self.messages[0]["content"], **self._tag()})
         self._system_logged = True
-        # A conversation left open overnight still carries yesterday's date in
-        # its system prompt; tell the model the new one with the message.
-        context = None
+        # Everything the harness adds to a request travels with it as context,
+        # logged with the request: a new date (a conversation left open
+        # overnight), background jobs that finished, plan mode, goal rounds,
+        # @-attached files, and what images show for a model that cannot see.
+        parts: list[str] = []
         today = datetime.now().astimezone().date()
         if self._told_date != today:
-            context = current_date_line()
+            parts.append(current_date_line())
             self._told_date = today
-        self.messages.append({"role": "user", "content": with_context(task, context)})
+        jobs = self.ctx.optional("jobs")
+        for job in jobs.finished_unannounced() if jobs is not None and self.options.name == "main" else []:
+            parts.append(f"Background job {job.id} ({job.command[:120]}) ended: {job.state}"
+                         + (f", exit {job.exit_code}" if job.exit_code is not None else "")
+                         + f". Log: {job.log_path}")
+        if self.plan_mode:
+            parts.append(PLAN_CONTEXT)
+        if extra_context:
+            parts.append(extra_context)
+        image_note = self._image_context(task, list(images or []), llm)
+        if image_note:
+            parts.append(image_note)
+        context = "\n\n".join(parts) if parts else None
+        message: dict[str, Any] = {"role": "user", "content": with_context(task, context)}
+        if images:
+            message["images"] = list(images)
+        self.messages.append(message)
         if session:
             event = {"type": "message", "role": "user", "content": task, **self._tag()}
             if context:
                 event["context"] = context
+            if images:
+                event["images"] = list(images)
             session.append(event)
         self.ctx.emit("agent/task-start", {"task": task})
 
@@ -383,10 +443,11 @@ class Agent:
             if self._stop.is_set():
                 self.ctx.emit("agent/task-end", {"turns": turn, "usage": self.total_usage, "stopped": True})
                 return "[stopped by operator]"
+            hidden = self.hidden_tools(registry)
             schemas = [
                 {"name": tool.name, "description": tool.description, "parameters": tool.parameters}
                 for tool in registry.list()
-                if tool.name not in self.options.exclude_tools
+                if tool.name not in hidden
             ]
             if self._compact_due:
                 self._compact_due = False
@@ -513,6 +574,9 @@ class Agent:
         tool = registry.get(call["name"])
         if tool is None or call["name"] in self.options.exclude_tools:
             return ToolResult(f"unknown tool: {call['name']}", is_error=True)
+        if call["name"] in self.hidden_tools(registry):
+            reason = "plan mode is on: nothing may be changed until the plan is approved" if self.plan_mode else "not available now"
+            return ToolResult(f"{call['name']} is {reason}", is_error=True)
         try:
             args = json.loads(call["arguments"]) if call["arguments"] else {}
             if not isinstance(args, dict):

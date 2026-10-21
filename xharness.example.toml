@@ -171,3 +171,18 @@ model = "your-model-id"
 # auto_title = true            # the conversation's own model writes a short title after the first task
 # [web]
 # model_switch = true          # people may change a conversation's model (limited per tier by providers = [...])
+
+# ── Images, background jobs, terminal ─────────────────────────
+# A provider that accepts images gets `vision = true`. For a text-only model,
+# name one that can see; each image is described by it first.
+# [providers.ocr]
+# base_url = "http://10.0.0.5:8088/v1"
+# model = "gemma-4-e4b-xreadable-ocr"
+# vision = true
+# [vision]
+# provider = "ocr"
+# [jobs]
+# max_running = 4
+# max_seconds = 7200
+# [tools]
+# terminal = true              # the shell that stays open between commands

@@ -42,6 +42,11 @@ class ResolvedConfig:
     sessions: dict[str, Any] = field(default_factory=dict)
     #: [web] model_switch (bool): may people change the model of a conversation
     web: dict[str, Any] = field(default_factory=dict)
+    #: [vision] provider: a model that describes images for models that cannot see
+    vision: dict[str, Any] = field(default_factory=dict)
+    #: [jobs] max_running, max_seconds; [tools] terminal
+    jobs: dict[str, Any] = field(default_factory=dict)
+    terminal: bool = True
 
 
 def _find_config_file(explicit_path: str | None) -> str | None:
@@ -124,6 +129,9 @@ def load_config(
         compaction=_compaction(raw.get("compaction", {}) or {}),
         sessions=raw.get("sessions", {}) or {},
         web=raw.get("web", {}) or {},
+        vision=raw.get("vision", {}) or {},
+        jobs=raw.get("jobs", {}) or {},
+        terminal=bool(raw.get("tools", {}).get("terminal", True)),
     )
 
 

@@ -373,3 +373,19 @@ def test_session_export_rejects_bad_ids(server_factory):
     assert client.request("GET", "/api/sessions/nope/export")[0] == 404
     status, hits = client.request("GET", "/api/sessions?q=zzz-not-there")
     assert status == 200 and hits == []
+
+
+def test_large_message_bodies_need_a_credential_first(server_factory):
+    """Messages may carry images, so their limit is 30 MB -- but only once the
+    caller is known; an anonymous request is refused before the body is read."""
+    import base64
+    client, _app = server_factory([AssistantTurn(content="ok")], token="node-secret")
+    _, conv = client.request("POST", "/api/conversations", {})
+    png = base64.b64encode(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")).decode()
+    body = {"text": "看圖", "images": [{"name": "a.png", "type": "image/png", "data": png}]}
+    assert client.request("POST", f"/api/conversations/{conv['id']}/messages", body, bearer=False)[0] == 401
+    assert client.request("POST", f"/api/conversations/{conv['id']}/messages", body)[0] == 202
+    bad = {"text": "x", "images": [{"type": "image/svg+xml", "data": png}]}
+    status, payload = client.request("POST", f"/api/conversations/{conv['id']}/messages", bad)
+    assert status in (400, 409) and ("unsupported" in json.dumps(payload) or "busy" in json.dumps(payload))

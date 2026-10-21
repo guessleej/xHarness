@@ -169,3 +169,17 @@ model = "your-model-id"
 # auto_title = true            # 第一個任務完成後，由這段對話的模型寫一個短標題
 # [web]
 # model_switch = true          # 使用者可以切換對話的模型（各層級可用 providers = [...] 限制）
+
+# ── 看圖、背景工作、終端機 ──────────────────────────────────
+# 看得懂圖的供應端設 vision = true。純文字模型可以指定一個會看圖的模型，先把圖轉成文字描述。
+# [providers.ocr]
+# base_url = "http://192.168.10.70:8088/v1"
+# model = "gemma-4-e4b-xreadable-ocr"
+# vision = true
+# [vision]
+# provider = "ocr"
+# [jobs]
+# max_running = 4              # 同時最多幾個背景工作
+# max_seconds = 7200           # 單一背景工作最長幾秒
+# [tools]
+# terminal = true              # 一直開著的 shell

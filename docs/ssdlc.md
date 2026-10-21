@@ -133,7 +133,10 @@ Rules the architecture enforces:
   `tools/bash.py` — running commands is that tool's purpose; `B310` in
   `llm.py` — scheme validated at construction; `B404`/`B603` in `tools/security.py` —
   invoking the scanners is that tool's purpose, with fixed argv and timeouts; `B404`/`B603` in `evals.py` — `command` checks are case-author code run in a throwaway workspace; `B110` in `desktop.py` — destroying an already-closed native window on shutdown is expected and has nothing to recover; `B104`/`B105` in `desktop.py` — a fleet node is meant to be reachable and is protected by its bearer token, and `DEFAULT_TOKEN_FILE` is a file name rather than a credential; `B110` in `ldap.py` — the bind result is already decoded when the socket is closed, so a failing close changes nothing; `B404`/`B603`/`B310` in `scripts/report/build_usage_report.py` — the optional LibreOffice conversion uses a fixed argv and the report fetch validates its scheme; `B404`/`B603`/`B108` in `sandbox.py` — backend
-  functional probes and the bwrap /tmp bind target, fixed probe argv).
+  functional probes and the bwrap /tmp bind target, fixed probe argv; `B404`/`B603` in
+  `tools/jobs.py` and `tools/terminal.py` — running an approved command (in the background, or in a shell
+  kept open) is those tools' purpose, under the same approval and sandbox as bash; `B110` in
+  `tools/jobs.py` — a failing UI listener must not take a running job down with it).
 
 ### Phase 4 — Verification
 
@@ -170,6 +173,15 @@ The UI runs conversations with the configured approval policy; `prompt` mode sur
 The fleet view adds an operator brake: stopping a conversation sets the agent's stop flag (honoured before the next model call and before each remaining tool call) and denies every pending approval. An in-flight model request completes; nothing else runs after it.
 
 Provider presets change no network posture by themselves: local presets stay on loopback, hosted presets are explicit opt-ins whose endpoints receive prompts and tool output. `xharness providers probe` only issues `GET /models` over http(s).
+
+### Requests that carry files, images and long-running work (1.10-1.11)
+
+- **Message bodies** may be up to 30 MB because they can carry four 5 MB images; that limit applies only after the caller is authenticated, so an anonymous request is refused before its body is read (every other route keeps 1 MB). Images must be PNG, JPEG, WebP or GIF, valid base64, and are stored by hash under `.xharness/images` in the caller's working directory; the session log records paths, not pixels.
+- **`@path` mentions** resolve only to files inside the working directory (real paths compared, so `../` and symlinks out are refused), text only, size-capped.
+- **Background jobs and the terminal** start under the same approval and sandbox as bash. Jobs are capped in number and run time, run in their own process group, and are killed when the conversation ends; the terminal shell is killed with it.
+- **Plan mode** withdraws every mutating tool and the subagent tools from the model's list and refuses a call to them anyway; **goal mode** only re-prompts within a hard round limit.
+- **Human commands** never reach the model; a bare `/word` that is not a command is answered locally, because a model handed one as a request was seen to report work it never did.
+- **Ratings** are logged for the usage report and never returned to the model.
 
 ### Eval subsystem
 

@@ -44,6 +44,9 @@ from . import seccheck
 from .sandbox import resolve_sandbox
 from .commands import CommandHost, CommandResult, dispatch as dispatch_command, generate_title, listing as command_listing
 from .commands import MAX_FEEDBACK_NOTE, providers_for, switch_model
+from .goal import run_goal
+from .mentions import expand as expand_mentions, list_files
+from .vision import describer_from_config, save_images
 from .session import (SessionLog, clean_title, export_markdown, messages_from_events, search_sessions,
                       session_summary, sessions_dir)
 from .telegram import TelegramBridge, telegram_settings
@@ -59,6 +62,9 @@ APPROVAL_TIMEOUT_SECONDS = 600
 QUESTION_TIMEOUT_SECONDS = 900
 TICKET_TTL_SECONDS = 60
 MAX_BODY_BYTES = 1_000_000
+#: A message may carry up to four 5 MB images as base64; read only after the
+#: caller is authenticated, so nobody unknown can make the server read 30 MB.
+MAX_MESSAGE_BYTES = 30_000_000
 CSRF_HEADER = "X-XHarness-Client"
 #: Change previews: files larger than this are named, not diffed, and a diff
 #: longer than this is cut. Enough to judge an edit, not a code review tool.
@@ -226,6 +232,10 @@ class Conversation:
             "provider": self.provider,
             "model": getattr(self.harness.ctx.optional("llm"), "model", ""),
             "requests": self.requests,
+            "plan_mode": bool(getattr(self.agent, "plan_mode", False)),
+            "goal": (self.harness.ctx.optional("goal").public() if self.harness.ctx.optional("goal") else None),
+            "jobs": [job.public() for job in (self.harness.ctx.optional("jobs").jobs.values()
+                                              if self.harness.ctx.optional("jobs") else [])],
             "ratings": {str(k): v for k, v in self.ratings.items()},
             "usage": self.usage(),
             "created": self.created,
@@ -296,6 +306,7 @@ class WebApp:
         initial = messages_from_events(SessionLog.load(resume, principal_name(user))) if resume else []
         holder: dict[str, Conversation] = {}
         cwd = workspace.ensure(principal_name(user))
+        describer = describer_from_config(self.config)
         #: Tool calls run one at a time, so the latest started call is the one
         #: an approval, a change preview or a tool_end belongs to.
         calls = {"current": 0}
@@ -357,6 +368,8 @@ class WebApp:
                 ask=ask,
                 initial_messages=initial,
                 compaction=getattr(self.config, "compaction", None) or {"auto": True, "threshold": 0.8},
+                describe_image=describer[1] if describer else None,
+                describer_name=describer[0] if describer else "",
                 on_delta=lambda text: holder["conv"].push({"type": "delta", "text": text}),
                 on_tool_start=tool_start,
                 on_tool_end=tool_end,
@@ -375,6 +388,7 @@ class WebApp:
 
         harness.ctx.on("subagent/start", child_start)
         harness.ctx.on("subagent/end", child_end)
+        harness.ctx.on("jobs/changed", lambda job: conv.push({"type": "job", **job}))
         harness.ctx.on("agent/compacted", lambda result: conv.push({
             "type": "compacted", "reason": result["reason"], "replaced": result["replaced"],
             "kept": result["kept"], "summary": result["summary"]}))
@@ -422,7 +436,13 @@ class WebApp:
             convs = sorted(self.conversations.values(), key=lambda c: c.created, reverse=True)
         return [conv.summary() for conv in convs if self.visible(conv, viewer)]
 
-    def send(self, conv: Conversation, text: str) -> bool:
+    def save_images(self, conv: Conversation, items: Any) -> list[str]:
+        if not isinstance(items, list) or not items:
+            return []
+        return save_images([i for i in items if isinstance(i, dict)], conv.agent.options.cwd or os.getcwd())
+
+    def send(self, conv: Conversation, text: str, images: list[str] | None = None,
+             goal: dict[str, Any] | None = None) -> bool:
         with conv.cond:
             if conv.running:
                 return False
@@ -431,11 +451,18 @@ class WebApp:
         conv.preview = text[:80]
         conv.requests += 1
         turn = conv.requests
-        conv.push({"type": "user", "text": text, "turn": turn})
+        conv.push({"type": "user", "text": text, "turn": turn, "images": len(images or []), "goal": bool(goal)})
 
         def run() -> None:
             try:
-                answer = conv.agent.run(text)
+                cwd = conv.agent.options.cwd or os.getcwd()
+                attached, files, pictures = expand_mentions(text, cwd)
+                if files:
+                    conv.push({"type": "attached", "files": files})
+                if goal is not None:
+                    answer = run_goal(conv.agent, text, int(goal.get("rounds") or 0) or 5, on_event=conv.push)
+                else:
+                    answer = conv.agent.run(text, extra_context=attached, images=(images or []) + pictures)
                 conv.push({"type": "done", "answer": answer, "usage": conv.usage(), "turn": turn})
                 if not conv.title and (getattr(self.config, "sessions", None) or {}).get("auto_title", True):
                     self._name(conv, text)
@@ -506,6 +533,8 @@ class WebApp:
             session = conv.harness.ctx.optional("session")
             if session:
                 session.append({"type": "command", "line": line[:200], "ok": result.ok})
+            if result.ok and "plan_mode" in result.data:
+                conv.push({"type": "plan", "on": result.data["plan_mode"]})
             if result.ok and result.data.get("provider"):
                 conv.provider = result.data["provider"]
                 conv.push({"type": "model", "provider": conv.provider, "model": result.data.get("model")})
@@ -517,6 +546,8 @@ class WebApp:
             "default": self.config.provider_name,
             "switchable": bool((getattr(self.config, "web", None) or {}).get("model_switch", True)),
             "providers": providers_for(self.config, allowed),
+            # A model that describes images for models that cannot see (see vision.py).
+            "describer": str((getattr(self.config, "vision", None) or {}).get("provider") or ""),
         }
 
     def skills(self, user: Any) -> list[dict[str, str]]:
@@ -747,7 +778,7 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'")
+            self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
@@ -807,9 +838,9 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             self._json(403, {"error": "administrator only"})
             return False
 
-        def _body(self) -> dict[str, Any] | None:
+        def _body(self, limit: int = MAX_BODY_BYTES) -> dict[str, Any] | None:
             length = int(self.headers.get("Content-Length") or 0)
-            if length > MAX_BODY_BYTES:
+            if length > limit:
                 self._json(413, {"error": "body too large"})
                 return None
             raw = self.rfile.read(length) if length else b"{}"
@@ -901,6 +932,10 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 return
             if parts[1:] == ["commands"]:
                 self._json(200, command_listing("web"))
+                return
+            if parts[1:] == ["workspace", "files"]:
+                root = workspace.ensure(principal_name(self.principal)) or os.getcwd()
+                self._json(200, list_files(root, (query.get("q") or [""])[0][:100]))
                 return
             if parts[1:] == ["models"]:
                 self._json(200, app.models(self.principal))
@@ -1027,13 +1062,16 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     return
                 self._upload()
                 return
-            body = self._body()
+            is_message = len(parts) == 4 and parts[1] == "conversations" and parts[3] == "messages"
+            if is_message and not self._guard():
+                return
+            body = self._body(MAX_MESSAGE_BYTES if is_message else MAX_BODY_BYTES)
             if body is None:
                 return
             if parts[1:] == ["login"]:
                 self._login(body)
                 return
-            if not self._guard():
+            if not is_message and not self._guard():
                 return
             if parts[1:] == ["logout"]:
                 app.users.revoke(self._presented())
@@ -1090,7 +1128,13 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     if not text:
                         self._json(400, {"error": "text is required"})
                         return
-                    if not app.send(conv, text):
+                    goal = body.get("goal") if isinstance(body.get("goal"), dict) else None
+                    try:
+                        images = app.save_images(conv, body.get("images") or [])
+                    except ValueError as error:
+                        self._json(400, {"error": str(error)})
+                        return
+                    if not app.send(conv, text, images=images, goal=goal):
                         self._json(409, {"error": "conversation is busy"})
                         return
                     self._json(202, {"ok": True})
@@ -1118,6 +1162,11 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     result = app.command(conv, "/model " + str(body.get("provider") or ""), self.principal)
                     ok = bool(result and result.ok)
                     self._json(200 if ok else 400, {"ok": ok, "text": result.text if result else "", **(result.data if result else {})})
+                    return
+                if parts[3] == "jobs":
+                    manager = conv.harness.ctx.optional("jobs")
+                    job = manager.stop(str(body.get("stop") or "")) if manager else None
+                    self._json(200 if job else 404, {"ok": bool(job), "job": job.public() if job else None})
                     return
                 if parts[3] == "feedback":
                     rating = body.get("rating")
@@ -1579,6 +1628,29 @@ body:not(.landing) .landing{display:none}
 .modelsel{font:inherit;font-size:12.5px;color:var(--ink-2);background:var(--surface-2);border:0;border-radius:99px;padding:4px 26px 4px 10px;max-width:230px;cursor:pointer;
   appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
   background-position:calc(100% - 13px) 52%,calc(100% - 9px) 52%;background-size:4px 4px;background-repeat:no-repeat}
+.planbtn{font-size:12.5px;font-weight:600;padding:4px 11px;border-radius:99px;border:0;cursor:pointer;background:var(--surface-2);color:var(--ink-2);white-space:nowrap}
+.planbtn:hover{background:var(--tint);color:var(--ink)}
+.planbtn.on{background:var(--warn-tint);color:var(--warn)}
+body.plan-on .composer{box-shadow:0 0 0 3px var(--warn-tint),var(--shadow)}
+.goalwrap{position:sticky;top:0;z-index:5;max-width:var(--col);margin:0 auto;padding:0 24px}
+.goalwrap:has(.goalbar[hidden]){display:none}
+.goalbar{margin:8px 0;padding:10px 14px;border-radius:14px;background:var(--tint);display:flex;align-items:center;gap:10px;font-size:14px;backdrop-filter:blur(8px)}
+.goalbar .gt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.goalbar .gr{font-size:12.5px;color:var(--brand);font-weight:700;white-space:nowrap}
+.goalbar.done{background:var(--ok-tint)}.goalbar.done .gr{color:var(--ok)}
+.goalbar.blocked,.goalbar.incomplete,.goalbar.stopped,.goalbar.failed{background:var(--warn-tint)}
+.goalbar.blocked .gr,.goalbar.incomplete .gr,.goalbar.stopped .gr,.goalbar.failed .gr{color:var(--warn)}
+.approve-plan{margin:2px 0 14px}
+.imgchip{position:relative;width:52px;height:52px;border-radius:10px;overflow:hidden;background:var(--surface-2);flex:none}
+.imgchip img{width:100%;height:100%;object-fit:cover;display:block}
+.imgchip button{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;display:grid;place-items:center;cursor:pointer}
+.imgchip button svg.i{width:12px;height:12px}
+.m-user .att{font-size:12.5px;color:var(--ink-3);text-align:right;margin-top:4px}
+.job{background:var(--surface-2);border-radius:14px;padding:10px 12px;margin:10px 2px}
+.job-h{display:flex;align-items:center;gap:8px}
+.job-h .c{flex:1;min-width:0;font:13px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.job .m{font-size:12px;color:var(--ink-3);margin-top:4px}
+.pill.done{background:var(--ok-tint);color:var(--ok)}.pill.failed,.pill.timeout{background:var(--tint);color:var(--brand)}.pill.stopped{background:var(--surface-3);color:var(--ink-3)}
 .task .snip{font-size:12.5px;color:var(--ink-2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---- landing: what to do when nothing has happened yet ---------------------- */
@@ -1871,6 +1943,7 @@ body:not(.view-admin) #admin{display:none}
             <div class="lcard d2"><h2>接續最近的任務</h2><div id="recent"></div></div>
           </div>
         </div>
+        <div class="goalwrap"><div class="goalbar" id="goalbar" hidden></div></div>
         <div class="thread" id="transcript"></div>
       </div>
       <div class="composer-wrap">
@@ -1879,9 +1952,10 @@ body:not(.view-admin) #admin{display:none}
           <div class="queued" id="queued"></div>
           <textarea id="input" rows="1" placeholder="交代一件事，或輸入 / 看指令（Enter 送出，Shift+Enter 換行）"></textarea>
           <div class="cbar">
-            <button class="iconbtn" id="btn-attach" title="附加檔案" aria-label="附加檔案" hidden>
+            <button class="iconbtn" id="btn-attach" title="附加圖片或檔案（也可以直接貼上圖片）" aria-label="附加圖片或檔案">
               <svg class="i" viewBox="0 0 24 24"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg></button>
             <input type="file" id="file-input" multiple hidden>
+            <button class="planbtn" id="btn-plan" type="button" title="計畫模式：模型只查看、提出計畫，你核准後才動手">計畫模式</button>
             <select class="modelsel" id="model-select" aria-label="這段對話使用的模型" title="這段對話使用的模型" hidden></select>
             <span class="modepill" id="modepill">有副作用的動作會先問你</span>
             <span class="grow"></span>
@@ -1899,12 +1973,14 @@ body:not(.view-admin) #admin{display:none}
       <div class="seg" role="tablist">
         <button class="on" data-rv="changes">變更<span class="cnt" id="rv-changes-cnt"></span></button>
         <button data-rv="files">檔案</button>
+        <button data-rv="jobs">背景<span class="cnt" id="rv-jobs-cnt"></span></button>
         <button data-rv="tools">工具</button>
         <button data-rv="memory">記憶</button>
       </div>
       <div class="pane-body">
         <div id="rv-changes"></div>
         <div id="rv-files" hidden></div>
+        <div id="rv-jobs" hidden></div>
         <div id="rv-tools" hidden></div>
         <div id="rv-memory" hidden></div>
       </div>
@@ -1992,6 +2068,7 @@ body:not(.view-admin) #admin{display:none}
   let conv=null,es=null,token=null,me=null,admin=false,gateOn=false,meta=null;
   let view='chat',convPreview='',convTitle='',convSession='',convState='idle',running=false;
   let commands=[],models={providers:[],switchable:false},pendingProvider='',searchHits=null,lastAiEl=null,knownRatings={};
+  let planOn=false,turnWasPlan=false,jobs={},pendingImages=[];
   let assistantEl=null,assistantText='',stepsBox=null,composing=false;
   const rows={};          // call id -> step row
   let changes=[];         // change previews for the open conversation
@@ -2119,7 +2196,9 @@ body:not(.view-admin) #admin{display:none}
   const KIND={read:['eye','讀取'],write:['pen','寫入'],edit:['pen','修改'],glob:['folder','找檔案'],grep:['search','搜尋'],
     bash:['term','執行'],webfetch:['globe','開啟網頁'],browser_open:['globe','開啟網頁'],web_search:['globe','搜尋網路'],
     todo_write:['list','更新待辦清單'],security_scan:['shield','資安掃描'],ask_user:['help','問你一個問題'],
-    subagent:['users','交給子代理'],subagent_batch:['users','交給多個子代理']};
+    subagent:['users','交給子代理'],subagent_batch:['users','交給多個子代理'],
+    terminal:['term','終端機'],job_start:['term','背景執行'],job_status:['list','查看背景工作'],job_wait:['list','等背景工作'],
+    job_stop:['stop','停止背景工作'],goal_done:['check','回報目標'],skill:['layers','載入技能']};
   function parseArgs(raw){
     try{const o=JSON.parse(raw||'{}');return o&&typeof o==='object'?o:{};}
     catch(e){const o={};String(raw||'').replace(/"(path|pattern|command|url|query|name|task)"\s*:\s*"((?:[^"\\]|\\.)*)/g,(_,k,v)=>{o[k]=v.replace(/\\n/g,' ').replace(/\\"/g,'"');});return o;}
@@ -2129,7 +2208,7 @@ body:not(.view-admin) #admin{display:none}
     if(!k){if(name.indexOf('memory')===0)k=['bookmark','記憶'];
       else if(name.indexOf('mcp__')===0){const p=name.split('__');k=['plug','MCP '+(p[1]||'')+'・'+p.slice(2).join('__')];}
       else k=['tool',name];}
-    let target=a.path||a.pattern||a.command||a.url||a.query||a.name||(a.task?String(a.task):'')||'';
+    let target=a.path||a.pattern||a.command||a.url||a.query||a.name||a.id||(a.task?String(a.task):'')||(a.summary?String(a.summary):'')||'';
     target=String(target).replace(/\s+/g,' ');if(target.length>90)target=target.slice(0,90)+'…';
     return {icon:k[0],verb:k[1],target};
   }
@@ -2148,7 +2227,8 @@ body:not(.view-admin) #admin{display:none}
     b.title=running?'停止這個任務':'送出';b.setAttribute('aria-label',b.title);
   }
   function setUsage(u){if(!u)return;$('#conv-use').textContent=fmtNum(u.total_tokens)+' tokens・'+(u.tool_calls||0)+' 個步驟';}
-  function addUser(text){const w=h('div','m-user');w.appendChild(h('div','bubble',text));transcript.appendChild(w);toBottom(true);}
+  function addUser(text,images){const w=h('div','m-user');const col=h('div');col.appendChild(h('div','bubble',text));
+    if(images)col.appendChild(h('div','att','附上 '+images+' 張圖片'));w.appendChild(col);transcript.appendChild(w);toBottom(true);}
   function addNote(text,ic){const n=h('div','m-note');if(ic)n.appendChild(icon(ic));n.appendChild(document.createTextNode(text));transcript.appendChild(n);toBottom();}
   function addError(text){transcript.appendChild(h('div','m-error',text));toBottom(true);}
   function finishAssistant(){if(assistantEl){const c=assistantEl.querySelector('.cursor');if(c)c.remove();}assistantEl=null;assistantText='';}
@@ -2192,6 +2272,37 @@ body:not(.view-admin) #admin{display:none}
     const more=h('button','linkbtn','看摘要');const box=h('div','summary-box');box.hidden=true;box.appendChild(md(ev.summary||''));
     more.onclick=()=>{box.hidden=!box.hidden;more.textContent=box.hidden?'看摘要':'收起';};
     n.appendChild(more);transcript.append(n,box);toBottom();
+  }
+
+  function setPlan(on){planOn=!!on;$('#btn-plan').classList.toggle('on',planOn);document.body.classList.toggle('plan-on',planOn);
+    $('#btn-plan').textContent=planOn?'計畫模式：開':'計畫模式';
+    input.placeholder=planOn?'計畫模式：說要做什麼，模型會先提計畫給你核准':'交代一件事，或輸入 / 看指令（Enter 送出，Shift+Enter 換行）';}
+  async function planCommand(on){
+    if(!conv)await newConversation();
+    try{const r=await api('/api/conversations/'+conv+'/commands',{method:'POST',body:{line:'/plan '+(on?'on':'off')}});setPlan(r.data&&r.data.plan_mode);toast(r.text);}
+    catch(e){toast('切換失敗：'+e.message,true);}
+  }
+  $('#btn-plan').onclick=()=>{if(running){toast('任務進行中，等它結束再切換計畫模式。');return;}planCommand(!planOn);};
+  const GOAL_WORDS={started:'開始',round:'進行中',done:'完成',blocked:'卡住了',incomplete:'輪數用完，尚未完成',stopped:'已停止',failed:'出錯了'};
+  function goalEvent(ev){
+    const bar=$('#goalbar');bar.hidden=false;bar.className='goalbar '+(ev.state==='round'||ev.state==='started'?'':ev.state);bar.textContent='';
+    bar.append(icon('layers'),h('span','gt','目標：'+ev.objective),h('span','gr','第 '+ev.round+'/'+ev.max_rounds+' 輪・'+(GOAL_WORDS[ev.state]||ev.state)));
+    if(ev.state==='round'&&ev.round>1)addNote('目標模式：第 '+ev.round+' 輪，目標還沒完成，繼續做。','layers');
+    if(['done','blocked','incomplete','stopped','failed'].includes(ev.state)){
+      const n=h('div','m-cmd'+(ev.state==='done'?'':' bad'));n.append(h('div','cl','目標'+(GOAL_WORDS[ev.state]||ev.state)),h('div','ct',ev.summary||'（模型沒有回報摘要）'));transcript.appendChild(n);toBottom();}
+  }
+  const JOB_WORDS={running:'執行中',done:'完成',failed:'失敗',stopped:'已停止',timeout:'逾時被停止'};
+  function jobEvent(ev){
+    const before=jobs[ev.id];jobs[ev.id]=ev;renderJobs();
+    if(before&&before.state==='running'&&ev.state!=='running')toast('背景工作 '+ev.id+' '+(JOB_WORDS[ev.state]||ev.state),ev.state!=='done');
+  }
+  function renderJobs(){
+    const box=$('#rv-jobs');box.textContent='';const list=Object.values(jobs);
+    const live=list.filter(j=>j.state==='running').length;$('#rv-jobs-cnt').textContent=live?String(live):'';
+    if(!list.length){const e=h('div','empty');e.append(h('b',null,'沒有背景工作'),document.createTextNode('模型遇到建置、測試、下載這類長指令時，會用 job_start 丟到背景執行，這裡可以看進度和停止。'));box.appendChild(e);return;}
+    list.slice().reverse().forEach(j=>{const c=h('div','job'),hd=h('div','job-h');hd.append(h('span','pill '+j.state,JOB_WORDS[j.state]||j.state),h('span','c',j.command));
+      if(j.state==='running'){const st=h('button','linkbtn','停止');st.onclick=async()=>{try{await api('/api/conversations/'+conv+'/jobs',{method:'POST',body:{stop:j.id}});}catch(e){toast(e.message,true);}};hd.appendChild(st);}
+      c.append(hd,h('div','m',j.id+'・'+j.runtime+' 秒'+(j.exit_code!=null?'・結束碼 '+j.exit_code:'')+'・記錄 '+j.log));box.appendChild(c);});
   }
 
   function stepsHead(box){
@@ -2320,10 +2431,14 @@ body:not(.view-admin) #admin{display:none}
 
   function handle(ev){
     const t=ev.type;
-    if(t==='user'){showLanding(false);closeSteps();addUser(ev.text);setState('running');if(!convPreview)setTitle(ev.text);}
+    if(t==='user'){showLanding(false);closeSteps();addUser(ev.text,ev.images);setState('running');turnWasPlan=planOn;if(!convPreview)setTitle(ev.text);}
     else if(t==='history'){showLanding(false);if(ev.role==='user'){addUser(ev.text);if(!convPreview)setTitle(ev.text);}
       else{const a=h('div','m-ai');a.appendChild(md(ev.text));transcript.appendChild(a);replyBar(a,ev.turn,ev.text);}}
     else if(t==='compacted')compactedNote(ev);
+    else if(t==='plan')setPlan(ev.on);
+    else if(t==='goal')goalEvent(ev);
+    else if(t==='job')jobEvent(ev);
+    else if(t==='attached')addNote('已附加：'+ev.files.join('、'),'file');
     else if(t==='title'){convTitle=ev.title||'';showTitle();refreshTasks();}
     else if(t==='model')setModelShown(ev.provider,ev.model);   // the command block or a toast already says so
     else if(t==='delta'){
@@ -2345,6 +2460,8 @@ body:not(.view-admin) #admin{display:none}
       const replyText=assistantText||ev.answer||'';
       if(!ev.answer&&!assistantText&&!assistantEl)addNote('（模型沒有回覆文字）');
       else if(lastAiEl&&transcript.lastElementChild===lastAiEl)replyBar(lastAiEl,ev.turn,replyText);
+      if(turnWasPlan&&planOn&&replyText){const b=h('button','btn primary approve-plan');b.append(icon('check'),document.createTextNode('核准計畫並執行'));
+        b.onclick=async()=>{b.disabled=true;await planCommand(false);input.value='計畫核准，請照計畫執行，完成後說明你檢查了什麼。';send();b.remove();};transcript.appendChild(b);toBottom();}
       finishAssistant();settleSpinners();closeSteps();
       transcript.querySelectorAll('.steps').forEach(b=>{if(!b.querySelector('.badmark'))b.classList.add('closed');});
       setState('idle');setUsage(ev.usage);refreshTasks();
@@ -2362,11 +2479,12 @@ body:not(.view-admin) #admin{display:none}
   }
   function resetThread(){
     transcript.textContent='';assistantEl=null;assistantText='';stepsBox=null;changes=[];lastAiEl=null;convTitle='';knownRatings={};
+    jobs={};renderJobs();$('#goalbar').hidden=true;setPlan(false);
     Object.keys(rows).forEach(k=>delete rows[k]);renderChanges();$('#conv-use').textContent='';
   }
   async function openConversation(c){
     conv=c.id;resetThread();convSession=c.session||'';convTitle=c.title||'';knownRatings=c.ratings||{};setTitle(c.preview||'');showLanding(false);setState(c.state||'idle');setUsage(c.usage);
-    setModelShown(c.provider,c.model);
+    setModelShown(c.provider,c.model);setPlan(c.plan_mode);(c.jobs||[]).forEach(j=>{jobs[j.id]=j;});renderJobs();
     hint.textContent='';showView('chat');await connect(conv,0);closeDrawer();renderTasks();
   }
   async function newConversation(resume){
@@ -2385,8 +2503,17 @@ body:not(.view-admin) #admin{display:none}
   async function runCommand(text){
     const cmd=commandOf(text);closePop();input.value='';autosize();
     if(cmd.name==='new'){await newConversation();return;}
+    if(cmd.name==='plan'){const w=text.split(/\s+/)[1];if(running){toast('任務進行中，等它結束再切換計畫模式。');return;}await planCommand(w==='off'?false:w==='on'?true:!planOn);input.value='';autosize();return;}
     if(cmd.name==='stop'){if(running)await stopTask();else toast('沒有進行中的任務');return;}
     if(cmd.name==='export'){await exportConv();return;}
+    if(cmd.name==='goal'&&text.trim()!=='/goal'){
+      if(running){toast('任務還在進行，等它結束再設目標。');return;}
+      if(!conv)await newConversation();
+      try{const r=await api('/api/conversations/'+conv+'/commands',{method:'POST',body:{line:text}});
+        if(!r.ok||r.action!=='goal'){cmdNote(text,r.text,r.ok);return;}
+        await api('/api/conversations/'+conv+'/messages',{method:'POST',body:{text:r.data.objective,goal:{rounds:r.data.rounds}}});
+      }catch(e){cmdNote(text,e.message,false);}
+      return;}
     if(!conv)await newConversation();
     try{
       const r=await api('/api/conversations/'+conv+'/commands',{method:'POST',body:{line:text}});
@@ -2405,10 +2532,12 @@ body:not(.view-admin) #admin{display:none}
     const typed=input.value.trim();
     // Attached files are named in the message itself, so the agent knows they
     // exist and where they are without any special protocol.
-    const text=typed+takeQueued();
+    const text=(typed||(pendingImages.length?'請看這張圖片。':''))+takeQueued();
     if(!text.trim())return;
     if(!conv)await newConversation();
-    try{await api('/api/conversations/'+conv+'/messages',{method:'POST',body:{text}});input.value='';autosize();}
+    const images=pendingImages.map(i=>({name:i.name,type:i.type,data:i.data}));
+    try{await api('/api/conversations/'+conv+'/messages',{method:'POST',body:images.length?{text,images}:{text}});input.value='';autosize();
+      pendingImages.forEach(i=>URL.revokeObjectURL(i.url));pendingImages=[];renderQueued();}
     catch(e){addError(e.message);}
   }
   async function exportConv(){
@@ -2455,7 +2584,7 @@ body:not(.view-admin) #admin{display:none}
     if(!$('#cmdpop').hidden){
       if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();movePop(e.key==='ArrowDown'?1:-1);return;}
       if(e.key==='Escape'){e.preventDefault();closePop();return;}
-      if(e.key==='Tab'||(e.key==='Enter'&&!e.shiftKey&&!exactCommand())){e.preventDefault();pickPop();return;}
+      if(e.key==='Tab'||(e.key==='Enter'&&!e.shiftKey&&(popMode==='file'||!exactCommand()))){e.preventDefault();pickPop();return;}
     }
     if(e.key!=='Enter'||e.shiftKey)return;
     e.preventDefault();send();
@@ -2465,11 +2594,27 @@ body:not(.view-admin) #admin{display:none}
   // ---- slash-command popup ----
   let popIndex=0,popItems=[];
   function exactCommand(){const t=input.value.trim();const c=commandOf(t);return !!c&&(t.length>c.name.length+1||!c.args);}
-  function closePop(){$('#cmdpop').hidden=true;popItems=[];}
+  function closePop(){$('#cmdpop').hidden=true;popItems=[];popMode='cmd';}
+  let popMode='cmd',mentionAt=-1,mentionTimer=null;
+  function mentionQuery(){
+    const pos=input.selectionStart,before=input.value.slice(0,pos);const m=before.match(/(^|\s)@([^\s@]*)$/);
+    if(!m)return null;mentionAt=pos-m[2].length-1;return m[2];
+  }
+  function showMentions(items){
+    const pop=$('#cmdpop');popItems=items;popMode='file';popIndex=Math.min(popIndex,Math.max(0,items.length-1));pop.textContent='';
+    if(!items.length){closePop();return;}
+    items.forEach((f,i)=>{const it=h('div','ci'+(i===popIndex?' on':''));it.setAttribute('role','option');
+      it.append(h('span','cn','@'),h('span','ch',f.path),h('span','ca',humanSize(f.bytes)));
+      it.onmousedown=ev=>{ev.preventDefault();popIndex=i;pickPop();};pop.appendChild(it);});
+    pop.hidden=false;
+  }
   function updatePop(){
     const t=input.value;const pop=$('#cmdpop');
+    const q=mentionQuery();
+    if(q!==null){clearTimeout(mentionTimer);mentionTimer=setTimeout(async()=>{try{showMentions(await api('/api/workspace/files?q='+encodeURIComponent(q)));}catch(e){closePop();}},150);return;}
+    popMode='cmd';
     if(!t.startsWith('/')||/\s/.test(t.trim())||t.indexOf('\n')>=0){closePop();return;}
-    const q=t.slice(1).toLowerCase();popItems=commands.filter(c=>c.name.indexOf(q)===0);
+    const prefix=t.slice(1).toLowerCase();popItems=commands.filter(c=>c.name.indexOf(prefix)===0);
     if(!popItems.length){closePop();return;}
     popIndex=Math.min(popIndex,popItems.length-1);pop.textContent='';
     popItems.forEach((c,i)=>{const it=h('div','ci'+(i===popIndex?' on':''));it.setAttribute('role','option');
@@ -2477,8 +2622,12 @@ body:not(.view-admin) #admin{display:none}
       it.onmousedown=ev=>{ev.preventDefault();popIndex=i;pickPop();};pop.appendChild(it);});
     pop.hidden=false;
   }
-  function movePop(d){if(!popItems.length)return;popIndex=(popIndex+d+popItems.length)%popItems.length;updatePop();}
-  function pickPop(){const c=popItems[popIndex];if(!c)return;input.value='/'+c.name+(c.args?' ':'');closePop();autosize();input.focus();
+  function movePop(d){if(!popItems.length)return;popIndex=(popIndex+d+popItems.length)%popItems.length;
+    if(popMode==='file')showMentions(popItems);else updatePop();}
+  function pickPop(){const c=popItems[popIndex];if(!c)return;
+    if(popMode==='file'){const pos=input.selectionStart;const v=input.value;const insert='@'+c.path+' ';
+      input.value=v.slice(0,mentionAt)+insert+v.slice(pos);const caret=mentionAt+insert.length;closePop();autosize();input.focus();input.setSelectionRange(caret,caret);return;}
+    input.value='/'+c.name+(c.args?' ':'');closePop();autosize();input.focus();
     if(!c.args)send();}
   input.addEventListener('blur',()=>setTimeout(closePop,150));
   input.addEventListener('focus',()=>$('#composer').classList.add('focus'));
@@ -2568,7 +2717,8 @@ body:not(.view-admin) #admin{display:none}
   document.querySelectorAll('[data-rv]').forEach(b=>b.onclick=()=>rvShow(b.dataset.rv));
   function rvShow(tab){
     rvTab=tab;document.querySelectorAll('[data-rv]').forEach(b=>b.classList.toggle('on',b.dataset.rv===tab));
-    ['changes','files','tools','memory'].forEach(k=>{$('#rv-'+k).hidden=k!==tab;});
+    if(tab==='jobs')renderJobs();
+    ['changes','files','jobs','tools','memory'].forEach(k=>{$('#rv-'+k).hidden=k!==tab;});
     if(tab==='files')loadFiles();if(tab==='tools')loadTools();if(tab==='memory')loadMemory();
   }
   const STATUS={pending:'等你許可',applied:'已套用',skipped:'沒有套用',denied:'已拒絕'};
@@ -2623,7 +2773,7 @@ body:not(.view-admin) #admin{display:none}
   async function uploadFiles(fileList){
     const list=[...fileList];
     if(!list.length)return;
-    if(!uploadsOn){toast('這台伺服器沒有啟用帳號，無法上傳檔案。',true);return;}
+    if(!uploadsOn){toast('這台伺服器沒有啟用帳號，只能附加圖片；文件請放進工作目錄後用 @ 檔名引用。',true);return;}
     const form=new FormData();
     list.forEach(f=>form.append('file',f,f.name));
     hint.textContent='上傳中：'+list.map(f=>f.name).join('、');
@@ -2642,6 +2792,9 @@ body:not(.view-admin) #admin{display:none}
   }
   function renderQueued(){
     const box=$('#queued');box.textContent='';
+    pendingImages.forEach((img,index)=>{const c=h('span','imgchip');const im=document.createElement('img');im.src=img.url;im.alt=img.name;
+      const x=h('button');x.appendChild(icon('x'));x.title='不要附這張圖';x.setAttribute('aria-label','移除 '+img.name);
+      x.onclick=()=>{URL.revokeObjectURL(img.url);pendingImages.splice(index,1);renderQueued();};c.append(im,x);box.appendChild(c);});
     queued.forEach((f,index)=>{
       const chip=h('span','qfile');chip.appendChild(h('span',null,f.name+'（'+humanSize(f.bytes)+'）'));
       const drop=h('button');drop.appendChild(icon('x'));drop.title='不要附這個檔案';drop.setAttribute('aria-label','移除 '+f.name);
@@ -2654,19 +2807,38 @@ body:not(.view-admin) #admin{display:none}
     queued.length=0;renderQueued();
     return '\n\n我已上傳以下檔案，請用 read 工具讀取：\n'+lines;
   }
+  const IMAGE_TYPES=['image/png','image/jpeg','image/webp','image/gif'];
+  function canSee(){const p=models.providers.find(x=>x.name===(shownProvider||models.default));return (p&&p.vision)||!!models.describer;}
+  async function addImages(files){
+    for(const f of files){
+      if(pendingImages.length>=4){toast('一則訊息最多 4 張圖片',true);break;}
+      if(f.size>5*1024*1024){toast(f.name+' 超過 5 MB',true);continue;}
+      const data=await new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(',')[1]);r.onerror=bad;r.readAsDataURL(f);});
+      pendingImages.push({name:f.name||'image.png',type:f.type,data,url:URL.createObjectURL(f)});
+    }
+    renderQueued();
+    if(pendingImages.length&&!canSee())toast('目前的模型看不懂圖片，也沒有設定描述圖片的模型；送出後模型會告訴你它看不到。',true);
+  }
+  async function takeFiles(list){
+    const files=[...list],images=files.filter(f=>IMAGE_TYPES.includes(f.type)),others=files.filter(f=>!IMAGE_TYPES.includes(f.type));
+    if(images.length)await addImages(images);
+    if(others.length)uploadFiles(others);
+  }
   $('#btn-attach').onclick=()=>$('#file-input').click();
-  $('#file-input').onchange=e=>{uploadFiles(e.target.files);e.target.value='';};
+  $('#file-input').onchange=e=>{takeFiles(e.target.files);e.target.value='';};
+  input.addEventListener('paste',e=>{const items=[...(e.clipboardData&&e.clipboardData.files||[])].filter(f=>IMAGE_TYPES.includes(f.type));
+    if(items.length){e.preventDefault();addImages(items);}});
   const composer=$('#composer');
-  ['dragenter','dragover'].forEach(type=>composer.addEventListener(type,e=>{e.preventDefault();if(uploadsOn)composer.classList.add('over');}));
+  ['dragenter','dragover'].forEach(type=>composer.addEventListener(type,e=>{e.preventDefault();composer.classList.add('over');}));
   ['dragleave','drop'].forEach(type=>composer.addEventListener(type,e=>{
     e.preventDefault();if(type==='drop'||!composer.contains(e.relatedTarget))composer.classList.remove('over');}));
-  composer.addEventListener('drop',e=>{if(e.dataTransfer&&e.dataTransfer.files)uploadFiles(e.dataTransfer.files);});
+  composer.addEventListener('drop',e=>{if(e.dataTransfer&&e.dataTransfer.files)takeFiles(e.dataTransfer.files);});
   async function loadFiles(){
     const box=$('#rv-files');box.textContent='';
     try{
       const d=await api('/api/files');
       uploadsOn=!!d.workspace;
-      $('#btn-attach').hidden=!uploadsOn;
+      // images are always accepted (they travel with the message); documents need a workspace
       if(!uploadsOn){const e=h('div','empty');e.append(h('b',null,'沒有個人檔案區'),document.createTextNode('這台伺服器沒有啟用帳號，agent 直接使用伺服器的工作目錄。'));box.appendChild(e);return;}
       const up=h('button','btn sm');up.append(icon('upload'),document.createTextNode('上傳檔案'));up.onclick=()=>$('#file-input').click();
       const head=h('div','row');head.append(h('span','rn','已用 '+humanSize(d.used_bytes)+' / '+humanSize(d.max_total_bytes)),up);box.appendChild(head);

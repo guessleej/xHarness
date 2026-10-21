@@ -15,6 +15,9 @@ from .quota import quota_plugin
 from .sandbox import sandbox_plugin
 from .session import session_plugin
 from .skills import skills_plugin
+from .goal import goal_plugin
+from .tools.jobs import jobs_plugin
+from .tools.terminal import terminal_plugin
 from .subagent import subagent_plugin
 from .telemetry import telemetry_plugin
 from .tools import tools_plugin
@@ -55,6 +58,10 @@ def build_harness(
     harness.use("tool-fs", fs_tools_plugin)
     harness.use("tool-search", search_tools_plugin)
     harness.use("tool-bash", bash_tool_plugin)
+    if getattr(config, "terminal", True):
+        harness.use("terminal", terminal_plugin())
+    harness.use("jobs", jobs_plugin(getattr(config, "jobs", None)))
+    harness.use("goal", goal_plugin())
     harness.use("tool-todo", todo_tool_plugin)
     harness.use("tool-security", security_tool_plugin)
     harness.use("tool-ask", ask_tool_plugin)

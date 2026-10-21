@@ -24,6 +24,9 @@ from .providers import PRESETS, probe_provider
 from .web import serve
 from .presets import build_harness
 from .commands import CommandHost, dispatch as dispatch_command
+from .goal import run_goal
+from .mentions import expand as expand_mentions
+from .vision import describer_from_config
 from .session import SessionLog, export_markdown, messages_from_events
 
 
@@ -468,6 +471,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         approval_mode = config.approval if interactive else "auto"
 
+    describer = describer_from_config(config)
     options = AgentOptions(
         system_prompt=config.system_prompt,
         max_turns=args.max_turns or config.max_turns or AgentOptions.max_turns,
@@ -479,6 +483,8 @@ def main(argv: list[str] | None = None) -> int:
         ask=_prompt_question if sys.stdin.isatty() else None,
         initial_messages=initial_messages,
         compaction=config.compaction or {"auto": True, "threshold": 0.8},
+        describe_image=(describer[1] if describer else None),
+        describer_name=(describer[0] if describer else ""),
         on_delta=lambda text: (sys.stdout.write(text), sys.stdout.flush()) and None,
         on_tool_start=lambda name, call_args: print(f"\n[tool] {name} {call_args[:200]}"),
         on_tool_end=lambda name, _output, is_error: print(f"[tool] {name} {'failed' if is_error else 'done'}"),
@@ -537,6 +543,17 @@ def main(argv: list[str] | None = None) -> int:
                 if result.action == "new":
                     agent.reset()
                     state["requests"] = 0
+                elif result.action == "goal":
+                    print(result.text)
+                    state["requests"] += 1
+                    try:
+                        run_goal(agent, result.data["objective"], result.data["rounds"],
+                                 on_event=lambda e: print(f"\n[目標] 第 {e['round']}/{e['max_rounds']} 輪") if e.get("state") == "round" else None)
+                        goal = harness.ctx.get("goal")
+                        print(f"\n[目標] 結束：{goal.status}" + (f"——{goal.summary}" if goal.summary else ""))
+                    except Exception as error:  # noqa: BLE001 - keep the REPL alive
+                        print(f"\nerror: {error}", file=sys.stderr)
+                    continue
                 elif result.action == "export":
                     text = export_markdown(session.id, None)
                     if text:
@@ -548,8 +565,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(result.text)
                 continue
             state["requests"] += 1
+            attached, files, pictures = expand_mentions(line, options.cwd or os.getcwd())
+            if files:
+                print(f"[附加] {'、'.join(files)}")
             try:
-                agent.run(line)
+                agent.run(line, extra_context=attached, images=pictures)
                 print()
             except Exception as error:  # noqa: BLE001 - keep the REPL alive
                 print(f"\nerror: {error}", file=sys.stderr)

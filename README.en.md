@@ -16,7 +16,7 @@ Left to right: the workspace and the model endpoint feed xHarness; an operator g
 
 ## Why
 
-Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one developer can audit: about 11,200 lines of Python (package code, excluding 5,141 lines of tests), **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a 370-case test suite that finishes in about 30 seconds (most of it spent shutting down test HTTP servers, not computing).
+Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one developer can audit: about 12,300 lines of Python (package code, excluding 5,519 lines of tests), **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a 392-case test suite that finishes in about 32 seconds (most of it spent shutting down test HTTP servers, not computing).
 
 ## Features
 
@@ -106,6 +106,9 @@ xharness --resume 2026-08-22-ab12cd34   # continue a session
 | `security_scan` | no | Run bandit / pip-audit / gitleaks against a directory (missing scanners are skipped) |
 | `ask_user` | no | Put a 2-4 option question to the person and wait (they may also type their own answer); with nobody attached it says so at once instead of blocking |
 | `skill` | no | Load a skill (SKILL.md) in full, with the list of files beside it; the system prompt carries only each skill's name and one line |
+| `terminal` | yes | Run a command in a shell that stays open: `cd`, `export` and `source .venv/bin/activate` carry over; on a timeout the shell restarts and the model is told |
+| `job_start` `job_status` `job_wait` `job_stop` | start is approved | Long commands in the background (builds, tests, downloads) while the model keeps working; a finished job is announced with the next message |
+| `goal_done` | no | Only in goal mode: report the goal done or blocked |
 | `web_search` | configurable | Opens the DuckDuckGo results page in a real browser and returns up to 10 results as title / URL / snippet; present only when `[tools] browser` is set |
 | `browser_open` | configurable | Opens a page in a real browser and returns the rendered visible text (truncated at 40k); present only when `[tools] browser` is set |
 | `webfetch` | yes | Fetch an http(s) URL as readable text; **disabled by default** (`[tools] webfetch = true`) — enabling it is the only egress besides the model endpoint, and every fetch goes through approval |
@@ -264,6 +267,18 @@ Something that looks like a command but is not one, such as `/stop` in the termi
 **Switching models**: with several `[providers.*]`, a conversation's model can be changed from the composer or with `/model`. Each task's usage records which model ran it, so the usage report's self-hosted vs bought-in split follows the model actually used. A tier can be limited with `providers = [...]`, for example students to the on-premises model only.
 
 **Titles, search, export, ratings**: after the first task the conversation's own model writes a short title; the task-list search covers the requests, replies and titles of every earlier conversation; a conversation can be exported as Markdown. Each reply can be copied, rated up or down, and given a note. Ratings are a record for people and never reach the model; the usage report's health block counts them and lists the latest notes on poor answers.
+
+## Plans, goals, background jobs and images
+
+**Plan mode**: the "計畫模式" button next to the composer, or `/plan`. While it is on, every tool that changes something (write, edit, commands, background jobs, subagents) is withdrawn; the model can only look, and ends with a numbered plan. An "approve and run" button under the reply turns plan mode off and carries the plan out. A call to a withdrawn tool is refused even if the model tries. In testing granite got a weekday wrong in its plan -- which is what this step is for.
+
+**Goal mode**: `/goal objective` (up to 5 rounds by default, `/goal --rounds 8 objective`, at most 20). Whenever the model stops without calling `goal_done` to report the goal done or blocked, xHarness gives it another round, until it is done, blocked, out of rounds or stopped. A banner shows the round. The round count is explicit on purpose: `/goal 2026 年的報表` does not read 2026 as rounds.
+
+**Background jobs and the terminal**: `job_start` runs a long command in the background, logging to `.xharness/jobs/` in the working directory; the review pane's background tab shows progress and a stop button. At most 4 at once and 2 hours each (`[jobs]` adjusts), stopped when the conversation ends, and a finished job is announced to the model with your next message. `terminal` is a shell that stays open, sandboxed and approved like bash.
+
+**@files**: typing `@` in the composer lists the working directory's files; the chosen file's text goes with the message (text files inside the working directory only, 20,000 characters each, 60,000 in all); `@picture.png` is attached as an image.
+
+**Images**: paste, drop or attach images in the composer (4 per message, 5 MB each). A provider with `vision = true` sees them directly; for one that cannot, `[vision] provider = "…"` names a model that turns each image into a written description first. In testing the xReadable OCR model on .70 transcribed an error screenshot word for word and granite worked out the troubleshooting steps from it. With neither, the model is told plainly that it cannot see the images instead of guessing.
 
 ## Long tasks that do not wedge themselves
 

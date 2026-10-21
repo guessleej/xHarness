@@ -2,6 +2,28 @@
 
 中文 | English below
 
+## 1.11.0 — 2026-10-21
+
+對照 DeepSeek Harness 補功能的第二批：能力上限。
+
+- **計畫模式**（輸入框旁的按鈕或 `/plan`）：會改東西的工具與子代理整組從模型的清單收起，硬要呼叫也會被擋；模型只查看、列出編號計畫，回覆底下的「核准計畫並執行」才關閉計畫模式照做。實測 granite 在計畫裡寫錯了日期的星期，正是這一步要讓人看一眼的原因。
+- **目標模式**（`/goal 目標`，`--rounds N` 調輪數，預設 5、上限 20）：模型停下卻沒用新的 `goal_done` 回報完成或卡住時，自動再給一輪，直到完成、卡住、輪數用完或停止；畫面上方有目標橫幅。輪數要明寫，`/goal 2026 年的報表` 不會被當成 2026 輪。
+- **背景工作**（`job_start`／`job_status`／`job_wait`／`job_stop`）：長指令丟到背景跑，模型繼續做事；與 bash 同樣走審批與沙箱，同時最多 4 個、最長 2 小時（`[jobs]`），記錄在 `.xharness/jobs/`，對話結束時一併停止，完成的工作在下一則訊息告訴模型。檢視面板新增「背景」頁。
+- **終端機**（`terminal`）：一直開著的 shell，`cd`、`export`、啟用的虛擬環境會留到下一次；逾時就重開在原目錄並告知模型變數已重設；每個代理各自一個。
+- **@檔案**：輸入框打 `@` 列出工作目錄的檔案，選取的文字檔內容隨訊息送出（只限工作目錄內、單檔 2 萬字、合計 6 萬字）；`@圖片` 當成圖片附上。終端機也支援。
+- **看圖**：可以貼上、拖進或附加圖片（每則 4 張、每張 5 MB）。供應端 `vision = true` 直接看；看不懂圖的模型由 `[vision] provider` 指定的模型先轉成文字描述（實測 .70 的 xReadable OCR 把錯誤畫面一字不差轉出，granite 據此給出排查步驟）；都沒有時明白告訴模型它看不到。描述模型不會出現在換模型清單。
+- 安全：帶圖片的訊息上限 30 MB，但只在身分驗證通過後才放寬；新的 `nosec` 與信任邊界登記在 SSDLC 文件。
+
+Second of three batches closing the gap with DeepSeek Harness: what the agent can take on.
+
+- **Plan mode** (button next to the composer, or `/plan`): every mutating tool and the subagent tools are withdrawn from the model's list and refused if called anyway; the model looks and proposes a numbered plan, and "approve and run" under the reply turns plan mode off and carries it out. In testing granite got a weekday wrong in its plan, which is what this step is for.
+- **Goal mode** (`/goal objective`, `--rounds N`, 5 by default, at most 20): when the model stops without reporting done or blocked through the new `goal_done`, it gets another round, until done, blocked, out of rounds or stopped; a banner shows progress. The round count is explicit, so `/goal 2026 年的報表` is not 2026 rounds.
+- **Background jobs** (`job_start` / `job_status` / `job_wait` / `job_stop`): long commands run in the background while the model keeps working; same approval and sandbox as bash, 4 at once and 2 hours each (`[jobs]`), logs in `.xharness/jobs/`, stopped when the conversation ends, announced to the model with the next message once finished. The review pane has a background tab.
+- **Terminal** (`terminal`): a shell that stays open, so `cd`, `export` and an activated virtualenv carry over; on a timeout it restarts in the same directory and the model is told variables were reset; one per agent.
+- **@files**: `@` in the composer lists working-directory files; the chosen text file goes with the message (inside the working directory only, 20,000 characters each, 60,000 in all); `@picture` attaches an image. Works in the terminal too.
+- **Images**: paste, drop or attach (4 per message, 5 MB each). A provider with `vision = true` sees them; for one that cannot, the `[vision] provider` model writes a description first (in testing the xReadable OCR model on .70 transcribed an error screenshot exactly and granite worked from it); with neither, the model is told it cannot see. The describer is not offered as a chat model.
+- Security: messages with images may be 30 MB, but only once the caller is authenticated; new `nosec` sites and trust boundaries are registered in the SSDLC document.
+
 ## 1.10.0 — 2026-10-21
 
 對照 DeepSeek Harness 補功能的第一批（共三批）：使用者每天會碰到的部分。

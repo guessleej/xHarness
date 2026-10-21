@@ -83,6 +83,7 @@ class OpenAIAdapter:
         extra_body: dict[str, Any] | None = None,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         context_tokens: int | None = None,
+        vision: bool = False,
     ) -> None:
         if not base_url:
             raise ValueError("provider base_url is required")
@@ -112,6 +113,8 @@ class OpenAIAdapter:
         #: How many tokens the endpoint accepts (llama-server -c). Unknown when
         #: None; compaction then only reacts to an overflow error.
         self.context_tokens = int(context_tokens) if context_tokens else None
+        #: True when the endpoint accepts images (OpenAI image_url parts).
+        self.vision = bool(vision)
 
     def _open(self, request: urllib.request.Request) -> Any:
         """Send the request, retrying transient failures.
@@ -172,9 +175,28 @@ class OpenAIAdapter:
                         "tool_call_id": message.get("tool_call_id", ""),
                     }
                 )
+            elif role == "user" and message.get("images"):
+                wire.append({"role": "user", "content": self._with_images(message)})
             else:
                 wire.append({"role": role, "content": message.get("content", "")})
         return wire
+
+    def _with_images(self, message: dict[str, Any]) -> Any:
+        """Images as content parts for a model that can see; a plain note otherwise."""
+        from .vision import data_uri
+
+        text = str(message.get("content") or "")
+        paths = [str(p) for p in message.get("images") or []]
+        if not self.vision:
+            return text   # the agent already described them or said they cannot be seen
+        parts: list[dict[str, Any]] = [{"type": "text", "text": text}]
+        for path in paths:
+            uri = data_uri(path)
+            if uri:
+                parts.append({"type": "image_url", "image_url": {"url": uri}})
+            else:
+                parts[0]["text"] += f"\n[image no longer available: {os.path.basename(path)}]"
+        return parts
 
     def stream(
         self,
