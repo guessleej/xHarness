@@ -620,7 +620,7 @@ def test_the_home_page_offers_a_discussion_and_the_example_roles_parse():
     assert "代理討論" in INDEX_HTML and "setSelectionRange" in INDEX_HTML      # fills the box, does not send
     here = os.path.join(os.path.dirname(__file__), "..", "examples", "agents")
     roles = RoleStore({"dirs": [here]}, site_dir=here).discover(None)
-    assert {r.name for r in roles} == {"researcher", "reviewer", "advocate", "skeptic"}
+    assert {r.name for r in roles} == {"查資料員", "審查員", "正方", "反方"}
     assert all(r.description and r.prompt and r.tools for r in roles)
 
 
@@ -645,3 +645,10 @@ def test_the_fleet_page_updates_cards_in_place():
     assert ".fc{background:var(--surface);border-radius:18px;padding:16px 18px;box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:8px}" in INDEX_HTML
     assert "kp.textContent='';" not in INDEX_HTML.split("async function renderFleet")[1].split("function enter")[0].replace(
         "if(kp.children.length!==tiles.length){kp.textContent='';", "")     # tiles are not rebuilt on every poll
+
+
+def test_role_names_may_be_chinese(tmp_path):
+    assert parse_role("---\nname: 正方\n---\nx", "x", "", "").name == "正方"
+    assert parse_role("---\nname: 審查員-2\n---\nx", "x", "", "").name == "審查員-2"
+    for bad in ("a b", "../x", "_x", "x/y", ""):
+        assert parse_role(f"---\nname: {bad}\n---\nx", "", "", "") is None, bad

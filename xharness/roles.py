@@ -50,7 +50,8 @@ from .session import harness_home
 from .skills import parse_front_matter
 
 ROLE_DIR = "agents"
-NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+#: Letters in any script (正方, 審查員) plus digits, dot, dash and underscore; no spaces or path separators.
+NAME_RE = re.compile(r"^[^\W_][\w.-]{0,63}$")
 MAX_ROLES = 80
 MAX_INDEX_ENTRIES = 40
 MAX_DESCRIPTION_CHARS = 240

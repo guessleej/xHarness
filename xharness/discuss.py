@@ -503,7 +503,7 @@ END_REASONS = {"rounds": "輪數用完", "converged": "整輪都沒有新意見"
 #: more often when shown the smallest valid one (measured on gemma-4-31b-xvita, which
 #: broke the nested participant objects in one run out of three).
 EXAMPLE = ('Simplest valid call: {"topic": "要不要調降招生名額", "mode": "debate", '
-           '"participants": ["advocate", "skeptic"], "rounds": 2}')
+           '"participants": ["正方", "反方"], "rounds": 2}')
 
 
 def parse_participants(ctx: Context, items: Any, mode: str, cwd: str) -> tuple[list[Seat], str]:
@@ -575,7 +575,7 @@ def discussion_plugin(config: dict[str, Any] | None = None) -> Plugin:
                 "that keeps their disagreements. Modes: roundtable (everyone in turn), debate (sides argue, then a "
                 "verdict), review (the first participant writes, the others review until they approve), free (a "
                 "moderator picks who speaks). Each participant is an agent with its own tools. Simplest form: "
-                'participants = ["advocate", "skeptic"] (agent role names or plain names); use objects with '
+                'participants = ["正方", "反方"] (agent role names or plain names); use objects with '
                 "name / agent / brief / stance only when a participant needs more. Use it when the person wants "
                 f"several viewpoints, an argument tested, or a draft reviewed. 2-{MAX_PARTICIPANTS} participants, "
                 f"up to {max_rounds} rounds."),
@@ -584,7 +584,7 @@ def discussion_plugin(config: dict[str, Any] | None = None) -> Plugin:
                 "mode": {"type": "string", "enum": list(MODES)},
                 # Plain types only: llama.cpp's Gemma template fails the whole request on a
                 # type list such as ["string", "object"] (500 "filter-mapping not implemented").
-                "participants": {"type": "array", "description": 'Names, e.g. ["advocate", "skeptic"], or objects',
+                "participants": {"type": "array", "description": 'Names, e.g. ["正方", "反方"], or objects',
                                  "items": {"type": "object", "properties": {
                     "name": {"type": "string"},
                     "agent": {"type": "string", "description": "Agent role to run as (see Agent roles)"},

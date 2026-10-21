@@ -451,7 +451,7 @@ You analyse institutional indicators. Look the data up before you answer and quo
 
 `subagent`, `subagent_batch`, every `workflow` step and every discussion participant take `agent: analyst`; the model sees the list of roles in its system prompt. A role can only **narrow** what an agent may do: its tool list is intersected with the tools the person already has (a tier's denied tools are gone before that), and its model must be configured and allowed for this person; otherwise the caller's model runs it and the result says so.
 
-**Four ready-made roles**: `examples/agents/` in the repo holds `researcher`, `reviewer`, `advocate` and `skeptic`; copy them into the site's `.xharness/agents/` to give them to everyone:
+**Four ready-made roles**: `examples/agents/` in the repo holds `查資料員` (researcher), `審查員` (reviewer), `正方` (for) and `反方` (against) -- role names may be in any script; copy them into the site's `.xharness/agents/` to give them to everyone:
 
 ```bash
 mkdir -p .xharness/agents && cp examples/agents/*.md .xharness/agents/
@@ -472,7 +472,7 @@ The `discussion` tool has several agents speak to one topic in turn, in four for
 | `review` | the first participant writes, the others review, the author revises | every reviewer answers 【通過】 (approved), or rounds run out |
 | `free` | the moderator picks who speaks next | the moderator calls it (only after everyone spoke), or the turn budget runs out |
 
-Ask in plain words, for example "have advocate and skeptic debate whether to cut the intake, two rounds, check 招生數據.csv first". Each participant is an agent of its own, with its own conversation, role or brief, tools and model, and can look things up before it speaks; on each turn it is told only what was said since it last spoke.
+Ask in plain words, for example "have 正方 and 反方 debate whether to cut the intake, two rounds, check 招生數據.csv first". Each participant is an agent of its own, with its own conversation, role or brief, tools and model, and can look things up before it speaks; on each turn it is told only what was said since it last spoke.
 
 What keeps a discussion accountable:
 

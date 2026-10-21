@@ -426,7 +426,7 @@ max_tokens: 40000              # 選填，這個代理的 token 上限
 
 `subagent`、`subagent_batch`、`workflow` 的每一步與討論的參與者都可以帶 `agent: analyst`，模型會在 system prompt 看到角色清單。角色只能**縮小**權限：工具清單與這個人原本就有的工具取交集（使用者分層拒絕的工具早已拿掉），模型必須是設定檔裡、而且這個人可以用的；不符合就用呼叫者的模型，並在結果裡說明。
 
-**現成的四個角色**：repo 的 `examples/agents/` 有 `researcher`（查資料員）、`reviewer`（審查員）、`advocate`（正方）、`skeptic`（反方），複製到站台的 `.xharness/agents/` 就給所有人用：
+**現成的四個角色**：repo 的 `examples/agents/` 有 `查資料員`、`審查員`、`正方`、`反方`（角色名稱可以用中文），複製到站台的 `.xharness/agents/` 就給所有人用：
 
 ```bash
 mkdir -p .xharness/agents && cp examples/agents/*.md .xharness/agents/
@@ -447,7 +447,7 @@ mkdir -p .xharness/agents && cp examples/agents/*.md .xharness/agents/
 | `review` 審查 | 第一位寫、其他人審，作者依意見修改 | 審查者全數回【通過】，或輪數用完 |
 | `free` 自由 | 主持人決定下一位發言者 | 主持人判斷已有結論（每人至少發言一次後），或發言數用完 |
 
-直接跟模型說就會用，例如「讓 advocate 和 skeptic 辯論要不要調降招生名額，兩輪，發言前先查 招生數據.csv」。每位參與者都是獨立的代理，有自己的對話、角色或簡述、工具與模型，發言前可以先查資料；每次輪到它，只會收到上次發言之後別人說的話。
+直接跟模型說就會用，例如「讓 正方 和 反方 辯論要不要調降招生名額，兩輪，發言前先查 招生數據.csv」。每位參與者都是獨立的代理，有自己的對話、角色或簡述、工具與模型，發言前可以先查資料；每次輪到它，只會收到上次發言之後別人說的話。
 
 讓討論可以驗收、不會失控的做法：
 

@@ -2,6 +2,12 @@
 
 中文 | English below
 
+## 1.13.3 — 2026-10-21
+
+- **角色名稱可以用中文**：原本只收英數字，所以範例角色只能叫 advocate、skeptic；現在任何文字都行（不能有空白或路徑符號），四個範例改名為 `查資料員`、`審查員`、`正方`、`反方`，首頁「代理討論」的範本改成「讓 正方 和 反方 辯論」。
+
+- **Role names in any script**: names were limited to ASCII letters and digits, which is why the examples were called advocate and skeptic; any letters now work (no spaces or path characters), the four examples are `查資料員`, `審查員`, `正方` and `反方`, and the home page's discussion template reads "讓 正方 和 反方 辯論".
+
 ## 1.13.2 — 2026-10-21
 
 - **艦隊頁不再跳動**：頁面每 2.5 秒更新一次，原本每次都把所有卡片與數字方塊整個拆掉重建，卡片的進場動畫（淡入並上移）就每 2.5 秒重播一次，整頁看起來一直在跳；在卡片裡回答代理提問時，打到一半的字也會被清掉。改成依任務比對、只更新有變的卡片，只有執行時間變就只改那個數字，進場動畫只在卡片第一次出現時播；正在輸入的卡片不會被換掉。實測 .70：連續三次更新，卡片元素不變、動畫 0 次、新增節點 0 個。

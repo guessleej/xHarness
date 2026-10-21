@@ -2843,7 +2843,7 @@ body:not(.view-admin) #admin{display:none}
   const STARTERS=[
     ['認識專案','eye','摘要這個工作目錄在做什麼','摘要這個工作目錄在做什麼，先看有哪些檔案再回答。'],
     // A discussion needs a topic: this one only fills the box (prefill) and waits for the person.
-    ['代理討論','users','讓幾個代理針對一個題目辯論','讓 advocate 和 skeptic 辯論：在這裡寫題目，兩輪。發言前先查資料。','在這裡寫題目'],
+    ['代理討論','users','讓幾個代理針對一個題目辯論','讓 正方 和 反方 辯論：在這裡寫題目，兩輪。發言前先查資料。','在這裡寫題目'],
     ['資安','shield','掃一次這個專案的資安問題','對這個目錄跑一次 security_scan，並用白話解釋每一項發現。'],
     ['交接','users','新同事接手該先讀哪三個檔案','這個專案如果要交給新同事接手，最需要先讀的三個檔案是哪些？為什麼？']];
   function renderLanding(){
