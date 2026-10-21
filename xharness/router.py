@@ -447,7 +447,9 @@ class Router:
         if self.config.prefer == "quality":
             key = lambda c: (-c.strength, c.cost, WHERE_RANK[c.where], self.order[c.name])  # noqa: E731
         else:
-            key = lambda c: (c.cost, WHERE_RANK[c.where], c.strength, self.order[c.name])  # noqa: E731
+            # Equal price and place: the default, then config order. Preferring the weaker one would save
+            # nothing and only lower the quality.
+            key = lambda c: (c.cost, WHERE_RANK[c.where], self.order[c.name])  # noqa: E731
         return sorted(strong, key=key) + sorted(weak, key=lambda c: (-c.strength, *key(c)))
 
     # -- what each model is sent ---------------------------------------------------------------

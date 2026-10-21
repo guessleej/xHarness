@@ -599,3 +599,13 @@ def test_titles_and_summaries_are_not_counted_as_decisions():
     assert not log.of("route") and not [e for n, e in r.emitted if n == "router/decision"]
     r.stream([user("你好")], TOOLS)
     assert [e["provider"] for e in log.of("route")] == ["local"]
+
+
+def test_equal_price_and_place_does_not_prefer_the_weaker_model():
+    cfg = config({"local": {"where": "local", "strength": 3, "cost": 0}, "private": {"where": "local", "strength": 2, "cost": 0}},
+                 default="local")
+    assert router(cfg).explain("你好")["choice"] == "local"              # same price: the default, not the weaker
+    assert router(cfg).explain("你好")["ranking"] == ["local", "private"]
+    dear = config({"local": {"where": "local", "strength": 3, "cost": 1}, "private": {"where": "local", "strength": 2, "cost": 0}},
+                  default="local")
+    assert router(dear).explain("你好")["choice"] == "private"           # a real saving still wins

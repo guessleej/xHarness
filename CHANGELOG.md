@@ -2,6 +2,12 @@
 
 中文 | English below
 
+## 1.16.1 — 2026-10-22
+
+- 路由：成本與位置都相同時，原本會挑強度較低的模型（沒有省任何東西、只是變差）；現在先選預設模型，再依設定檔順序。成本真的比較低時照樣選便宜的。
+
+- Routing: with equal price and place the router used to pick the weaker model (saving nothing, only lowering quality); it now takes the default first, then config order. A model that really costs less still wins.
+
 ## 1.16.0 — 2026-10-22
 
 自動路由：設定檔列了好幾個模型時，每個請求自己挑一個。預設關閉（`[routing] enabled = true`）。
