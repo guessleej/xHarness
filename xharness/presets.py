@@ -5,16 +5,16 @@ from __future__ import annotations
 import importlib.util
 import os
 from typing import Any
-from urllib.parse import urlsplit
 
 from .config import ResolvedConfig
 from .context import Harness, Plugin
-from .llm import llm_plugin
+from .llm import endpoint_host as _endpoint_host, hosting_of as _hosting, llm_plugin
 from .mcp import mcp_plugin
 from .memory import memory_plugin
 from .quota import quota_plugin
 from .sandbox import sandbox_plugin
 from .session import session_plugin
+from .skills import skills_plugin
 from .subagent import subagent_plugin
 from .telemetry import telemetry_plugin
 from .tools import tools_plugin
@@ -26,26 +26,6 @@ from .tools.todo import todo_tool_plugin
 from .tools.webfetch import webfetch_tool_plugin
 from .tools.browser import browser_tools_plugin
 from .tools.ask import ask_tool_plugin
-
-
-PRIVATE_PREFIXES = ("127.", "10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.",
-                    "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
-                    "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")
-
-
-def _endpoint_host(base_url: Any) -> str:
-    """Host only: a base_url may carry a path or query that is nobody's business in a report."""
-    return urlsplit(str(base_url or "")).hostname or ""
-
-
-def _hosting(base_url: Any) -> str:
-    """self-hosted vs bought-in, decided by where the endpoint lives."""
-    host = _endpoint_host(base_url)
-    if not host:
-        return "unknown"
-    if host in ("localhost", "::1") or host.startswith(PRIVATE_PREFIXES):
-        return "self-hosted"
-    return "external"
 
 
 def _load_user_plugin(module_path: str) -> Plugin:
@@ -78,6 +58,7 @@ def build_harness(
     harness.use("tool-todo", todo_tool_plugin)
     harness.use("tool-security", security_tool_plugin)
     harness.use("tool-ask", ask_tool_plugin)
+    harness.use("skills", skills_plugin(getattr(config, "skills", None)))
     harness.use("telemetry", telemetry_plugin(config.telemetry))
     harness.use("subagent", subagent_plugin(config.subagent))
     if config.memory.get("enabled", True):

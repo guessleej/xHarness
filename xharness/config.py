@@ -34,6 +34,14 @@ class ResolvedConfig:
     files: dict[str, Any] = field(default_factory=dict)
     browser: str | None = None
     browser_approval: bool = True
+    #: [skills] enabled, dirs, claude_home -- see skills.py
+    skills: dict[str, Any] = field(default_factory=dict)
+    #: [compaction] auto (bool), threshold (share of the context window)
+    compaction: dict[str, Any] = field(default_factory=dict)
+    #: [sessions] auto_title (bool)
+    sessions: dict[str, Any] = field(default_factory=dict)
+    #: [web] model_switch (bool): may people change the model of a conversation
+    web: dict[str, Any] = field(default_factory=dict)
 
 
 def _find_config_file(explicit_path: str | None) -> str | None:
@@ -112,4 +120,15 @@ def load_config(
         files=raw.get("files", {}) or {},
         browser=_browser_url(raw.get("tools", {}).get("browser")),
         browser_approval=bool(raw.get("tools", {}).get("browser_approval", True)),
+        skills=raw.get("skills", {}) or {},
+        compaction=_compaction(raw.get("compaction", {}) or {}),
+        sessions=raw.get("sessions", {}) or {},
+        web=raw.get("web", {}) or {},
     )
+
+
+def _compaction(settings: dict[str, Any]) -> dict[str, Any]:
+    threshold = float(settings.get("threshold", 0.8))
+    if not 0.3 <= threshold <= 0.95:
+        raise ValueError("[compaction] threshold must be between 0.3 and 0.95 (share of the context window)")
+    return {"auto": bool(settings.get("auto", True)), "threshold": threshold}

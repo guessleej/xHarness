@@ -94,6 +94,8 @@ class User:
     administrator: bool = False
     #: Tools this tier never receives.
     denied_tools: tuple[str, ...] = ()
+    #: Providers this tier may switch to; empty means any configured one.
+    allowed_providers: tuple[str, ...] = ()
 
     @property
     def is_admin(self) -> bool:
@@ -107,6 +109,7 @@ class User:
             "role_label": self.role_label or self.role,
             "admin": self.administrator,
             "denied_tools": list(self.denied_tools),
+            "allowed_providers": list(self.allowed_providers),
             "quota_tokens_per_day": self.quota_tokens_per_day,
             "quota_tokens_per_month": self.quota_tokens_per_month,
         }
@@ -199,6 +202,7 @@ class UserStore:
             role_label=str(spec.get("label") or role),
             administrator=bool(spec.get("admin", role == "admin")),
             denied_tools=tuple(str(item) for item in (spec.get("deny_tools") or ())),
+            allowed_providers=tuple(str(item) for item in (spec.get("providers") or ())),
             quota_tokens_per_day=quota("quota_tokens_per_day"),
             quota_tokens_per_month=quota("quota_tokens_per_month"),
         )

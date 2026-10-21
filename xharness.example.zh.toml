@@ -132,6 +132,7 @@ model = "your-model-id"
 # deny_tools = ["bash", "write", "edit", "security_scan", "subagent", "subagent_batch"]
 #   ↑ 拿不到的工具是「不存在」不是「被拒絕」：它們根本不會出現在模型的工具清單裡，
 #     所以學生問「幫我刪掉這個檔案」時，模型不會先答應再失敗。
+# providers = ["granite"]      # 這個層級可以切換的模型（不設＝設定檔裡全部）
 
 # ── 上傳檔案 ────────────────────────────────────────────────
 # 啟用 [auth] 後，每個人有自己的工作目錄（$XHARNESS_HOME/workspaces/u/<帳號>/），
@@ -149,3 +150,22 @@ model = "your-model-id"
 # base_url = "http://192.168.10.70:8093/v1"
 # model = "granite-4.2-30b"
 # extra_body = { chat_template_kwargs = { enable_thinking = false } }
+# context_tokens = 32768      # 端點收得下多少 token（llama-server 的 -c）；設了才會自動壓縮
+
+# ── 技能（Skills） ──────────────────────────────────────────
+# 含 SKILL.md 的資料夾（與 Claude Code、Codex 相同格式）。會從工作目錄的
+# .xharness/skills 與 .claude/skills、伺服器啟動目錄的 .xharness/skills、
+# $XHARNESS_HOME/skills 找。system prompt 只放名稱與一句說明，模型需要時再用 skill 工具載入全文。
+# [skills]
+# enabled = true
+# dirs = ["/srv/shared-skills"]
+# claude_home = false          # true 時也讀 ~/.claude/skills
+
+# ── 長對話 ──────────────────────────────────────────────────
+# [compaction]
+# auto = true                  # prompt 超過 threshold × context_tokens 時，把較早的訊息整理成摘要
+# threshold = 0.8
+# [sessions]
+# auto_title = true            # 第一個任務完成後，由這段對話的模型寫一個短標題
+# [web]
+# model_switch = true          # 使用者可以切換對話的模型（各層級可用 providers = [...] 限制）

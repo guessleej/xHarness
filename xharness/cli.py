@@ -23,8 +23,8 @@ from .report import collect as collect_report, format_report as format_usage_rep
 from .providers import PRESETS, probe_provider
 from .web import serve
 from .presets import build_harness
-from .session import SessionLog, messages_from_events
-from .tools import ToolRegistry
+from .commands import CommandHost, dispatch as dispatch_command
+from .session import SessionLog, export_markdown, messages_from_events
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -478,6 +478,7 @@ def main(argv: list[str] | None = None) -> int:
         # at once instead of blocking on stdin.
         ask=_prompt_question if sys.stdin.isatty() else None,
         initial_messages=initial_messages,
+        compaction=config.compaction or {"auto": True, "threshold": 0.8},
         on_delta=lambda text: (sys.stdout.write(text), sys.stdout.flush()) and None,
         on_tool_start=lambda name, call_args: print(f"\n[tool] {name} {call_args[:200]}"),
         on_tool_end=lambda name, _output, is_error: print(f"[tool] {name} {'failed' if is_error else 'done'}"),
@@ -502,7 +503,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"xHarness {__version__} — session {session.id}")
         print(f"model: {config.provider['model']} @ {config.provider['base_url']}")
         print(f"sandbox: {sandbox.name if sandbox else 'off'}")
-        print("commands: /tools /usage /memory /session /clear /exit")
+        print("指令：/help 列出全部，/exit 離開")
+        state = {"requests": 0, "title": ""}
+
+        def rate(rating: str, note: str) -> int | None:
+            if not state["requests"]:
+                return None
+            session.append({"type": "feedback", "turn": state["requests"], "rating": rating, "note": note})
+            return state["requests"]
+
+        def set_title(title: str) -> None:
+            state["title"] = title
+            session.append({"type": "title", "title": title})
+
         while True:
             try:
                 line = input("\nxharness> ").strip()
@@ -513,28 +526,28 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if line in ("/exit", "/quit"):
                 break
-            if line == "/usage":
-                telemetry = harness.ctx.optional("telemetry")
-                print(telemetry.summary() if telemetry else "telemetry not mounted")
-                continue
             if line == "/session":
                 print(session.id)
                 continue
-            if line == "/memory":
-                store = harness.ctx.optional("memory")
-                lines = store.index_lines() if store else []
-                print("\n".join(lines) if lines else "no memories")
+            host = CommandHost(agent=agent, ctx=harness.ctx, config=config, set_title=set_title,
+                               get_title=lambda: state["title"], rate=rate,
+                               model_switch=bool((config.web or {}).get("model_switch", True)))
+            result = dispatch_command(host, line, surface="cli")
+            if result is not None:
+                if result.action == "new":
+                    agent.reset()
+                    state["requests"] = 0
+                elif result.action == "export":
+                    text = export_markdown(session.id, None)
+                    if text:
+                        path = os.path.abspath(f"xharness-{session.id}.md")
+                        with open(path, "w", encoding="utf-8") as handle:
+                            handle.write(text)
+                        print(f"已匯出到 {path}")
+                        continue
+                print(result.text)
                 continue
-            if line == "/tools":
-                registry: ToolRegistry = harness.ctx.get("tools")
-                for tool in registry.list():
-                    marker = " (mutating)" if tool.mutating else ""
-                    print(f"{tool.name}{marker} — {tool.description}")
-                continue
-            if line == "/clear":
-                agent.reset()
-                print("conversation cleared")
-                continue
+            state["requests"] += 1
             try:
                 agent.run(line)
                 print()

@@ -331,10 +331,32 @@ def build_docx(report: dict, output: str) -> str:
           [[item["name"], item["state"], item["detail"]] for item in outbound["items"]])
 
     heading(document, "ch6", CHAPTERS[5][1], 6)
+
+    def taipei(iso: str) -> str:
+        from datetime import datetime, timedelta, timezone
+
+        try:
+            moment = datetime.fromisoformat(iso)
+        except ValueError:
+            return iso[:16]
+        return moment.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+
     body(document, (
         f"本期記錄到 {health['errors']} 次任務失敗、{health['budget_stops']} 次因預算或配額中斷、"
         f"{health['failed_signins']} 次登入失敗（其中 {health['lockouts']} 次觸發帳號暫時鎖定）。"
     ))
+    feedback = health.get("feedback") or {}
+    rated = int(feedback.get("up", 0)) + int(feedback.get("down", 0))
+    if rated:
+        body(document, (
+            f"使用者對回覆的評價：{feedback['up']} 則有幫助、{feedback['down']} 則沒幫助"
+            f"（有評價的回覆中 {round(feedback['up'] / rated * 100)}% 有幫助）。"
+            "評價只是給人看的紀錄，不會回到模型；以下是最近幾則「沒幫助」的備註，可用來決定調整哪類任務的說明或技能。"
+        ))
+        if feedback.get("notes"):
+            table(document, ["時間（台北時間）", "備註"], [[taipei(n["ts"]), n["note"]] for n in feedback["notes"]])
+    else:
+        body(document, "本期沒有人評價回覆。網頁介面每則回覆底下有評價按鈕，鼓勵使用者按一下，才知道哪類任務答得不好。")
     if health["issues"]:
         table(document, ["待處理事項", "說明", "建議做法"],
               [[row["item"], row["detail"], row["action"]] for row in health["issues"]])

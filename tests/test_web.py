@@ -333,3 +333,43 @@ def test_token_mode_401_tells_the_page_which_credential(server_factory):
     client.token = None
     status, payload = client.request("GET", "/api/meta")
     assert status == 401 and payload["auth"] == "token"
+
+
+# --- 1.10 routes ----------------------------------------------------------------
+
+def test_command_routes(server_factory):
+    client, _app = server_factory([])
+    status, listed = client.request("GET", "/api/commands")
+    assert status == 200 and {"compact", "model", "skills", "title"} <= {c["name"] for c in listed}
+    _, conv = client.request("POST", "/api/conversations", {})
+    status, result = client.request("POST", f"/api/conversations/{conv['id']}/commands", {"line": "/title 測試標題"})
+    assert status == 200 and result["ok"] and result["data"]["title"] == "測試標題"
+    status, _ = client.request("POST", f"/api/conversations/{conv['id']}/commands", {"line": "not a command"})
+    assert status == 404
+
+
+def test_models_route_lists_without_secrets(server_factory):
+    client, _app = server_factory([])
+    status, payload = client.request("GET", "/api/models")
+    assert status == 200 and payload["default"] == "fake" and "api_key" not in json.dumps(payload)
+
+
+def test_feedback_route(server_factory):
+    client, app = server_factory([AssistantTurn(content="答")])
+    _, conv = client.request("POST", "/api/conversations", {})
+    client.request("POST", f"/api/conversations/{conv['id']}/messages", {"text": "問"})
+    client.events(conv["id"])
+    status, payload = client.request("POST", f"/api/conversations/{conv['id']}/feedback", {"turn": 1, "rating": "up"})
+    assert status == 200 and payload == {"ok": True, "turn": 1}
+    status, _ = client.request("POST", f"/api/conversations/{conv['id']}/feedback", {"turn": "x", "rating": "up"})
+    assert status == 200   # a bad number falls back to the latest reply
+    status, _ = client.request("POST", f"/api/conversations/{conv['id']}/feedback", {"turn": 9, "rating": "up"})
+    assert status == 400
+
+
+def test_session_export_rejects_bad_ids(server_factory):
+    client, _app = server_factory([])
+    assert client.request("GET", "/api/sessions/..%2F..%2Fetc%2Fpasswd/export")[0] == 404
+    assert client.request("GET", "/api/sessions/nope/export")[0] == 404
+    status, hits = client.request("GET", "/api/sessions?q=zzz-not-there")
+    assert status == 200 and hits == []

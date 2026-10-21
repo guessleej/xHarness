@@ -130,6 +130,7 @@ model = "your-model-id"
 # deny_tools = ["bash", "write", "edit", "security_scan", "subagent", "subagent_batch"]
 #   Denied tools are absent, not refused: they never appear in the model's tool
 #   list, so a restricted account is never promised something that then fails.
+# providers = ["granite"]      # models this tier may switch to (default: every configured one)
 
 # ── Uploaded files ────────────────────────────────────────────
 # With [auth] on, each person gets their own working directory
@@ -150,3 +151,23 @@ model = "your-model-id"
 # base_url = "http://10.0.0.5:8093/v1"
 # model = "granite-4.2-30b"
 # extra_body = { chat_template_kwargs = { enable_thinking = false } }
+# context_tokens = 32768      # what the endpoint accepts (llama-server -c); enables automatic compaction
+
+# ── Skills ────────────────────────────────────────────────────
+# Folders holding SKILL.md (Claude Code / Codex layout). Found in the working
+# directory's .xharness/skills and .claude/skills, the server directory's
+# .xharness/skills, and $XHARNESS_HOME/skills. Only names and descriptions go
+# into the prompt; the model loads a body with the skill tool when it needs it.
+# [skills]
+# enabled = true
+# dirs = ["/srv/shared-skills"]
+# claude_home = false          # true also reads ~/.claude/skills
+
+# ── Long conversations ────────────────────────────────────────
+# [compaction]
+# auto = true                  # summarise older messages once the prompt passes threshold x context_tokens
+# threshold = 0.8
+# [sessions]
+# auto_title = true            # the conversation's own model writes a short title after the first task
+# [web]
+# model_switch = true          # people may change a conversation's model (limited per tier by providers = [...])

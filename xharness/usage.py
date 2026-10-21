@@ -73,7 +73,10 @@ def task_records(directory: str | None, since: datetime) -> list[dict[str, Any]]
             stamp = _parse_ts(event.get("ts"))
             if stamp is None or stamp < since:
                 continue
-            records.append({"ts": stamp.isoformat(), "session": name[:-6], **delta})
+            record = {"ts": stamp.isoformat(), "session": name[:-6], **delta}
+            if event.get("model"):
+                record["model"], record["hosting"] = event["model"], event.get("hosting") or "unknown"
+            records.append(record)
     records.sort(key=lambda record: record["ts"])
     return records
 

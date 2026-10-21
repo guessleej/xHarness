@@ -34,6 +34,17 @@ REPEAT_WARNINGS = (3, 5, 8)
 #: Tool results kept verbatim when the conversation no longer fits the model.
 KEEP_RECENT_TOOL_RESULTS = 2
 PRUNED_OUTPUT = "[output removed to fit the context window; run the tool again if you need it]"
+#: Compaction: the model rewrites everything before the latest request as a
+#: summary, so a long conversation keeps going instead of hitting the wall.
+SUMMARY_PREFIX = "[Summary of the earlier conversation, written by xHarness to save context]\n"
+SUMMARY_ACK = "Understood. I will continue from this summary."
+SUMMARY_SYSTEM = (
+    "You compact a conversation between a person and an AI agent so the work can continue with less "
+    "context. Write a summary in the language and script the person used: the goal, what has been done, "
+    "facts learned (file paths, commands, results, decisions) and what is still open. Keep names, paths "
+    "and numbers exact; never add anything that is not in the conversation. Plain text, at most 400 words."
+)
+MAX_SUMMARY_SOURCE_CHARS = 60_000
 _CONTEXT_OVERFLOW = re.compile(
     r"exceed\w*.{0,40}context|context.{0,20}(length|size|window)|maximum context|too many tokens|prompt is too long",
     re.IGNORECASE,
@@ -212,6 +223,28 @@ class AgentOptions:
     name: str = "main"
     #: Tool names hidden from this agent (e.g. children may not spawn children).
     exclude_tools: set[str] = field(default_factory=set)
+    #: auto: compact before the next model call once the prompt passes
+    #: `threshold` of the endpoint's context_tokens.
+    compaction: dict[str, Any] = field(default_factory=lambda: {"auto": True, "threshold": 0.8})
+
+
+def render_transcript(messages: list[dict[str, Any]]) -> str:
+    """Messages as plain text for the summariser, newest kept when too long."""
+    parts: list[str] = []
+    for message in messages:
+        role = message.get("role")
+        content = str(message.get("content") or "")
+        if role == "user":
+            parts.append(f"PERSON: {content}")
+        elif role == "assistant":
+            if content:
+                parts.append(f"AGENT: {content}")
+            for call in message.get("tool_calls") or []:
+                parts.append(f"AGENT CALLS {call.get('name')}: {str(call.get('arguments') or '')[:400]}")
+        elif role == "tool":
+            parts.append(f"TOOL RESULT: {content[:1500]}")
+    text = "\n\n".join(parts)
+    return text[-MAX_SUMMARY_SOURCE_CHARS:]
 
 
 def with_context(text: str, context: str | None) -> str:
@@ -230,6 +263,7 @@ class Agent:
         self._told_date: Any = None
         self._system_logged = False
         self._repeat: tuple[str, int] = ("", 0)
+        self._compact_due = False
         if self.options.initial_messages:
             self.messages.extend(self.options.initial_messages)
         if not any(message.get("role") == "system" for message in self.messages):
@@ -251,7 +285,54 @@ class Agent:
             instructions = load_project_instructions(cwd, self.options.site_instructions_dir)
             if instructions:
                 system = f"{system}\n\n{instructions}"
+        skills = self.ctx.optional("skills")
+        if skills is not None and "skill" not in self.options.exclude_tools:
+            index = skills.index(cwd)
+            if index:
+                system = f"{system}\n\n{index}"
         return system
+
+    def refresh_system_prompt(self) -> None:
+        """Rebuild the system prompt (after a model switch, say) and log it again."""
+        if self.messages and self.messages[0].get("role") == "system":
+            self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
+            self._system_logged = False
+
+    def compact(self, reason: str = "manual") -> dict[str, Any] | None:
+        """Replace everything before the latest request with a model-written summary.
+
+        Returns what happened, or None when there is nothing worth compacting
+        (a single request, or only a previous summary before it). The cut is
+        always at a person's message, so tool calls and their results are never
+        separated. The summary is logged, and resume rebuilds the same history.
+        """
+        body = self.messages[1:] if self.messages and self.messages[0].get("role") == "system" else self.messages[:]
+        head = self.messages[: len(self.messages) - len(body)]
+        cut = max((i for i, m in enumerate(body) if m.get("role") == "user"), default=-1)
+        middle = body[:cut] if cut > 0 else []
+        if len(middle) < 2 or (len(middle) == 2 and str(middle[0].get("content", "")).startswith(SUMMARY_PREFIX)):
+            return None
+        llm = self.ctx.get("llm")
+        request = [{"role": "system", "content": SUMMARY_SYSTEM},
+                   {"role": "user", "content": render_transcript(middle)}]
+        reply: AssistantTurn = self.ctx.invoke(
+            "llm/stream", {"messages": request, "tools": []},
+            lambda current: llm.stream(current["messages"], current["tools"]),
+        )
+        summary = (reply.content or "").strip()
+        if not summary:
+            return None
+        kept = body[cut:]
+        self.messages[:] = head + [
+            {"role": "user", "content": SUMMARY_PREFIX + summary},
+            {"role": "assistant", "content": SUMMARY_ACK},
+        ] + kept
+        result = {"reason": reason, "replaced": len(middle), "kept": len(kept), "summary": summary}
+        session: SessionLog | None = self.ctx.optional("session")
+        if session:
+            session.append({"type": "compaction", **result, **self._tag()})
+        self.ctx.emit("agent/compacted", result)
+        return result
 
     def reset(self) -> None:
         """Forget the conversation, keeping a fresh system prompt."""
@@ -307,7 +388,17 @@ class Agent:
                 for tool in registry.list()
                 if tool.name not in self.options.exclude_tools
             ]
+            if self._compact_due:
+                self._compact_due = False
+                try:
+                    self.compact(reason="auto")
+                except Exception as error:  # noqa: BLE001 - a failed summary must not end the task
+                    print(f"[xharness] compaction failed: {error}", file=sys.stderr)
             reply = self._call_model(llm, schemas, session)
+            window = getattr(llm, "context_tokens", None)
+            if (window and reply.usage and self.options.compaction.get("auto", True)
+                    and reply.usage.prompt_tokens >= float(self.options.compaction.get("threshold", 0.8)) * window):
+                self._compact_due = True
             if reply.usage:
                 self.total_usage.prompt_tokens += reply.usage.prompt_tokens
                 self.total_usage.completion_tokens += reply.usage.completion_tokens
@@ -374,6 +465,12 @@ class Agent:
         except RuntimeError as error:
             if not is_context_overflow(error):
                 raise
+            try:
+                if self.compact(reason="overflow"):
+                    return send()
+            except RuntimeError as again:
+                if not is_context_overflow(again):
+                    raise
             pruned = self._prune_tool_results()
             if not pruned:
                 raise

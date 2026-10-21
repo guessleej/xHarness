@@ -30,7 +30,7 @@ PRESETS: dict[str, dict[str, Any]] = {
 
 #: Every OpenAIAdapter keyword a provider table may set; anything else is dropped.
 #: Keep in step with OpenAIAdapter.__init__ (tests/test_providers.py checks).
-PROVIDER_KEYS = {"base_url", "model", "api_key", "api_key_env", "temperature", "max_tokens", "extra_headers", "extra_body", "timeout_seconds"}
+PROVIDER_KEYS = {"base_url", "model", "api_key", "api_key_env", "temperature", "max_tokens", "extra_headers", "extra_body", "timeout_seconds", "context_tokens"}
 
 
 def apply_preset(provider: dict[str, Any]) -> dict[str, Any]:

@@ -22,6 +22,9 @@ from .context import Context, Plugin
 #: Fields the adapter owns; extra_body may not touch them.
 RESERVED_BODY_KEYS = frozenset({"model", "messages", "stream", "stream_options", "tools"})
 DEFAULT_TIMEOUT_SECONDS = 600
+PRIVATE_PREFIXES = ("127.", "10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.",
+                    "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
+                    "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")
 #: Statuses that mean "try again shortly", not "this request is wrong".
 RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 #: Waits before the 2nd and 3rd attempt. A llama-server behind a load balancer
@@ -52,6 +55,21 @@ def _retry_after(value: str | None) -> float | None:
         return None  # the HTTP-date form; the default delay is close enough
 
 
+def endpoint_host(base_url: Any) -> str:
+    """Host only: a base_url may carry a path or query that is nobody's business in a report."""
+    return urllib.parse.urlsplit(str(base_url or "")).hostname or ""
+
+
+def hosting_of(base_url: Any) -> str:
+    """self-hosted vs bought-in, decided by where the endpoint lives."""
+    host = endpoint_host(base_url)
+    if not host:
+        return "unknown"
+    if host in ("localhost", "::1") or host.startswith(PRIVATE_PREFIXES):
+        return "self-hosted"
+    return "external"
+
+
 class OpenAIAdapter:
     def __init__(
         self,
@@ -64,6 +82,7 @@ class OpenAIAdapter:
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+        context_tokens: int | None = None,
     ) -> None:
         if not base_url:
             raise ValueError("provider base_url is required")
@@ -90,6 +109,9 @@ class OpenAIAdapter:
         }
         self.timeout_seconds = timeout_seconds
         self.sleep: Callable[[float], None] = time.sleep  # replaced in tests
+        #: How many tokens the endpoint accepts (llama-server -c). Unknown when
+        #: None; compaction then only reacts to an overflow error.
+        self.context_tokens = int(context_tokens) if context_tokens else None
 
     def _open(self, request: urllib.request.Request) -> Any:
         """Send the request, retrying transient failures.

@@ -48,6 +48,30 @@ def _session_meta(directory: str, session_id: str) -> dict[str, Any]:
     return {}
 
 
+def _ratings(directory: str, session_id: str) -> dict[str, Any]:
+    """Thumbs on replies in one transcript; a later rating of the same reply replaces the earlier."""
+    latest: dict[Any, dict[str, Any]] = {}
+    try:
+        with open(os.path.join(directory, f"{session_id}.jsonl"), encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("type") == "feedback" and record.get("rating") in ("up", "down"):
+                    latest[record.get("turn")] = record
+    except OSError:
+        pass
+    ratings = list(latest.values())
+    return {
+        "up": sum(1 for r in ratings if r["rating"] == "up"),
+        "down": sum(1 for r in ratings if r["rating"] == "down"),
+        # Only what people wrote about poor answers: that is what someone acts on.
+        "notes": [{"ts": str(r.get("ts", "")), "note": str(r["note"])[:200]} for r in ratings
+                  if r["rating"] == "down" and r.get("note")],
+    }
+
+
 def _count_events(directory: str, session_id: str, kinds: tuple[str, ...]) -> dict[str, int]:
     path = os.path.join(directory, f"{session_id}.jsonl")
     counts = {kind: 0 for kind in kinds}
@@ -82,6 +106,7 @@ def collect(
     errors = 0
     budget_stops = 0
     unattributed = {"tokens": 0, "tasks": 0}
+    feedback: dict[str, Any] = {"up": 0, "down": 0, "notes": []}
 
     for user, directory in session_owners():
         label = user or "(未歸戶)"
@@ -92,32 +117,41 @@ def collect(
             label, {"user": label, "attributed": user is not None, "tasks": 0, "tokens": 0, "calls": 0, "tool_calls": 0, "sessions": 0}
         )
         seen: set[str] = set()
+        metas: dict[str, dict[str, Any]] = {}
+        used: set[tuple[str, str]] = set()   # (session, model) and (session, hosting) pairs counted
         for record in records:
             bucket["tasks"] += 1
-            bucket["tokens"] += int(record.get("total_tokens") or 0)
+            tokens = int(record.get("total_tokens") or 0)
+            bucket["tokens"] += tokens
             bucket["calls"] += int(record.get("calls") or 0)
             bucket["tool_calls"] += int(record.get("tool_calls") or 0)
             session_id = str(record.get("session") or "")
+            if session_id not in metas:
+                metas[session_id] = _session_meta(directory, session_id)
+            meta = metas[session_id]
+            # Each task carries the model that ran it (1.10+); older transcripts
+            # only name the model the session started with.
+            kind = str(record.get("hosting") or meta.get("hosting") or "unknown")
+            model = str(record.get("model") or meta.get("model") or "unknown")
+            slot = hosting.setdefault(kind, {"tokens": 0, "sessions": 0})
+            slot["tokens"] += tokens
+            if (session_id, "h:" + kind) not in used:
+                used.add((session_id, "h:" + kind))
+                slot["sessions"] += 1
+            if (session_id, "m:" + model) not in used:
+                used.add((session_id, "m:" + model))
+                models[model] = models.get(model, 0) + 1
             if session_id in seen:
                 continue
             seen.add(session_id)
-            meta = _session_meta(directory, session_id)
-            kind = str(meta.get("hosting") or "unknown")
-            slot = hosting.setdefault(kind, {"tokens": 0, "sessions": 0})
-            slot["sessions"] += 1
-            model = str(meta.get("model") or "unknown")
-            models[model] = models.get(model, 0) + 1
             counts = _count_events(directory, session_id, ("error", "budget-stop"))
             errors += counts["error"]
             budget_stops += counts["budget-stop"]
+            ratings = _ratings(directory, session_id)
+            feedback["up"] += ratings["up"]
+            feedback["down"] += ratings["down"]
+            feedback["notes"].extend(ratings["notes"])
         bucket["sessions"] = len(seen)
-        # Attribute this session's tokens to its hosting kind proportionally is
-        # overkill; a session uses one endpoint, so charge its whole delta there.
-        for session_id in seen:
-            meta = _session_meta(directory, session_id)
-            kind = str(meta.get("hosting") or "unknown")
-            tokens = sum(int(r.get("total_tokens") or 0) for r in records if r.get("session") == session_id)
-            hosting.setdefault(kind, {"tokens": 0, "sessions": 0})["tokens"] += tokens
         if user is None:
             unattributed = {"tokens": bucket["tokens"], "tasks": bucket["tasks"]}
 
@@ -178,6 +212,9 @@ def collect(
             "failed_signins": failed_signins,
             "lockouts": lockouts,
             "unattributed": unattributed,
+            # What people thought of the answers: latest rating per reply.
+            "feedback": {"up": feedback["up"], "down": feedback["down"],
+                         "notes": sorted(feedback["notes"], key=lambda n: n["ts"], reverse=True)[:TOP_N]},
             "issues": _issues(users, unattributed, outbound, machines, errors, failed_signins),
             "governance": GOVERNANCE_RULE,
         },
@@ -339,7 +376,8 @@ def format_report(report: dict[str, Any]) -> str:
         "五、對外串接：" + "、".join(f"{item['name']}={item['state']}" for item in report["outbound"]["items"][:6]),
         "",
         f"六、健康與治理：{health['errors']} 次任務失敗、{health['budget_stops']} 次預算中斷、"
-        f"{health['failed_signins']} 次登入失敗",
+        f"{health['failed_signins']} 次登入失敗；回覆評價 {health.get('feedback', {}).get('up', 0)} 讚、"
+        f"{health.get('feedback', {}).get('down', 0)} 倒讚",
     ]
     if health["issues"]:
         for issue in health["issues"]:

@@ -42,7 +42,10 @@ from . import multipart, workspace
 from .report import collect as collect_report
 from . import seccheck
 from .sandbox import resolve_sandbox
-from .session import SessionLog, messages_from_events, sessions_dir
+from .commands import CommandHost, CommandResult, dispatch as dispatch_command, generate_title, listing as command_listing
+from .commands import MAX_FEEDBACK_NOTE, providers_for, switch_model
+from .session import (SessionLog, clean_title, export_markdown, messages_from_events, search_sessions,
+                      session_summary, sessions_dir)
 from .telegram import TelegramBridge, telegram_settings
 from .telemetry import BudgetExceeded
 
@@ -104,8 +107,8 @@ def preview_change(name: str, raw_args: str, cwd: str) -> dict[str, Any] | None:
         after = str(args.get("content") or "")
     else:
         old, new = str(args.get("old_string") or ""), str(args.get("new_string") or "")
-        if not old or old not in before:
-            return None
+        if not old or old == new or old not in before:
+            return None   # the tool refuses these; there is nothing to preview
         after = before.replace(old, new) if args.get("replace_all") else before.replace(old, new, 1)
     # [2:] drops the ---/+++ file headers; the path is shown separately.
     lines = list(difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm="", n=3))[2:]
@@ -115,24 +118,6 @@ def preview_change(name: str, raw_args: str, cwd: str) -> dict[str, Any] | None:
     # The same masking as every other surface: a diff of an .env is still an .env.
     change["diff"] = [scrub(line[:MAX_DIFF_LINE_CHARS]) for line in lines[:MAX_DIFF_LINES]]
     return change
-
-
-def session_preview(session_id: str, user: str | None) -> str:
-    """The first thing the person asked in a saved session, for the task list."""
-    try:
-        with open(os.path.join(sessions_dir(user), f"{session_id}.jsonl"), encoding="utf-8") as handle:
-            for index, line in enumerate(handle):
-                if index > 400:
-                    break
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if event.get("type") == "message" and event.get("role") == "user" and not event.get("agent"):
-                    return str(event.get("content") or "")[:80]
-    except OSError:
-        pass
-    return ""
 
 
 def is_admin(principal: Any) -> bool:
@@ -191,6 +176,12 @@ class Conversation:
         self.last_activity = time.time()
         self.children: dict[str, str] = {}  # active subagents: name -> task
         self.turns = 0
+        self.title = ""
+        #: Requests sent so far, counting resumed history: a reply is rated by
+        #: the number of the request it answered.
+        self.requests = 0
+        self.ratings: dict[int, str] = {}
+        self.provider = ""
 
     def push(self, event: dict[str, Any]) -> None:
         with self.cond:
@@ -231,6 +222,11 @@ class Conversation:
             "running": self.running,
             "state": state,
             "preview": self.preview,
+            "title": self.title,
+            "provider": self.provider,
+            "model": getattr(self.harness.ctx.optional("llm"), "model", ""),
+            "requests": self.requests,
+            "ratings": {str(k): v for k, v in self.ratings.items()},
             "usage": self.usage(),
             "created": self.created,
             "started_at": self.started_at,
@@ -291,6 +287,7 @@ class WebApp:
         resume: str | None = None,
         extra_system: str | None = None,
         user: User | None = None,
+        provider: str | None = None,
     ) -> Conversation:
         harness = self.harness_factory(resume, user) if self._factory_takes_user else self.harness_factory(resume)
         session = harness.ctx.optional("session")
@@ -359,6 +356,7 @@ class WebApp:
                 prompt=prompt,
                 ask=ask,
                 initial_messages=initial,
+                compaction=getattr(self.config, "compaction", None) or {"auto": True, "threshold": 0.8},
                 on_delta=lambda text: holder["conv"].push({"type": "delta", "text": text}),
                 on_tool_start=tool_start,
                 on_tool_end=tool_end,
@@ -377,12 +375,34 @@ class WebApp:
 
         harness.ctx.on("subagent/start", child_start)
         harness.ctx.on("subagent/end", child_end)
+        harness.ctx.on("agent/compacted", lambda result: conv.push({
+            "type": "compacted", "reason": result["reason"], "replaced": result["replaced"],
+            "kept": result["kept"], "summary": result["summary"]}))
+        conv.provider = self.config.provider_name
+        if provider and provider != conv.provider:
+            outcome = switch_model(self._command_host(conv, user), provider)
+            if not outcome.ok:
+                raise ValueError(outcome.text)
+            conv.provider = provider
         if initial:
-            first = next((m for m in initial if m["role"] == "user" and m.get("content")), None)
+            from .agent import SUMMARY_ACK, SUMMARY_PREFIX
+
+            first = next((m for m in initial if m["role"] == "user" and m.get("content")
+                          and not str(m["content"]).startswith(SUMMARY_PREFIX)), None)
             conv.preview = str(first["content"])[:80] if first else ""
+            conv.title = session_summary(resume, principal_name(user))["title"] if resume else ""
             for message in initial:
-                if message["role"] in ("user", "assistant") and message.get("content"):
-                    conv.push({"type": "history", "role": message["role"], "text": message["content"]})
+                text = str(message.get("content") or "")
+                if message["role"] not in ("user", "assistant") or not text or text == SUMMARY_ACK:
+                    continue
+                if text.startswith(SUMMARY_PREFIX):
+                    conv.push({"type": "compacted", "reason": "history", "replaced": 0, "kept": 0,
+                               "summary": text[len(SUMMARY_PREFIX):]})
+                    continue
+                if message["role"] == "user":
+                    conv.requests += 1
+                conv.push({"type": "history", "role": message["role"], "text": text,
+                           "turn": conv.requests if message["role"] == "assistant" else None})
         with self.lock:
             self.conversations[conv_id] = conv
         return conv
@@ -409,12 +429,16 @@ class WebApp:
             conv.running = True
             conv.started_at = time.time()
         conv.preview = text[:80]
-        conv.push({"type": "user", "text": text})
+        conv.requests += 1
+        turn = conv.requests
+        conv.push({"type": "user", "text": text, "turn": turn})
 
         def run() -> None:
             try:
                 answer = conv.agent.run(text)
-                conv.push({"type": "done", "answer": answer, "usage": conv.usage()})
+                conv.push({"type": "done", "answer": answer, "usage": conv.usage(), "turn": turn})
+                if not conv.title and (getattr(self.config, "sessions", None) or {}).get("auto_title", True):
+                    self._name(conv, text)
             except Exception as error:  # noqa: BLE001 - surfaced to the browser
                 # An exception often repeats the URL or header that failed, which
                 # is exactly where a token would be.
@@ -432,6 +456,75 @@ class WebApp:
 
         threading.Thread(target=run, name=f"xharness-web-{conv.id}", daemon=True).start()
         return True
+
+    def _name(self, conv: Conversation, request: str) -> None:
+        """Title the conversation from its first request, with its own model."""
+        try:
+            title = generate_title(conv.harness.ctx, request)
+        except Exception as error:  # noqa: BLE001 - a title is a convenience
+            print(f"[xharness] title failed: {scrub(error)}", file=sys.stderr)
+            return
+        if title and not conv.title:
+            self.set_title(conv, title)
+
+    def set_title(self, conv: Conversation, title: str) -> None:
+        conv.title = clean_title(title)
+        session = conv.harness.ctx.optional("session")
+        if session:
+            session.append({"type": "title", "title": conv.title})
+        conv.push({"type": "title", "title": conv.title})
+
+    def rate(self, conv: Conversation, turn: int | None, rating: str | None, note: str = "") -> int | None:
+        """Rate the reply to request number `turn` (default: the latest). The
+        rating is a record for people, kept out of what the model sees."""
+        turn = turn or conv.requests
+        if not turn or turn > conv.requests or rating not in ("up", "down", None):
+            return None
+        session = conv.harness.ctx.optional("session")
+        if session:
+            session.append({"type": "feedback", "turn": turn, "rating": rating, "note": str(note or "")[:MAX_FEEDBACK_NOTE]})
+        if rating:
+            conv.ratings[turn] = rating
+        else:
+            conv.ratings.pop(turn, None)
+        return turn
+
+    def _command_host(self, conv: Conversation, user: Any) -> CommandHost:
+        allowed = tuple(getattr(user, "allowed_providers", ()) or ())
+        return CommandHost(
+            agent=conv.agent, ctx=conv.harness.ctx, config=self.config, running=conv.running,
+            allowed_providers=allowed,
+            model_switch=bool((getattr(self.config, "web", None) or {}).get("model_switch", True)),
+            set_title=lambda title: self.set_title(conv, title),
+            get_title=lambda: conv.title,
+            rate=lambda rating, note: self.rate(conv, None, rating, note),
+        )
+
+    def command(self, conv: Conversation, line: str, user: Any) -> CommandResult | None:
+        result = dispatch_command(self._command_host(conv, user), line, surface="web")
+        if result is not None:
+            session = conv.harness.ctx.optional("session")
+            if session:
+                session.append({"type": "command", "line": line[:200], "ok": result.ok})
+            if result.ok and result.data.get("provider"):
+                conv.provider = result.data["provider"]
+                conv.push({"type": "model", "provider": conv.provider, "model": result.data.get("model")})
+        return result
+
+    def models(self, user: Any) -> dict[str, Any]:
+        allowed = tuple(getattr(user, "allowed_providers", ()) or ())
+        return {
+            "default": self.config.provider_name,
+            "switchable": bool((getattr(self.config, "web", None) or {}).get("model_switch", True)),
+            "providers": providers_for(self.config, allowed),
+        }
+
+    def skills(self, user: Any) -> list[dict[str, str]]:
+        from .skills import SkillStore
+
+        store = SkillStore(getattr(self.config, "skills", None))
+        return [{"name": s.name, "description": s.description, "source": s.source}
+                for s in store.discover(workspace.ensure(principal_name(user)) or os.getcwd())]
 
     def approve(self, conv: Conversation, approval_id: str, allow: bool) -> bool:
         approval = conv.approvals.get(approval_id)
@@ -783,10 +876,37 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 return
             if parts[1:] == ["sessions"]:
                 owner = principal_name(self.principal)
+                needle = (query.get("q") or [""])[0].strip()
+                if needle:
+                    self._json(200, search_sessions(needle[:100], owner))
+                    return
                 self._json(200, [
-                    {**entry, "preview": session_preview(entry["id"], owner)}
+                    {**entry, **session_summary(entry["id"], owner)}
                     for entry in SessionLog.list(owner)[:50]
                 ])
+                return
+            if len(parts) == 4 and parts[1] == "sessions" and parts[3] == "export":
+                text = export_markdown(parts[2], principal_name(self.principal))
+                if text is None:
+                    self._json(404, {"error": "session not found"})
+                    return
+                data = text.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="xharness-{parts[2]}.md"')
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            if parts[1:] == ["commands"]:
+                self._json(200, command_listing("web"))
+                return
+            if parts[1:] == ["models"]:
+                self._json(200, app.models(self.principal))
+                return
+            if parts[1:] == ["skills"]:
+                self._json(200, app.skills(self.principal))
                 return
             if parts[1:] == ["me"]:
                 principal = self.principal
@@ -953,7 +1073,8 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 resume = body.get("resume")
                 owner = self.principal if isinstance(self.principal, User) else None
                 try:
-                    conv = app.create(str(resume) if resume else None, user=owner)
+                    conv = app.create(str(resume) if resume else None, user=owner,
+                                      provider=str(body["provider"]) if body.get("provider") else None)
                 except Exception as error:  # noqa: BLE001 - reported to the caller
                     self._json(400, {"error": str(error)})
                     return
@@ -985,6 +1106,27 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 if parts[3] == "stop":
                     ok = app.stop(conv)
                     self._json(200 if ok else 409, {"ok": ok})
+                    return
+                if parts[3] == "commands":
+                    result = app.command(conv, str(body.get("line") or ""), self.principal)
+                    if result is None:
+                        self._json(404, {"error": "unknown command"})
+                        return
+                    self._json(200, {"ok": result.ok, "text": result.text, "action": result.action, "data": result.data})
+                    return
+                if parts[3] == "model":
+                    result = app.command(conv, "/model " + str(body.get("provider") or ""), self.principal)
+                    ok = bool(result and result.ok)
+                    self._json(200 if ok else 400, {"ok": ok, "text": result.text if result else "", **(result.data if result else {})})
+                    return
+                if parts[3] == "feedback":
+                    rating = body.get("rating")
+                    try:
+                        turn = int(body.get("turn") or 0) or None
+                    except (TypeError, ValueError):
+                        turn = None
+                    rated = app.rate(conv, turn, rating if rating in ("up", "down") else None, str(body.get("note") or ""))
+                    self._json(200 if rated else 400, {"ok": bool(rated), "turn": rated})
                     return
             if len(parts) == 6 and parts[1] == "nodes" and parts[3] == "conversations":
                 if not self._admin_only():  # steering another machine is an operator action
@@ -1409,6 +1551,36 @@ body:not(.landing) .landing{display:none}
 .sendbtn svg.i{width:17px;height:17px;stroke-width:2.2}
 .hint{max-width:calc(var(--col) - 48px);margin:6px auto 0;font-size:12px;color:var(--ink-3);text-align:center;min-height:18px}
 
+/* slash commands: a list above the composer, and their results in the thread */
+.composer{position:relative}
+.cmdpop{position:absolute;left:0;right:0;bottom:calc(100% + 8px);background:var(--surface);border-radius:16px;box-shadow:var(--shadow);padding:6px;
+  max-height:300px;overflow-y:auto;z-index:30;animation:rise .18s var(--ease)}
+.cmdpop .ci{display:flex;align-items:baseline;gap:10px;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:14px}
+.cmdpop .ci.on,.cmdpop .ci:hover{background:var(--tint)}
+.cmdpop .cn{font-family:var(--mono);font-weight:700;color:var(--brand);white-space:nowrap}
+.cmdpop .ca{font-family:var(--mono);font-size:12.5px;color:var(--ink-3);white-space:nowrap}
+.cmdpop .ch{color:var(--ink-2);font-size:13.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.m-cmd{margin:14px 0;border-radius:14px;background:var(--surface-2);padding:10px 14px;animation:rise .3s var(--ease)}
+.m-cmd .cl{font:12.5px var(--mono);color:var(--ink-3);margin-bottom:4px}
+.m-cmd .ct{white-space:pre-wrap;word-break:break-word;font-size:14px}
+.m-cmd.bad .ct{color:var(--brand)}
+.summary-box{margin:8px 0 0;font-size:14px;color:var(--ink-2);background:var(--surface-2);border-radius:12px;padding:10px 14px}
+/* under each reply: copy and rate */
+.replybar{display:flex;align-items:center;gap:2px;margin:-4px 0 8px;opacity:.75;transition:opacity .2s}
+.replybar:hover,.replybar.rated{opacity:1}
+.rb{width:30px;height:30px;border-radius:9px;border:0;background:transparent;color:var(--ink-3);display:grid;place-items:center;cursor:pointer}
+.rb:hover{background:var(--surface-2);color:var(--ink)}
+.rb.on{color:var(--brand);background:var(--tint)}
+.rb svg.i{width:15px;height:15px}
+.rnote{display:flex;gap:6px;flex:1;max-width:420px;margin-left:6px}
+.rnote input{flex:1;min-width:0;font:inherit;font-size:13px;padding:5px 10px;border-radius:9px;background:var(--surface);color:var(--ink);border:1px solid var(--surface-3);outline:none}
+.rnote input:focus{border-color:var(--brand)}
+.rmsg{font-size:12.5px;color:var(--ink-3);margin-left:6px}
+.modelsel{font:inherit;font-size:12.5px;color:var(--ink-2);background:var(--surface-2);border:0;border-radius:99px;padding:4px 26px 4px 10px;max-width:230px;cursor:pointer;
+  appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:calc(100% - 13px) 52%,calc(100% - 9px) 52%;background-size:4px 4px;background-repeat:no-repeat}
+.task .snip{font-size:12.5px;color:var(--ink-2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* ---- landing: what to do when nothing has happened yet ---------------------- */
 .landing{max-width:var(--col);margin:0 auto;padding:22px 24px 16px}
 .hero{position:relative;overflow:hidden;border-radius:22px;background:var(--hero);color:#e8eef3;padding:28px 30px 24px;isolation:isolate;animation:rise .5s var(--ease)}
@@ -1676,6 +1848,8 @@ body:not(.view-admin) #admin{display:none}
         <span class="pill" id="conv-state" hidden></span>
         <span class="use" id="conv-use"></span>
         <span class="grow"></span>
+        <button class="ghostbtn" id="btn-export" title="把這段對話匯出成 Markdown" hidden>
+          <svg class="i" viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></svg>匯出</button>
         <button class="ghostbtn" id="btn-review" aria-controls="review" aria-expanded="false" title="檢視變更、檔案、工具與記憶">
           <svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M14 4v16"/></svg>檢視<span class="cnt" id="review-cnt" hidden></span></button>
       </div>
@@ -1701,12 +1875,14 @@ body:not(.view-admin) #admin{display:none}
       </div>
       <div class="composer-wrap">
         <div class="composer" id="composer">
+          <div class="cmdpop" id="cmdpop" role="listbox" aria-label="指令" hidden></div>
           <div class="queued" id="queued"></div>
-          <textarea id="input" rows="1" placeholder="交代一件事…（Enter 送出，Shift+Enter 換行）"></textarea>
+          <textarea id="input" rows="1" placeholder="交代一件事，或輸入 / 看指令（Enter 送出，Shift+Enter 換行）"></textarea>
           <div class="cbar">
             <button class="iconbtn" id="btn-attach" title="附加檔案" aria-label="附加檔案" hidden>
               <svg class="i" viewBox="0 0 24 24"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg></button>
             <input type="file" id="file-input" multiple hidden>
+            <select class="modelsel" id="model-select" aria-label="這段對話使用的模型" title="這段對話使用的模型" hidden></select>
             <span class="modepill" id="modepill">有副作用的動作會先問你</span>
             <span class="grow"></span>
             <button class="sendbtn" id="btn-send" title="送出" aria-label="送出">
@@ -1814,7 +1990,8 @@ body:not(.view-admin) #admin{display:none}
   const $=s=>document.querySelector(s);
   const transcript=$('#transcript'),input=$('#input'),hint=$('#hint'),scroller=$('#scroller');
   let conv=null,es=null,token=null,me=null,admin=false,gateOn=false,meta=null;
-  let view='chat',convPreview='',convState='idle',running=false;
+  let view='chat',convPreview='',convTitle='',convSession='',convState='idle',running=false;
+  let commands=[],models={providers:[],switchable:false},pendingProvider='',searchHits=null,lastAiEl=null,knownRatings={};
   let assistantEl=null,assistantText='',stepsBox=null,composing=false;
   const rows={};          // call id -> step row
   let changes=[];         // change previews for the open conversation
@@ -1843,11 +2020,22 @@ body:not(.view-admin) #admin{display:none}
     send:'<path d="M12 19V5M6 11l6-6 6 6"/>',
     stop:'<rect x="7" y="7" width="10" height="10" rx="2"/>',
     file:'<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/>',
-    upload:'<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>'
+    upload:'<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
+    up:'<path d="M7 10v11"/><path d="M15 5.9 14 10h5.8a2 2 0 0 1 1.9 2.6l-2.3 7.9A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.8a2 2 0 0 0 1.8-1.1L12 2a3.1 3.1 0 0 1 3 3.9Z"/>',
+    down:'<path d="M17 14V3"/><path d="M9 18.1 10 14H4.2a2 2 0 0 1-1.9-2.6l2.3-7.9A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.8a2 2 0 0 0-1.8 1.1L12 22a3.1 3.1 0 0 1-3-3.9Z"/>',
+    copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    note:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    layers:'<path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>'
   };
   function icon(name){const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('class','i');s.setAttribute('viewBox','0 0 24 24');
     s.innerHTML=ICONS[name]||ICONS.tool;return s;}   // fixed strings from this file only
   function toast(text,bad){const t=h('div','toast'+(bad?' bad':''),text);$('#toasts').appendChild(t);setTimeout(()=>t.remove(),bad?6000:3200);}
+  // http:// pages have no navigator.clipboard; fall back to a hidden textarea.
+  async function copyText(text){
+    try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return true;}}catch(e){}
+    const t=document.createElement('textarea');t.value=text;t.setAttribute('readonly','');t.style.position='fixed';t.style.opacity='0';
+    document.body.appendChild(t);t.select();let ok=false;try{ok=document.execCommand('copy');}catch(e){}t.remove();return ok;
+  }
   function askConfirm(title,body,yes){
     return new Promise(resolve=>{
       $('#dlg-t').textContent=title;$('#dlg-p').textContent=body;$('#dlg-yes').textContent=yes||'確定';$('#dlg').classList.add('on');
@@ -1947,8 +2135,10 @@ body:not(.view-admin) #admin{display:none}
   }
 
   // ---- the conversation thread --------------------------------------------------
-  function showLanding(on){document.body.classList.toggle('landing',on);if(on)renderLanding();}
-  function setTitle(text){convPreview=text||'';$('#conv-title').textContent=convPreview?(convPreview.length>60?convPreview.slice(0,60)+'…':convPreview):'新任務';}
+  function showLanding(on){document.body.classList.toggle('landing',on);if(on)renderLanding();showTitle();}
+  function showTitle(){const t=convTitle||convPreview;$('#conv-title').textContent=t?(t.length>60?t.slice(0,60)+'…':t):'新任務';
+    $('#btn-export').hidden=!convSession||document.body.classList.contains('landing');}
+  function setTitle(text){convPreview=text||'';showTitle();}
   const STATE_TEXT={running:'執行中',waiting:'等你回應',idle:'已完成',error:'出錯了'};
   function setState(state){
     convState=state;running=(state==='running'||state==='waiting');
@@ -1965,6 +2155,43 @@ body:not(.view-admin) #admin{display:none}
   function renderAssistant(final){
     assistantEl.textContent='';assistantEl.appendChild(md(assistantText));
     if(!final){const c=h('span','cursor');(assistantEl.lastElementChild||assistantEl).appendChild(c);}
+  }
+
+  // Under each reply: copy it, and rate it. A rating is a record for people;
+  // it never goes back to the model.
+  function replyBar(el,turn,text){
+    if(!el||!turn||el.nextElementSibling&&el.nextElementSibling.classList.contains('replybar'))return;
+    const bar=h('div','replybar');bar.dataset.turn=turn;
+    const btn=(ic,title)=>{const b=h('button','rb');b.type='button';b.title=title;b.setAttribute('aria-label',title);b.appendChild(icon(ic));return b;};
+    const cp=btn('copy','複製這則回覆'),up=btn('up','這則回覆有幫助'),dn=btn('down','這則回覆沒幫助'),nt=btn('note','寫一句備註');
+    const msg=h('span','rmsg');
+    let rating=null;
+    const send=async(r,note)=>{
+      try{await api('/api/conversations/'+conv+'/feedback',{method:'POST',body:{turn,rating:r,note:note||''}});
+        rating=r;up.classList.toggle('on',r==='up');dn.classList.toggle('on',r==='down');bar.classList.toggle('rated',!!r);
+        msg.textContent=note?'已記下備註':(r?'謝謝回饋':'');}
+      catch(e){toast('送出失敗：'+e.message,true);}
+    };
+    cp.onclick=async()=>{toast(await copyText(text||el.textContent)?'已複製':'複製失敗，請手動選取',false);};
+    up.onclick=()=>send(rating==='up'?null:'up');
+    dn.onclick=()=>{send(rating==='down'?null:'down');if(rating!=='down')openNote();};
+    function openNote(){
+      if(bar.querySelector('.rnote'))return;
+      const box=h('div','rnote'),f=h('input');f.placeholder='哪裡不好？（選填，Enter 送出）';f.setAttribute('aria-label','評價備註');
+      imeSafeEnter(f,()=>{send(rating||'down',f.value.trim());box.remove();});box.appendChild(f);bar.insertBefore(box,msg);f.focus();
+    }
+    nt.onclick=openNote;
+    bar.append(cp,up,dn,nt,msg);el.after(bar);
+    const known=knownRatings[String(turn)];if(known){rating=known;(known==='up'?up:dn).classList.add('on');bar.classList.add('rated');}
+  }
+  function cmdNote(line,text,ok){const b=h('div','m-cmd'+(ok===false?' bad':''));b.append(h('div','cl',line),h('div','ct',text));transcript.appendChild(b);toBottom(true);}
+  function compactedNote(ev){
+    const n=h('div','m-note');n.appendChild(icon('layers'));
+    n.appendChild(document.createTextNode(ev.reason==='history'?'這段對話較早的部分已整理成摘要。':
+      '已把較早的 '+ev.replaced+' 則訊息整理成摘要'+(ev.reason==='auto'||ev.reason==='overflow'?'（對話接近模型上限，自動整理）':'')+'。'));
+    const more=h('button','linkbtn','看摘要');const box=h('div','summary-box');box.hidden=true;box.appendChild(md(ev.summary||''));
+    more.onclick=()=>{box.hidden=!box.hidden;more.textContent=box.hidden?'看摘要':'收起';};
+    n.appendChild(more);transcript.append(n,box);toBottom();
   }
 
   function stepsHead(box){
@@ -2095,9 +2322,12 @@ body:not(.view-admin) #admin{display:none}
     const t=ev.type;
     if(t==='user'){showLanding(false);closeSteps();addUser(ev.text);setState('running');if(!convPreview)setTitle(ev.text);}
     else if(t==='history'){showLanding(false);if(ev.role==='user'){addUser(ev.text);if(!convPreview)setTitle(ev.text);}
-      else{const a=h('div','m-ai');a.appendChild(md(ev.text));transcript.appendChild(a);}}
+      else{const a=h('div','m-ai');a.appendChild(md(ev.text));transcript.appendChild(a);replyBar(a,ev.turn,ev.text);}}
+    else if(t==='compacted')compactedNote(ev);
+    else if(t==='title'){convTitle=ev.title||'';showTitle();refreshTasks();}
+    else if(t==='model')setModelShown(ev.provider,ev.model);   // the command block or a toast already says so
     else if(t==='delta'){
-      if(!assistantEl){closeSteps();assistantEl=h('div','m-ai');transcript.appendChild(assistantEl);}
+      if(!assistantEl){closeSteps();assistantEl=h('div','m-ai');transcript.appendChild(assistantEl);lastAiEl=assistantEl;}
       assistantText+=ev.text;renderAssistant(false);toBottom();
     }
     else if(t==='tool_start')toolStart(ev);
@@ -2112,7 +2342,9 @@ body:not(.view-admin) #admin{display:none}
     else if(t==='stop_requested'){addNote('已要求停止：下一次呼叫模型前會停下，等待中的許可一律拒絕。','stop');}
     else if(t==='done'){
       if(assistantEl)renderAssistant(true);
+      const replyText=assistantText||ev.answer||'';
       if(!ev.answer&&!assistantText&&!assistantEl)addNote('（模型沒有回覆文字）');
+      else if(lastAiEl&&transcript.lastElementChild===lastAiEl)replyBar(lastAiEl,ev.turn,replyText);
       finishAssistant();settleSpinners();closeSteps();
       transcript.querySelectorAll('.steps').forEach(b=>{if(!b.querySelector('.badmark'))b.classList.add('closed');});
       setState('idle');setUsage(ev.usage);refreshTasks();
@@ -2129,20 +2361,46 @@ body:not(.view-admin) #admin{display:none}
     es.onerror=()=>{/* EventSource reconnects with Last-Event-ID */};
   }
   function resetThread(){
-    transcript.textContent='';assistantEl=null;assistantText='';stepsBox=null;changes=[];
+    transcript.textContent='';assistantEl=null;assistantText='';stepsBox=null;changes=[];lastAiEl=null;convTitle='';knownRatings={};
     Object.keys(rows).forEach(k=>delete rows[k]);renderChanges();$('#conv-use').textContent='';
   }
   async function openConversation(c){
-    conv=c.id;resetThread();setTitle(c.preview||'');showLanding(false);setState(c.state||'idle');setUsage(c.usage);
+    conv=c.id;resetThread();convSession=c.session||'';convTitle=c.title||'';knownRatings=c.ratings||{};setTitle(c.preview||'');showLanding(false);setState(c.state||'idle');setUsage(c.usage);
+    setModelShown(c.provider,c.model);
     hint.textContent='';showView('chat');await connect(conv,0);closeDrawer();renderTasks();
   }
   async function newConversation(resume){
-    const c=await api('/api/conversations',{method:'POST',body:resume?{resume}:{}});
-    conv=c.id;resetThread();setTitle('');showLanding(!resume);setState('idle');
+    const body=resume?{resume}:{};const choice=pendingProvider||($('#model-select').value||'');
+    if(choice&&choice!==models.default)body.provider=choice;
+    const c=await api('/api/conversations',{method:'POST',body});
+    conv=c.id;resetThread();convSession=c.session||'';convTitle=c.title||'';setTitle('');showLanding(!resume);setState('idle');setModelShown(c.provider,c.model);
     hint.textContent=resume?'接續 session '+resume:'';showView('chat');
     await connect(conv,0);refreshTasks();closeDrawer();input.focus();return c;
   }
+  function commandOf(text){
+    if(!text.startsWith('/'))return null;
+    const name=text.slice(1).split(/\s+/)[0].toLowerCase();
+    return commands.find(c=>c.name===name)||null;
+  }
+  async function runCommand(text){
+    const cmd=commandOf(text);closePop();input.value='';autosize();
+    if(cmd.name==='new'){await newConversation();return;}
+    if(cmd.name==='stop'){if(running)await stopTask();else toast('沒有進行中的任務');return;}
+    if(cmd.name==='export'){await exportConv();return;}
+    if(!conv)await newConversation();
+    try{
+      const r=await api('/api/conversations/'+conv+'/commands',{method:'POST',body:{line:text}});
+      showLanding(false);
+      if(!(cmd.name==='compact'&&r.ok&&r.data&&r.data.summary))cmdNote(text,r.text,r.ok);   // the compaction note already shows it
+      if(r.data&&r.data.title){convTitle=r.data.title;showTitle();refreshTasks();}
+    }catch(e){cmdNote(text,e.message,false);}
+  }
   async function send(){
+    const typed0=input.value.trim();
+    if(commandOf(typed0)){await runCommand(typed0);return;}
+    // A bare /word that is not a command never reaches the model, which would
+    // treat it as a request and may invent work it never did.
+    if(/^\/[A-Za-z][\w-]*$/.test(typed0)){toast('沒有 '+typed0+' 這個指令，輸入 / 看全部',true);return;}
     if(running){toast('這個任務還在進行；要換方向先按停止。');return;}
     const typed=input.value.trim();
     // Attached files are named in the message itself, so the agent knows they
@@ -2153,6 +2411,37 @@ body:not(.view-admin) #admin{display:none}
     try{await api('/api/conversations/'+conv+'/messages',{method:'POST',body:{text}});input.value='';autosize();}
     catch(e){addError(e.message);}
   }
+  async function exportConv(){
+    if(!convSession){toast('還沒有可以匯出的對話');return;}
+    try{
+      const headers={'X-XHarness-Client':'1'};if(token)headers['Authorization']='Bearer '+token;
+      const r=await fetch('/api/sessions/'+encodeURIComponent(convSession)+'/export',{headers});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const url=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=url;
+      a.download=((convTitle||convPreview||'xharness').replace(/[\\/:*?"<>|\s]+/g,'_').slice(0,40)||'xharness')+'.md';a.click();URL.revokeObjectURL(url);
+      toast('已匯出');
+    }catch(e){toast('匯出失敗：'+e.message,true);}
+  }
+  $('#btn-export').onclick=exportConv;
+  // ---- models ----
+  function setModelShown(provider,model){
+    const sel=$('#model-select');if(provider&&[...sel.options].some(o=>o.value===provider)){sel.value=provider;shownProvider=provider;}
+    if(model)$('#model-name').textContent=model;
+  }
+  async function loadModels(){
+    try{models=await api('/api/models');}catch(e){return;}
+    const sel=$('#model-select');sel.textContent='';
+    models.providers.forEach(p=>{const o=document.createElement('option');o.value=p.name;o.textContent=p.name+'・'+p.model+(p.hosting==='self-hosted'?'':'（外部）');sel.appendChild(o);});
+    sel.value=models.default;shownProvider=models.default;sel.hidden=!models.switchable||models.providers.length<2;
+  }
+  let shownProvider='';
+  $('#model-select').onchange=async e=>{
+    const name=e.target.value,p=models.providers.find(x=>x.name===name);
+    if(!conv){pendingProvider=name;if(p)$('#model-name').textContent=p.model;return;}   // used when the task is created
+    if(running){toast('任務還在進行，等它結束再換模型。');e.target.value=shownProvider;return;}
+    try{const r=await api('/api/conversations/'+conv+'/model',{method:'POST',body:{provider:name}});toast(r.text);}
+    catch(err){toast('換模型失敗：'+err.message,true);e.target.value=shownProvider;}
+  };
   async function stopTask(){
     if(!conv)return;
     try{await api('/api/conversations/'+conv+'/stop',{method:'POST',body:{}});toast('已要求停止');}catch(e){toast('停止失敗：'+e.message,true);}
@@ -2162,12 +2451,36 @@ body:not(.view-admin) #admin{display:none}
   input.addEventListener('compositionstart',()=>composing=true);
   input.addEventListener('compositionend',()=>{composing=false});
   input.addEventListener('keydown',e=>{
-    if(e.key!=='Enter'||e.shiftKey)return;
     if(composing||e.isComposing||e.keyCode===229)return;
+    if(!$('#cmdpop').hidden){
+      if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();movePop(e.key==='ArrowDown'?1:-1);return;}
+      if(e.key==='Escape'){e.preventDefault();closePop();return;}
+      if(e.key==='Tab'||(e.key==='Enter'&&!e.shiftKey&&!exactCommand())){e.preventDefault();pickPop();return;}
+    }
+    if(e.key!=='Enter'||e.shiftKey)return;
     e.preventDefault();send();
   });
   function autosize(){input.style.height='auto';input.style.height=Math.min(220,input.scrollHeight)+'px';input.style.overflowY=input.scrollHeight>220?'auto':'hidden';}
-  input.addEventListener('input',autosize);
+  input.addEventListener('input',()=>{autosize();updatePop();});
+  // ---- slash-command popup ----
+  let popIndex=0,popItems=[];
+  function exactCommand(){const t=input.value.trim();const c=commandOf(t);return !!c&&(t.length>c.name.length+1||!c.args);}
+  function closePop(){$('#cmdpop').hidden=true;popItems=[];}
+  function updatePop(){
+    const t=input.value;const pop=$('#cmdpop');
+    if(!t.startsWith('/')||/\s/.test(t.trim())||t.indexOf('\n')>=0){closePop();return;}
+    const q=t.slice(1).toLowerCase();popItems=commands.filter(c=>c.name.indexOf(q)===0);
+    if(!popItems.length){closePop();return;}
+    popIndex=Math.min(popIndex,popItems.length-1);pop.textContent='';
+    popItems.forEach((c,i)=>{const it=h('div','ci'+(i===popIndex?' on':''));it.setAttribute('role','option');
+      it.append(h('span','cn','/'+c.name),h('span','ca',c.args||''),h('span','ch',c.help));
+      it.onmousedown=ev=>{ev.preventDefault();popIndex=i;pickPop();};pop.appendChild(it);});
+    pop.hidden=false;
+  }
+  function movePop(d){if(!popItems.length)return;popIndex=(popIndex+d+popItems.length)%popItems.length;updatePop();}
+  function pickPop(){const c=popItems[popIndex];if(!c)return;input.value='/'+c.name+(c.args?' ':'');closePop();autosize();input.focus();
+    if(!c.args)send();}
+  input.addEventListener('blur',()=>setTimeout(closePop,150));
   input.addEventListener('focus',()=>$('#composer').classList.add('focus'));
   input.addEventListener('blur',()=>$('#composer').classList.remove('focus'));
   $('#btn-send').onclick=()=>running?stopTask():send();
@@ -2190,7 +2503,7 @@ body:not(.view-admin) #admin{display:none}
     const items=savedSessions.filter(s=>s.preview).slice(0,4);
     if(!items.length){rec.appendChild(h('div','muted','還沒有做過的任務。完成第一個任務後，這裡可以一鍵接續。'));}
     items.forEach(s=>{const b=h('button','start'),i=h('span','ic');i.appendChild(icon('list'));
-      const tx=h('span');tx.append(h('span','sk',ago(s.mtime)),h('span','sv',s.preview));b.append(i,tx);
+      const tx=h('span');tx.append(h('span','sk',ago(s.mtime)),h('span','sv',s.title||s.preview));b.append(i,tx);
       b.onclick=()=>newConversation(s.id);rec.appendChild(b);});
   }
   $('#tile-running').onclick=()=>openDrawer();
@@ -2203,7 +2516,12 @@ body:not(.view-admin) #admin{display:none}
   $('#btn-drawer').onclick=()=>document.body.classList.contains('drawer-open')?closeDrawer():openDrawer();
   $('#drawer-close').onclick=closeDrawer;
   $('#btn-newtask').onclick=()=>newConversation();
-  $('#task-filter').addEventListener('input',renderTasks);
+  let searchTimer=null;
+  $('#task-filter').addEventListener('input',()=>{
+    renderTasks();clearTimeout(searchTimer);const q=$('#task-filter').value.trim();
+    if(q.length<2){searchHits=null;renderTasks();return;}
+    searchTimer=setTimeout(async()=>{try{searchHits=await api('/api/sessions?q='+encodeURIComponent(q));}catch(e){searchHits=[];}renderTasks();},300);
+  });
   async function refreshTasks(withSessions){
     try{liveConvs=await api('/api/conversations');}catch(e){return;}
     if(withSessions||!savedSessions.length){try{savedSessions=await api('/api/sessions');}catch(e){}}
@@ -2212,9 +2530,10 @@ body:not(.view-admin) #admin{display:none}
     $('#t-running').textContent=runningN;$('#t-waiting').textContent=waiting;
     renderTasks();if(document.body.classList.contains('landing'))renderLanding();
   }
-  function taskItem(title,meta,state,active,onclick){
+  function taskItem(title,meta,state,active,onclick,snippet){
     const d=h('div','task'+(active?' active':''));d.append(h('span','dot '+(state||'')));
-    const b=h('div','tb');b.append(h('div','tt',title),h('div','tm',meta));d.appendChild(b);d.onclick=onclick;return d;
+    const b=h('div','tb');b.append(h('div','tt',title));if(snippet)b.appendChild(h('div','snip',snippet));b.appendChild(h('div','tm',meta));
+    d.appendChild(b);d.onclick=onclick;return d;
   }
   function renderTasks(){
     const box=$('#task-list');box.textContent='';const q=($('#task-filter').value||'').trim().toLowerCase();
@@ -2222,14 +2541,21 @@ body:not(.view-admin) #admin{display:none}
     const groups=[['等你回應',c=>c.state==='waiting'],['進行中',c=>c.state==='running'],['這次開啟的',c=>c.state==='idle']];
     let shown=0;const liveSessions=new Set();
     groups.forEach(([label,test])=>{
-      const list=liveConvs.filter(c=>test(c)&&(c.preview||c.state!=='idle')&&match(c.preview));list.forEach(c=>liveSessions.add(c.session));
+      const list=liveConvs.filter(c=>test(c)&&(c.preview||c.state!=='idle')&&match((c.title||'')+' '+c.preview));list.forEach(c=>liveSessions.add(c.session));
       if(!list.length)return;box.appendChild(h('div','grp',label));
       list.forEach(c=>{shown++;const u=c.usage||{};
-        box.appendChild(taskItem(c.preview||'（尚未送出訊息）',ago(c.last_activity)+(u.total_tokens?'・'+fmtNum(u.total_tokens)+' tokens':''),c.state,c.id===conv,()=>openConversation(c)));});
+        box.appendChild(taskItem(c.title||c.preview||'（尚未送出訊息）',ago(c.last_activity)+(u.total_tokens?'・'+fmtNum(u.total_tokens)+' tokens':''),c.state,c.id===conv,()=>openConversation(c)));});
     });
-    const older=savedSessions.filter(s=>!liveSessions.has(s.id)&&match(s.preview||s.id)).slice(0,40);
+    if(searchHits){
+      const hits=searchHits.filter(s=>!liveSessions.has(s.id));
+      box.appendChild(h('div','grp','搜尋結果（'+hits.length+'）'));
+      hits.forEach(s=>{shown++;box.appendChild(taskItem(s.title||s.preview||s.id,ago(s.mtime),'',false,()=>newConversation(s.id),s.snippet));});
+      if(!hits.length)box.appendChild(h('div','muted','較早的任務裡沒有找到。'));
+      return;
+    }
+    const older=savedSessions.filter(s=>!liveSessions.has(s.id)&&match((s.title||'')+' '+(s.preview||s.id))).slice(0,40);
     if(older.length){box.appendChild(h('div','grp','較早的任務（點一下接續）'));
-      older.forEach(s=>{shown++;box.appendChild(taskItem(s.preview||s.id,ago(s.mtime),'',false,()=>newConversation(s.id)));});}
+      older.forEach(s=>{shown++;box.appendChild(taskItem(s.title||s.preview||s.id,ago(s.mtime),'',false,()=>newConversation(s.id)));});}
     if(!shown)box.appendChild(h('div','muted',q?'沒有符合「'+q+'」的任務。':'還沒有任務。按「新任務」開始。'));
   }
 
@@ -2266,6 +2592,11 @@ body:not(.view-admin) #admin{display:none}
     try{
       const tl=await api('/api/tools');
       box.appendChild(h('div','muted',tl.tools.length+' 個工具・沙箱 '+(tl.sandbox||'未啟用')+(tl.mcp_servers.length?'・MCP：'+tl.mcp_servers.map(sv=>sv.name+'（'+sv.tools+(sv.ok?'':'，未啟動')+'）').join('、'):'')));
+      try{const sk=await api('/api/skills');
+        box.appendChild(h('div','sub','技能（'+sk.length+'）'));
+        if(!sk.length)box.appendChild(h('div','muted','還沒有技能。把含 SKILL.md 的資料夾放進 .xharness/skills/，模型就會在任務符合時自己載入。'));
+        sk.forEach(k=>{const d=h('div','tool'),n=h('div','tn',k.name);n.appendChild(h('span','tag ro',k.source));d.append(n,h('div','td',k.description));box.appendChild(d);});
+      }catch(e){}
       [['會改東西（走審批）',t=>t.mutating],['唯讀',t=>!t.mutating]].forEach(([label,test])=>{
         const list=tl.tools.filter(test);if(!list.length)return;box.appendChild(h('div','sub',label));
         list.forEach(t=>{const d=h('div','tool'),n=h('div','tn',t.name);n.appendChild(h('span','tag'+(t.mutating?'':' ro'),t.source==='mcp'?'MCP・'+t.server:'內建'));
@@ -2707,7 +3038,8 @@ body:not(.view-admin) #admin{display:none}
     try{applyMeta(await api('/api/meta'));}
     catch(e){if(!gateOn)addError(e.message);return;}
     loadFiles();   // also decides whether the attach button is shown
-    refreshTasks(true);loadDayUsage();renderLanding();
+    refreshTasks(true);loadDayUsage();renderLanding();loadModels();
+    try{commands=await api('/api/commands');}catch(e){}
     input.focus();
   })();
 })();

@@ -35,6 +35,15 @@ class Context:
         self._services[key] = value
         return self.on_dispose(lambda: self._services.pop(key, None))
 
+    def replace(self, key: str, value: Any) -> Any:
+        """Swap a registered service for another (e.g. the model for this
+        conversation) and return the old one. The original registration's
+        disposer still removes whatever is there when its plugin unloads."""
+        if key not in self._services:
+            raise KeyError(f"service not found: {key}")
+        old, self._services[key] = self._services[key], value
+        return old
+
     def get(self, key: str) -> Any:
         """Get a required service. Missing keys raise."""
         if key not in self._services:

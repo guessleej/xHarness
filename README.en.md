@@ -16,7 +16,7 @@ Left to right: the workspace and the model endpoint feed xHarness; an operator g
 
 ## Why
 
-Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one developer can audit: about 10,100 lines of Python (package code, excluding 4,672 lines of tests), **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a 338-case test suite that finishes in about 27 seconds (most of it spent shutting down test HTTP servers, not computing).
+Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one developer can audit: about 11,200 lines of Python (package code, excluding 5,141 lines of tests), **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a 370-case test suite that finishes in about 30 seconds (most of it spent shutting down test HTTP servers, not computing).
 
 ## Features
 
@@ -105,6 +105,7 @@ xharness --resume 2026-08-22-ab12cd34   # continue a session
 | `memory_consolidate` | yes | Tidy one topic: find duplicates / contradictions / stale entries and merge; without `apply` it only returns the plan |
 | `security_scan` | no | Run bandit / pip-audit / gitleaks against a directory (missing scanners are skipped) |
 | `ask_user` | no | Put a 2-4 option question to the person and wait (they may also type their own answer); with nobody attached it says so at once instead of blocking |
+| `skill` | no | Load a skill (SKILL.md) in full, with the list of files beside it; the system prompt carries only each skill's name and one line |
 | `web_search` | configurable | Opens the DuckDuckGo results page in a real browser and returns up to 10 results as title / URL / snippet; present only when `[tools] browser` is set |
 | `browser_open` | configurable | Opens a page in a real browser and returns the rendered visible text (truncated at 40k); present only when `[tools] browser` is set |
 | `webfetch` | yes | Fetch an http(s) URL as readable text; **disabled by default** (`[tools] webfetch = true`) — enabling it is the only egress besides the model endpoint, and every fetch goes through approval |
@@ -239,6 +240,30 @@ The default system prompt also asks the model, when a task gives a relative date
 If nobody answers within 15 minutes or the task is stopped, the model is told there was no answer and not to ask again. Subagents do not get the tool: a parallel batch asking you questions at once would bury you, so they report what they are missing to the parent, which decides whether to ask.
 
 The default system prompt tells the model to use `ask_user` rather than end its turn with a question, and never to fill such a gap with an invented command, path or fact. In practice models do not always comply and often still ask in prose -- that works too (reply with your next message), it just loses the option buttons and is invisible to an unattended run. To make the tool stick, say it again in the project's `AGENTS.md`.
+
+## Skills, commands and long conversations
+
+**Skills**: a folder holding `SKILL.md` is a skill, in the same layout as Claude Code and Codex, so existing skills work unchanged. They are found in the working directory's `.xharness/skills/` or `.claude/skills/` (a person's own), the server directory's `.xharness/skills/` (site-wide) and `$XHARNESS_HOME/skills/` (this machine); on a name clash the earlier wins. The system prompt carries only names and one line each; the model loads a body and its file list with the `skill` tool when a task matches, so twenty skills cost a few hundred tokens. In testing granite does not always load one unprompted, the same compliance limit as `ask_user`; naming the skill in `AGENTS.md` is the reliable way.
+
+**Slash commands**: typing `/` in the composer opens the command list (arrow keys, Enter). Commands are handled by xHarness and never sent to the model; the terminal uses the same set.
+
+| Command | Does |
+|---|---|
+| `/compact` | Summarise older messages so a long conversation can go on |
+| `/model [name]` | Show the model, or switch to another configured one (also in the selector) |
+| `/skills` | List the available skills |
+| `/title [title]` | Show or change the conversation's title |
+| `/feedback up\|down [note]` | Rate the last reply (each reply also has buttons) |
+| `/export` | Download the conversation as Markdown |
+| `/new` `/stop` `/tools` `/memory` `/usage` `/help` | New task, stop, tools, memory, usage, all commands |
+
+Something that looks like a command but is not one, such as `/stop` in the terminal, is answered with "no such command" instead of being sent to the model. Measured: handed `/stop` as a request, xVITA reported editing two files without calling a single tool.
+
+**Long conversations**: with `context_tokens` set on a provider, once a prompt passes 80% of it xHarness has the same model summarise the older part before continuing; a context-overflow error is also answered by a summary first and by dropping old tool output only if that is not enough. The summary is in the session log, and a resumed conversation is rebuilt at the same point.
+
+**Switching models**: with several `[providers.*]`, a conversation's model can be changed from the composer or with `/model`. Each task's usage records which model ran it, so the usage report's self-hosted vs bought-in split follows the model actually used. A tier can be limited with `providers = [...]`, for example students to the on-premises model only.
+
+**Titles, search, export, ratings**: after the first task the conversation's own model writes a short title; the task-list search covers the requests, replies and titles of every earlier conversation; a conversation can be exported as Markdown. Each reply can be copied, rated up or down, and given a note. Ratings are a record for people and never reach the model; the usage report's health block counts them and lists the latest notes on poor answers.
 
 ## Long tasks that do not wedge themselves
 

@@ -2,6 +2,28 @@
 
 中文 | English below
 
+## 1.10.0 — 2026-10-21
+
+對照 DeepSeek Harness 補功能的第一批（共三批）：使用者每天會碰到的部分。
+
+- **技能（Skills）**：含 `SKILL.md` 的資料夾就是一個技能，格式與 Claude Code、Codex 相同。從工作目錄的 `.xharness/skills`／`.claude/skills`、伺服器目錄的 `.xharness/skills`、`$XHARNESS_HOME/skills` 與 `[skills] dirs` 找，同名時前者優先；`~/.claude/skills` 要 `claude_home = true` 才讀。system prompt 只放名稱與一句說明，模型用新的 `skill` 工具載入全文與附檔清單。
+- **斜線指令**：`/compact` `/model` `/skills` `/title` `/feedback` `/export` `/new` `/stop` `/tools` `/memory` `/usage` `/help`，網頁輸入框打 `/` 會跳出清單（方向鍵、Enter），終端機用同一套。指令由 xHarness 處理、不送給模型，執行紀錄寫進 session。看起來像指令卻不存在的字（例如終端機的 `/stop`）直接回「沒有這個指令」：實測 xVITA 收到 `/stop` 後回報「已修改兩個檔案」，其實一個工具都沒呼叫。
+- **模型摘要壓縮**：供應端設 `context_tokens` 後，prompt 超過 `[compaction] threshold`（預設八成）就先請同一個模型把較早的內容整理成摘要；遇到「超出 context」也先摘要、不夠才刪舊工具輸出。切點一定落在使用者訊息，不會拆散工具呼叫與結果；摘要寫進 session，接續時在同一位置重建。
+- **換模型**：網頁輸入框的選單或 `/model` 為這段對話換成設定檔裡的另一個供應端；`[web] model_switch` 可關閉，各層級可用 `providers = [...]` 限制。每個任務的用量記錄是哪個模型跑的，服務使用報告的「自建 vs 外購」與模型統計改為逐任務計算。
+- **標題、搜尋、匯出**：第一個任務完成後由這段對話的模型寫短標題（`[sessions] auto_title`）；任務清單的搜尋查所有舊對話的提問、回覆與標題；對話可匯出成 Markdown（時間以台北時間呈現）。
+- **回覆評價**：每則回覆底下可複製、按讚或倒讚、寫備註。評價寫進 session 但不回到模型；服務使用報告「健康與治理」列出讚、倒讚數與最近的倒讚備註，Word 報告同步呈現。
+- 修：編輯內容前後相同時不再顯示「+0 −0」的空預覽；測試裡的假金鑰改為執行時組合，避免機密掃描誤判。
+
+First of three batches closing the gap with DeepSeek Harness: what people touch every day.
+
+- **Skills**: a folder holding `SKILL.md` is a skill, in Claude Code's and Codex's layout. Found in the working directory's `.xharness/skills` / `.claude/skills`, the server directory's `.xharness/skills`, `$XHARNESS_HOME/skills` and `[skills] dirs`, earlier winning on a name clash; `~/.claude/skills` only with `claude_home = true`. The system prompt carries names and one line each; the model loads a body and its file list with the new `skill` tool.
+- **Slash commands**: `/compact` `/model` `/skills` `/title` `/feedback` `/export` `/new` `/stop` `/tools` `/memory` `/usage` `/help`, with a picker when `/` is typed in the composer; the terminal uses the same set. Commands are handled by xHarness, never sent to the model, and logged. Something that looks like a command but is not one (such as `/stop` in the terminal) is answered with "no such command": handed `/stop` as a request, xVITA reported editing two files without calling a tool.
+- **Model-written compaction**: with `context_tokens` on a provider, a prompt past `[compaction] threshold` (80% by default) has the same model summarise the older part first; a context overflow is also answered by a summary before old tool output is dropped. The cut is always at a person's message, so tool calls stay with their results; the summary is logged and rebuilt on resume.
+- **Switching models**: a conversation can move to another configured provider from the composer or with `/model`; `[web] model_switch` turns it off and `providers = [...]` limits a tier. Each task's usage records its model, and the usage report's self-hosted vs bought-in split and model counts are now per task.
+- **Titles, search, export**: after the first task the conversation's model writes a short title (`[sessions] auto_title`); the task list searches the requests, replies and titles of every earlier conversation; a conversation exports as Markdown (times in Taipei time).
+- **Ratings**: each reply can be copied, rated up or down and given a note. Ratings are logged but never reach the model; the usage report's health block (and the Word report) counts them and lists the latest notes on poor answers.
+- Fix: an edit whose old and new text are identical no longer shows an empty "+0 −0" preview; fake keys in tests are assembled at runtime so secret scanners do not flag them.
+
 ## 1.9.1 — 2026-10-21
 
 - 修 1.9.0 版面左右不對稱：寬螢幕預設展開任務清單、而且把內容推開，看起來就是固定左側欄；標題列的「新任務」與「檢視」又貼在畫面最左最右，跟置中的內容對不齊，右邊留一大塊空白。現在任務清單與檢視面板都是浮在頁面上的圓角卡片、預設收起，選了任務就收；寬螢幕打開時內容欄在剩下的空間重新置中。標題列、內容、輸入框對齊同一個寬度，收起時左右留白完全相同。

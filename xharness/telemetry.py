@@ -118,7 +118,15 @@ def telemetry_plugin(config: dict[str, Any] | None = None) -> Plugin:
         def persist(_payload: Any) -> None:
             session = ctx.optional("session")
             if session:
-                session.append({"type": "telemetry", **telemetry.report()})
+                # Which model did this task: a conversation can switch models,
+                # and the usage report charges each task to its own endpoint.
+                llm = ctx.optional("llm")
+                tags = {}
+                if llm is not None and getattr(llm, "model", None):
+                    from .llm import hosting_of
+
+                    tags = {"model": llm.model, "hosting": hosting_of(getattr(llm, "base_url", ""))}
+                session.append({"type": "telemetry", **telemetry.report(), **tags})
 
         ctx.on("agent/task-end", persist)
 
