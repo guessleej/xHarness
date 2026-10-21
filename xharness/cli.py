@@ -43,7 +43,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "users" manages accounts; "report" prints the service usage report; "eval <path>" runs a suite; "web" starts the local UI; "desktop" opens it in a native window; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; "usage" shows token history; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "users" manages accounts; "report" prints the service usage report; "eval <path>" runs a suite; "acp" serves an editor over the Agent Client Protocol; "web" starts the local UI; "desktop" opens it in a native window; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; "usage" shows token history; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -444,6 +444,11 @@ def main(argv: list[str] | None = None) -> int:
         return _run_users(args, config)
     if args.task and args.task[0] in ("report", "usage-report"):
         return _run_report(args, config)
+    if args.task and args.task[0] == "acp":
+        # Stdout belongs to the protocol from here on.
+        from .acp import run_acp
+
+        return run_acp(config)
     if args.task and args.task[0] == "web":
         approval_mode = "auto" if args.yes else (args.approve or config.approval)
         return serve(

@@ -16,6 +16,10 @@ from .sandbox import sandbox_plugin
 from .session import session_plugin
 from .skills import skills_plugin
 from .goal import goal_plugin
+from .hooks import hooks_plugin
+from .lsp import lsp_plugin
+from .schedule import schedule_plugin
+from .workflow import workflow_plugin
 from .tools.jobs import jobs_plugin
 from .tools.terminal import terminal_plugin
 from .subagent import subagent_plugin
@@ -62,12 +66,18 @@ def build_harness(
         harness.use("terminal", terminal_plugin())
     harness.use("jobs", jobs_plugin(getattr(config, "jobs", None)))
     harness.use("goal", goal_plugin())
+    if getattr(config, "hooks", None):
+        harness.use("hooks", hooks_plugin(config.hooks))
     harness.use("tool-todo", todo_tool_plugin)
     harness.use("tool-security", security_tool_plugin)
     harness.use("tool-ask", ask_tool_plugin)
     harness.use("skills", skills_plugin(getattr(config, "skills", None)))
     harness.use("telemetry", telemetry_plugin(config.telemetry))
     harness.use("subagent", subagent_plugin(config.subagent))
+    harness.use("workflow", workflow_plugin(config.subagent))
+    harness.use("schedule", schedule_plugin())
+    if (getattr(config, "lsp", None) or {}).get("enabled", True):
+        harness.use("lsp", lsp_plugin(config.lsp))
     if config.memory.get("enabled", True):
         harness.use("memory", memory_plugin(config.memory))
     if config.webfetch:

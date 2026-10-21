@@ -183,3 +183,17 @@ model = "your-model-id"
 # max_seconds = 7200           # 單一背景工作最長幾秒
 # [tools]
 # terminal = true              # 一直開著的 shell
+
+# ── Hooks、語言伺服器 ───────────────────────────────────────
+# Claude Code 的 hook 協定。只能在這裡設定：專案本身不能註冊 hook。
+# [hooks]
+# files = ["~/.claude/settings.json"]   # 有 "hooks" 的 Claude Code 設定檔
+# notify = ["/usr/local/bin/notify-turn"]   # 仿 Codex：每個任務結束後呼叫，參數是一段 JSON
+# [[hooks.PreToolUse]]
+# matcher = "Bash"
+# command = "/opt/policy/check-command.sh"
+# [lsp]
+# auto = true                  # 有安裝 pyright／pylsp／typescript-language-server／gopls／rust-analyzer 就用
+# [lsp.servers.java]
+# command = ["jdtls"]
+# extensions = [".java"]

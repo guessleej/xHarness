@@ -2,6 +2,30 @@
 
 中文 | English below
 
+## 1.12.0 — 2026-10-21
+
+對照 DeepSeek Harness 補功能的第三批：生態系。三批到此完成。
+
+- **Hooks**：照 Claude Code 的協定，現成的 hook 腳本不用改。`SessionStart`、`UserPromptSubmit`（補脈絡或擋下）、`PreToolUse`（放行、要求審批、拒絕）、`PostToolUse`（附註）、`Stop`（要求繼續，一個任務最多 3 次）、`PreCompact`（否決壓縮）；exit 2 擋下並把 stderr 給模型；比對器認得 Claude Code 的工具名稱。也支援 Codex 的 `notify`。只從操作者的設定檔載入，專案本身不能註冊 hook。
+- **工具斷路器**：同一工具在一個任務裡被拒絕 3 次（hook、審批、計畫模式），或同參數連續呼叫 12 次，就收起到任務結束並告知模型。實測 bash 被 hook 擋下時，granite 原本重試 37 次直到輪數上限，現在 3 次就換方法並說明做不到的部分。
+- **ACP**：`xharness acp` 讓 Zed 等支援 Agent Client Protocol 的編輯器直接使用：回覆串流、工具呼叫附種類與狀態、寫檔與編輯附差異、審批變成編輯器的許可提示（允許一次／一律允許／拒絕）、可取消。
+- **LSP**：新的 `lsp` 工具（定義、引用、型別說明、診斷、大綱），依副檔名自動啟動已安裝的語言伺服器並保持到對話結束，位置可只給行號與名稱。純標準函式庫的 JSON-RPC 客戶端。實測接 pylsp 每次查詢約 1 秒。
+- **提醒**：`schedule_add`／`schedule_list`／`schedule_cancel` 與 `/remind`；時間到以標明為提醒的新請求交給模型，可重複；寫進 session、接續時還原並補送錯過的；只在網頁介面開著對話時送出，終端機裡模型會說做不到。
+- **工作流程**：新的 `workflow` 工具，把有相依關係的步驟交給子代理依序執行、可平行，結果往下傳，失敗就跳過依賴它的步驟；檢查未知步驟與循環。
+- **新指令**：`/remind`、`/hooks`。
+- 修：`glob`／`grep` 搜尋不存在的目錄時回「沒有這個目錄」而不是「沒有符合」，讀檔失敗會提醒用相對路徑，system prompt 要求用相對路徑——實測 granite 打錯一長串絕對路徑後，被「沒有符合」誤導成以為檔案不存在。提醒請模型用提醒文字的語言回覆。
+
+Third of three batches closing the gap with DeepSeek Harness: the ecosystem. The three batches are complete.
+
+- **Hooks**: Claude Code's protocol, so existing hook scripts work unchanged. `SessionStart`, `UserPromptSubmit` (add context or block), `PreToolUse` (allow, ask, deny), `PostToolUse` (note), `Stop` (continue, at most 3 times a task), `PreCompact` (veto); exit 2 blocks with stderr given to the model; matchers know Claude Code's tool names. Codex's `notify` too. Loaded only from the operator's configuration; a repository cannot register a hook.
+- **Tool circuit breaker**: a tool refused 3 times in a task (hook, approval policy, plan mode), or called 12 times in a row with the same arguments, is withdrawn for the rest of the task and the model is told. Measured: with bash blocked by a hook granite retried it 37 times until the turn limit; now it changes approach after 3 and says what it could not do.
+- **ACP**: `xharness acp` lets editors that speak the Agent Client Protocol, such as Zed, use xHarness directly: streamed replies, tool calls with kind and status, diffs for writes and edits, approvals as the editor's permission prompts (allow once / always / reject), cancellation.
+- **LSP**: a new `lsp` tool (definition, references, hover, diagnostics, outline) that starts an installed language server for the file type and keeps it for the conversation; a position can be a line plus a name. A standard-library JSON-RPC client. Measured against pylsp: about one second per query.
+- **Reminders**: `schedule_add` / `schedule_list` / `schedule_cancel` and `/remind`; due reminders arrive as requests marked as reminders, optionally repeating; logged, restored on resume and caught up; delivered only while the Web UI holds the conversation, and in the terminal the model says it cannot set one.
+- **Workflows**: a new `workflow` tool runs steps with dependencies as subagents in order, in parallel where possible, passing results forward and skipping steps built on a failure; unknown steps and cycles are rejected.
+- **New commands**: `/remind`, `/hooks`.
+- Fix: `glob` / `grep` under a directory that does not exist now say so instead of "no matches", a failed read suggests a relative path, and the system prompt asks for relative paths -- measured: granite mistyped a long absolute path and, told "no files matched", concluded existing files were gone. Reminders ask for a reply in the reminder's own language.
+
 ## 1.11.0 — 2026-10-21
 
 對照 DeepSeek Harness 補功能的第二批：能力上限。

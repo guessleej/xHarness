@@ -16,7 +16,7 @@ Left to right: the workspace and the model endpoint feed xHarness; an operator g
 
 ## Why
 
-Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one developer can audit: about 12,300 lines of Python (package code, excluding 5,519 lines of tests), **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a 392-case test suite that finishes in about 32 seconds (most of it spent shutting down test HTTP servers, not computing).
+Agent harnesses tend to hard-wire one vendor's API and ship a large dependency tree. xHarness keeps the architecture idea — tools, the model adapter, the session log, and the agent loop wiring are all plugins over a shared context — at a size one developer can audit: about 13,800 lines of Python (package code, excluding 6,020 lines of tests), **zero runtime dependencies** (standard library only, including the SSE streaming client, the TOML config reader, and the MCP client), and a 411-case test suite that finishes in about 33 seconds (most of it spent shutting down test HTTP servers, not computing).
 
 ## Features
 
@@ -109,6 +109,9 @@ xharness --resume 2026-08-22-ab12cd34   # continue a session
 | `terminal` | yes | Run a command in a shell that stays open: `cd`, `export` and `source .venv/bin/activate` carry over; on a timeout the shell restarts and the model is told |
 | `job_start` `job_status` `job_wait` `job_stop` | start is approved | Long commands in the background (builds, tests, downloads) while the model keeps working; a finished job is announced with the next message |
 | `goal_done` | no | Only in goal mode: report the goal done or blocked |
+| `lsp` | no | Ask a language server: definition, references, hover, diagnostics, file outline |
+| `workflow` | yes | A multi-step plan with dependencies, run by subagents in order, independent steps in parallel |
+| `schedule_add` `schedule_list` `schedule_cancel` | no | Reminders within a conversation, delivered as a new request when due (Web UI) |
 | `web_search` | configurable | Opens the DuckDuckGo results page in a real browser and returns up to 10 results as title / URL / snippet; present only when `[tools] browser` is set |
 | `browser_open` | configurable | Opens a page in a real browser and returns the rendered visible text (truncated at 40k); present only when `[tools] browser` is set |
 | `webfetch` | yes | Fetch an http(s) URL as readable text; **disabled by default** (`[tools] webfetch = true`) — enabling it is the only egress besides the model endpoint, and every fetch goes through approval |
@@ -279,6 +282,30 @@ Something that looks like a command but is not one, such as `/stop` in the termi
 **@files**: typing `@` in the composer lists the working directory's files; the chosen file's text goes with the message (text files inside the working directory only, 20,000 characters each, 60,000 in all); `@picture.png` is attached as an image.
 
 **Images**: paste, drop or attach images in the composer (4 per message, 5 MB each). A provider with `vision = true` sees them directly; for one that cannot, `[vision] provider = "…"` names a model that turns each image into a written description first. In testing the xReadable OCR model on .70 transcribed an error screenshot word for word and granite worked out the troubleshooting steps from it. With neither, the model is told plainly that it cannot see the images instead of guessing.
+
+## Hooks, editors, language servers, reminders and workflows
+
+**Hooks**: Claude Code's hook protocol, so existing hook scripts work unchanged. `SessionStart`, `UserPromptSubmit` (add context or block the request), `PreToolUse` (allow without the approval prompt, force the prompt, or deny), `PostToolUse` (add a note after the result), `Stop` (keep the agent going, at most 3 times a task) and `PreCompact` (veto). Scripts get JSON on stdin; exit 2 blocks and its stderr is the reason the model sees; a matcher may say `Bash` or `bash`. Codex's `notify` is supported too. Hooks come **only from the operator's configuration** (`[[hooks.PreToolUse]]`, or `[hooks] files = ["~/.claude/settings.json"]`); a repository the agent works on cannot register one, or any checked-out project could run commands on the server.
+
+```toml
+[[hooks.PreToolUse]]
+matcher = "Bash"
+command = "/opt/policy/check-command.sh"
+```
+
+**Refused tools stop burning turns**: a tool refused 3 times in a task (by a hook, the approval policy or plan mode), or called 12 times in a row with the same arguments, is withdrawn for the rest of that task and the model is told to try another way or say what it could not do. Measured: with bash blocked by a hook, granite retried it 37 times until the turn limit; with the breaker it changed approach after 3 and said plainly what it could not do.
+
+**Editors (ACP)**: `xharness acp` lets an editor that speaks the Agent Client Protocol, such as Zed, use xHarness directly: streamed replies, every tool call shown in the editor (with a diff for writes and edits), and approvals as the editor's permission prompts (allow once, always allow, reject). Zed:
+
+```json
+"agent_servers": { "xHarness": { "command": "xharness", "args": ["acp"] } }
+```
+
+**Language servers (LSP)**: the `lsp` tool starts an installed server for the file's language on first use (pyright, pylsp, typescript-language-server, gopls, rust-analyzer) and keeps it for the conversation: definition, references, hover, diagnostics and outline. A position can be a line plus the name on it; no column counting. Measured against pylsp on this repository: about one second per query. `[lsp.servers.<name>]` configures others.
+
+**Reminders**: `/remind 30 check the training run`, or ask the model to look again in half an hour (it uses `schedule_add`). When due, the reminder arrives as a new request marked as a reminder rather than something a person typed; it can repeat every N minutes for a set number of times. Reminders are in the session log, restored when a conversation is resumed and caught up if they came due meanwhile. They need the Web UI holding the conversation; in the terminal the model says it cannot set one instead of promising.
+
+**Workflows**: with `workflow` the model breaks work into steps with dependencies (read three modules, then design the change, then update code and tests in parallel, then review), run by subagents in order with independent steps in parallel; each step receives the results of the steps it depends on, and a failed step skips everything built on it.
 
 ## Long tasks that do not wedge themselves
 

@@ -16,13 +16,19 @@ def _resolve(cwd: str, path: str) -> str:
     return path if os.path.isabs(path) else os.path.join(cwd, path)
 
 
+def _not_found_hint(path: str, ctx: ToolContext) -> str:
+    if os.path.exists(path):
+        return ""
+    return f" (the working directory is {ctx.cwd}; use a path relative to it)"
+
+
 def _read(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     path = _resolve(ctx.cwd, str(args.get("path") or ""))
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:
             lines = handle.read().split("\n")
     except OSError as error:
-        return ToolResult(f"cannot read {path}: {error}", is_error=True)
+        return ToolResult(f"cannot read {path}: {error}{_not_found_hint(path, ctx)}", is_error=True)
     offset = max(1, int(args.get("offset") or 1))
     limit = min(int(args.get("limit") or MAX_READ_LINES), MAX_READ_LINES)
     window = lines[offset - 1 : offset - 1 + limit]
@@ -91,7 +97,7 @@ def _edit(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         with open(path, encoding="utf-8") as handle:
             text = handle.read()
     except OSError as error:
-        return ToolResult(f"cannot read {path}: {error}", is_error=True)
+        return ToolResult(f"cannot read {path}: {error}{_not_found_hint(path, ctx)}", is_error=True)
     count = text.count(old)
     if count == 0:
         return ToolResult(f"old_string not found in {path}", is_error=True)

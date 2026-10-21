@@ -16,7 +16,7 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：�
 
 ## 為什麼做這個
 
-多數 agent harness 綁死單一廠商 API，還拖著龐大的相依樹。xHarness 保留架構核心——工具、模型 adapter、session 記錄、agent 迴圈的組裝全部都是掛在共享 context 上的插件——但把規模控制在一個開發者審計得完：約 12,300 行 Python（套件程式碼，不含 5,519 行測試）、**零執行期相依**（純標準函式庫，含 SSE 串流client、TOML 設定讀取與 MCP client），392 個測試約 32 秒跑完（多數時間花在關閉測試用的 HTTP 伺服器，不是在算）。
+多數 agent harness 綁死單一廠商 API，還拖著龐大的相依樹。xHarness 保留架構核心——工具、模型 adapter、session 記錄、agent 迴圈的組裝全部都是掛在共享 context 上的插件——但把規模控制在一個開發者審計得完：約 13,800 行 Python（套件程式碼，不含 6,020 行測試）、**零執行期相依**（純標準函式庫，含 SSE 串流client、TOML 設定讀取與 MCP client），411 個測試約 33 秒跑完（多數時間花在關閉測試用的 HTTP 伺服器，不是在算）。
 
 ## 特色
 
@@ -109,6 +109,9 @@ xharness --resume 2026-08-22-ab12cd34   # 接續 session
 | `terminal` | 是 | 在一個一直開著的 shell 執行指令：`cd`、`export`、`source .venv/bin/activate` 會留到下一次；逾時就重開並告知模型 |
 | `job_start` `job_status` `job_wait` `job_stop` | 啟動走審批 | 長指令丟到背景跑（建置、測試、下載），模型可以繼續做事，完成時下一則訊息會告訴它 |
 | `goal_done` | 否 | 只在目標模式出現：回報目標完成或卡住 |
+| `lsp` | 否 | 問語言伺服器：定義在哪、所有引用、型別說明、錯誤與警告、檔案大綱 |
+| `workflow` | 是 | 有先後順序的多步驟計畫：用子代理照相依關係執行，沒相依的同時跑 |
+| `schedule_add` `schedule_list` `schedule_cancel` | 否 | 對話內的提醒：時間到時以新請求交給模型（網頁介面） |
 | `web_search` | 依設定 | 在真瀏覽器開 DuckDuckGo 結果頁，回傳最多 10 筆標題／網址／摘要；`[tools] browser` 設了才有 |
 | `browser_open` | 依設定 | 真瀏覽器開頁、回傳渲染後可見文字（40k 字截斷）；`[tools] browser` 設了才有 |
 | `webfetch` | 是 | 抓取 http(s) 網頁並轉成可讀文字；**預設關閉**（`[tools] webfetch = true` 才開）——開了它才會有模型端點以外的對外連線，且每次抓取都走審批 |
@@ -268,6 +271,30 @@ LDAP 用戶端是為了這件事寫的，只做一件事——驗證這個人的
 **@檔案**：輸入框打 `@` 會列出工作目錄的檔案，選了之後送出，檔案內容會跟著這則訊息給模型（只限工作目錄裡的文字檔，單檔 2 萬字、合計 6 萬字）；`@圖片.png` 會當成圖片附上。
 
 **看圖**：輸入框可以貼上、拖進或附加圖片（每則最多 4 張、每張 5 MB）。供應端設 `vision = true` 的模型直接看圖；看不懂圖的模型，可以用 `[vision] provider = "…"` 指定一個看得懂的模型先把圖轉成文字描述，再交給它。實測 .70 的 xReadable OCR 模型把一張錯誤畫面一字不差轉成文字，granite 再據此給出排查步驟。兩者都沒有時，模型會被明白告知它看不到圖片，而不是瞎猜。
+
+## Hooks、編輯器、語言伺服器、提醒與工作流程
+
+**Hooks**：照 Claude Code 的 hook 協定，現成的 hook 腳本不用改就能用。支援 `SessionStart`、`UserPromptSubmit`（補充脈絡或擋下請求）、`PreToolUse`（放行時跳過審批、要求審批、或拒絕）、`PostToolUse`（在結果後附註給模型）、`Stop`（要模型繼續，一個任務最多 3 次）、`PreCompact`（否決壓縮）。腳本從 stdin 收到 JSON，exit 2 代表擋下並把 stderr 當理由告訴模型；比對器寫 `Bash` 或 `bash` 都可以。也支援 Codex 的 `notify`：每個任務結束後呼叫外部程式。hooks **只從操作者的設定檔來**（`[[hooks.PreToolUse]]` 或 `[hooks] files = ["~/.claude/settings.json"]`），agent 正在處理的專案不能自己註冊 hook，否則任何下載下來的專案都能在伺服器上執行指令。
+
+```toml
+[[hooks.PreToolUse]]
+matcher = "Bash"
+command = "/opt/policy/check-command.sh"
+```
+
+**被拒絕的工具不再空轉**：同一個工具在一個任務裡被拒絕 3 次（hook、審批、計畫模式），或同樣參數連續呼叫 12 次，這個任務剩下的時間就收起來，並告訴模型改用別的方法或直接說做不到。實測：bash 被 hook 擋下時，granite 原本重試了 37 次直到輪數上限；加上這個斷路器後，3 次就換方法，並如實說明做不到的部分。
+
+**編輯器（ACP）**：`xharness acp` 讓支援 Agent Client Protocol 的編輯器（例如 Zed）直接使用 xHarness：回覆即時串流、每個工具呼叫都顯示在編輯器裡（寫檔與編輯附上差異）、需要許可的動作變成編輯器的許可提示（允許一次、一律允許、拒絕）。Zed 的設定：
+
+```json
+"agent_servers": { "xHarness": { "command": "xharness", "args": ["acp"] } }
+```
+
+**語言伺服器（LSP）**：`lsp` 工具會在第一次用到時，依副檔名啟動已安裝的語言伺服器（pyright、pylsp、typescript-language-server、gopls、rust-analyzer），整段對話保持開著。可以查定義、所有引用、型別說明、錯誤與警告、檔案大綱。位置可以只給行號和名稱，不用數欄位。實測接 pylsp 查本專案的程式碼，每次查詢約 1 秒。也可以用 `[lsp.servers.<名稱>]` 自己指定。
+
+**提醒**：`/remind 30 檢查訓練進度`，或請模型「半小時後幫我看一下背景工作」（它會用 `schedule_add`）。時間到時，提醒會以新的請求交給模型，並標明是提醒、不是人打的；可以設定重複（每 N 分鐘、共幾次）。提醒寫進 session 記錄，接續舊對話時會還原，錯過的也會補送。提醒要靠網頁介面開著這段對話才會送出；在終端機裡模型會直接說它做不到，不會亂答應。
+
+**工作流程**：模型可以用 `workflow` 把工作拆成有相依關係的步驟（例如「讀三個模組 → 設計修改 → 改程式與改測試同時進行 → 檢查」），由子代理依序執行，沒有相依的步驟同時跑，每一步會收到它所依賴步驟的結果；有一步失敗，依賴它的步驟就跳過，不會在錯誤的基礎上繼續。
 
 ## 長任務不會自己卡死
 

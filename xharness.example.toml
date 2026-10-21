@@ -186,3 +186,17 @@ model = "your-model-id"
 # max_seconds = 7200
 # [tools]
 # terminal = true              # the shell that stays open between commands
+
+# ── Hooks, language servers ───────────────────────────────────
+# Claude Code hook protocol. Only from here: a repository cannot register hooks.
+# [hooks]
+# files = ["~/.claude/settings.json"]   # Claude Code settings files with a "hooks" key
+# notify = ["/usr/local/bin/notify-turn"]   # Codex-style: called after every task with one JSON argument
+# [[hooks.PreToolUse]]
+# matcher = "Bash"
+# command = "/opt/policy/check-command.sh"
+# [lsp]
+# auto = true                  # use pyright / pylsp / typescript-language-server / gopls / rust-analyzer when installed
+# [lsp.servers.java]
+# command = ["jdtls"]
+# extensions = [".java"]

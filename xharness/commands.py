@@ -254,6 +254,41 @@ def _jobs(host: CommandHost, _args: str) -> CommandResult:
                          data={"jobs": [j.public() for j in jobs]})
 
 
+def _remind(host: CommandHost, args: str) -> CommandResult:
+    import time as _time
+
+    scheduler = host.ctx.optional("schedule")
+    if scheduler is None or not scheduler.deliverable:
+        return CommandResult("提醒只在網頁介面開著這段對話時才會送出，這裡無法使用。", ok=False)
+    minutes, _, message = args.strip().partition(" ")
+    try:
+        value = float(minutes)
+    except ValueError:
+        value = 0
+    if value < 1 or not message.strip():
+        if not args.strip():
+            pending = scheduler.pending()
+            if not pending:
+                return CommandResult("沒有待送的提醒。用法：/remind 30 檢查訓練進度")
+            return CommandResult("\n".join(f"{r.id}　{r.public()['due_local']}　{r.message}" for r in pending))
+        return CommandResult("用法：/remind 分鐘 要做的事，例如 /remind 30 檢查訓練進度", ok=False)
+    try:
+        reminder = scheduler.add(message.strip()[:1000], _time.time() + value * 60)
+    except ValueError as error:
+        return CommandResult(str(error), ok=False)
+    return CommandResult(f"好，{reminder.public()['due_local']} 會把「{reminder.message}」交給模型（{reminder.id}）。")
+
+
+def _hooks(host: CommandHost, _args: str) -> CommandResult:
+    runner = host.ctx.optional("hooks")
+    if not runner:
+        return CommandResult("沒有設定 hooks。在設定檔的 [hooks] 加上 Claude Code 的 settings 檔或 [[hooks.PreToolUse]]。")
+    lines = [f"{h.event}　{h.matcher or '*'}　（{'設定檔' if h.source == 'config' else os.path.basename(h.source)}）" for h in runner.hooks]
+    if runner.notify_argv:
+        lines.append("notify　每個任務結束後通知")
+    return CommandResult("\n".join(lines))
+
+
 def _new(_host: CommandHost, _args: str) -> CommandResult:
     return CommandResult("開始新的任務。", action="new")
 
@@ -275,6 +310,8 @@ COMMANDS: dict[str, Command] = {c.name: c for c in (
     Command("plan", "[on|off]", "計畫模式：先看、提計畫，你核准後才動手", _plan),
     Command("goal", "[--rounds N] 目標", "目標模式：一輪接一輪做到完成或卡住為止", _goal),
     Command("jobs", "", "列出背景工作", _jobs),
+    Command("remind", "分鐘 內容", "幾分鐘後把一件事交給模型（網頁介面）", _remind, surfaces=("web",)),
+    Command("hooks", "", "列出設定的 hooks", _hooks),
     Command("title", "[標題]", "看或修改這段對話的標題", _title),
     Command("feedback", "up|down [備註]", "評價上一則回覆", _feedback),
     Command("export", "", "把這段對話匯出成 Markdown", _export),

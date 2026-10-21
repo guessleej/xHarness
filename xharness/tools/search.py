@@ -48,8 +48,20 @@ def _root(args: dict[str, Any], ctx: ToolContext) -> str:
     return raw if os.path.isabs(raw) else os.path.join(ctx.cwd, raw)
 
 
+def _missing_root(root: str, ctx: ToolContext) -> ToolResult | None:
+    """A search under a directory that does not exist is an error, not "no matches":
+    a model that mistyped a long absolute path otherwise concludes the files are gone."""
+    if os.path.isdir(root):
+        return None
+    return ToolResult(f"no such directory: {root}. The working directory is {ctx.cwd}; "
+                      "paths relative to it are safer than absolute ones.", is_error=True)
+
+
 def _glob(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     root = _root(args, ctx)
+    missing = _missing_root(root, ctx)
+    if missing:
+        return missing
     regex = glob_to_regex(str(args.get("pattern") or ""))
     matches: list[str] = []
     for file in _walk(root):
@@ -87,6 +99,9 @@ def _grep(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     except re.error as error:
         return ToolResult(f"invalid regex: {error}", is_error=True)
     root = _root(args, ctx)
+    missing = _missing_root(root, ctx)
+    if missing:
+        return missing
     include = glob_to_regex(str(args["include"])) if args.get("include") else None
     results: list[str] = []
     for file in _walk(root):

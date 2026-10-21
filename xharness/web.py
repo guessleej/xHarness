@@ -236,6 +236,8 @@ class Conversation:
             "goal": (self.harness.ctx.optional("goal").public() if self.harness.ctx.optional("goal") else None),
             "jobs": [job.public() for job in (self.harness.ctx.optional("jobs").jobs.values()
                                               if self.harness.ctx.optional("jobs") else [])],
+            "reminders": [r.public() for r in (self.harness.ctx.optional("schedule").pending()
+                                               if self.harness.ctx.optional("schedule") else [])],
             "ratings": {str(k): v for k, v in self.ratings.items()},
             "usage": self.usage(),
             "created": self.created,
@@ -279,6 +281,39 @@ class WebApp:
         #: Recorded for the security self-check, which has to know how we are exposed.
         self.bound_host: str | None = None
         self.has_token = False
+
+    def tick_reminders(self) -> int:
+        """Send due reminders to idle conversations; returns how many fired."""
+        with self.lock:
+            convs = list(self.conversations.values())
+        fired = 0
+        for conv in convs:
+            scheduler = conv.harness.ctx.optional("schedule")
+            if scheduler is None or conv.running:
+                continue
+            due = scheduler.take_due()
+            if not due:
+                continue
+            text = "\n".join(f"[提醒 {r.id}] {r.message}" for r in due)
+            note = ("This request is a reminder you set earlier with schedule_add; nobody typed it just now. "
+                    "Do what it says, then report briefly, in the language and script of the reminder text.")
+            if self.send(conv, text, note=note):
+                fired += len(due)
+            else:   # became busy in between: put them back for the next tick
+                for r in due:
+                    scheduler.add(r.message, r.due, r.every_minutes, r.remaining, record=False)
+        return fired
+
+    def start_reminders(self, interval: float = 15.0) -> None:
+        def loop() -> None:
+            while not getattr(self, "_closing", False):
+                try:
+                    self.tick_reminders()
+                except Exception as error:  # noqa: BLE001 - the ticker must outlive a bad reminder
+                    print(f"[xharness] reminders: {scrub(error)}", file=sys.stderr)
+                time.sleep(interval)
+
+        threading.Thread(target=loop, name="xharness-reminders", daemon=True).start()
 
     def start_channels(self) -> None:
         """Mount the channels named in [channels.*]; a bad channel config is fatal on purpose."""
@@ -389,6 +424,14 @@ class WebApp:
         harness.ctx.on("subagent/start", child_start)
         harness.ctx.on("subagent/end", child_end)
         harness.ctx.on("jobs/changed", lambda job: conv.push({"type": "job", **job}))
+        harness.ctx.on("workflow/start", lambda info: conv.push({"type": "workflow", "state": "start", "steps": info["steps"]}))
+        harness.ctx.on("workflow/end", lambda info: conv.push({"type": "workflow", "state": "end", "ok": info["ok"]}))
+        scheduler = harness.ctx.optional("schedule")
+        if scheduler is not None:
+            scheduler.deliverable = True    # this server delivers them (see tick_reminders)
+            scheduler.on_change = lambda items: conv.push({"type": "reminders", "items": items})
+            if resume:
+                scheduler.restore(SessionLog.load(resume, principal_name(user)))
         harness.ctx.on("agent/compacted", lambda result: conv.push({
             "type": "compacted", "reason": result["reason"], "replaced": result["replaced"],
             "kept": result["kept"], "summary": result["summary"]}))
@@ -442,7 +485,7 @@ class WebApp:
         return save_images([i for i in items if isinstance(i, dict)], conv.agent.options.cwd or os.getcwd())
 
     def send(self, conv: Conversation, text: str, images: list[str] | None = None,
-             goal: dict[str, Any] | None = None) -> bool:
+             goal: dict[str, Any] | None = None, note: str | None = None) -> bool:
         with conv.cond:
             if conv.running:
                 return False
@@ -451,7 +494,8 @@ class WebApp:
         conv.preview = text[:80]
         conv.requests += 1
         turn = conv.requests
-        conv.push({"type": "user", "text": text, "turn": turn, "images": len(images or []), "goal": bool(goal)})
+        conv.push({"type": "user", "text": text, "turn": turn, "images": len(images or []), "goal": bool(goal),
+                   "reminder": bool(note)})
 
         def run() -> None:
             try:
@@ -462,7 +506,8 @@ class WebApp:
                 if goal is not None:
                     answer = run_goal(conv.agent, text, int(goal.get("rounds") or 0) or 5, on_event=conv.push)
                 else:
-                    answer = conv.agent.run(text, extra_context=attached, images=(images or []) + pictures)
+                    extra = "\n\n".join(part for part in (note, attached) if part) or None
+                    answer = conv.agent.run(text, extra_context=extra, images=(images or []) + pictures)
                 conv.push({"type": "done", "answer": answer, "usage": conv.usage(), "turn": turn})
                 if not conv.title and (getattr(self.config, "sessions", None) or {}).get("auto_title", True):
                     self._name(conv, text)
@@ -650,8 +695,15 @@ class WebApp:
         if denied:
             items = [item for item in items if item["name"] not in denied]
         sandbox = harness.ctx.optional("sandbox")
+        runner = harness.ctx.optional("hooks")
+        hooks = [{"event": h.event, "matcher": h.matcher or "*",
+                  "source": "設定檔" if h.source == "config" else os.path.basename(h.source)}
+                 for h in (runner.hooks if runner else [])]
+        lsp = harness.ctx.optional("lsp")
         return {"tools": items, "mcp_servers": servers, "sandbox": sandbox.name if sandbox else None,
-                "denied": sorted(denied)}
+                "denied": sorted(denied), "hooks": hooks,
+                "notify": bool(runner and runner.notify_argv),
+                "language_servers": [{"name": n, "extensions": e} for n, _c, e in (lsp.servers if lsp else [])]}
 
     def memory_index(self) -> list[dict[str, Any]]:
         """Read-only view of what the agent remembers, straight from disk."""
@@ -738,6 +790,7 @@ class WebApp:
         )
 
     def dispose(self) -> None:
+        self._closing = True
         with self.lock:
             convs = list(self.conversations.values())
         for conv in convs:
@@ -1163,6 +1216,11 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     ok = bool(result and result.ok)
                     self._json(200 if ok else 400, {"ok": ok, "text": result.text if result else "", **(result.data if result else {})})
                     return
+                if parts[3] == "reminders":
+                    scheduler = conv.harness.ctx.optional("schedule")
+                    done = scheduler.cancel(str(body.get("cancel") or "")) if scheduler else None
+                    self._json(200 if done else 404, {"ok": bool(done)})
+                    return
                 if parts[3] == "jobs":
                     manager = conv.harness.ctx.optional("jobs")
                     job = manager.stop(str(body.get("stop") or "")) if manager else None
@@ -1281,6 +1339,7 @@ def start_server(
         app.bound_host = bare
         app.has_token = bool(token)
         app.start_channels()
+        app.start_reminders()
     elif bare not in LOOPBACK_HOSTS:
         # A second listener on the same app (the desktop window also serving as a
         # fleet node): the security page must report the exposed binding, not the
@@ -1973,7 +2032,7 @@ body:not(.view-admin) #admin{display:none}
       <div class="seg" role="tablist">
         <button class="on" data-rv="changes">變更<span class="cnt" id="rv-changes-cnt"></span></button>
         <button data-rv="files">檔案</button>
-        <button data-rv="jobs">背景<span class="cnt" id="rv-jobs-cnt"></span></button>
+        <button data-rv="jobs">背景與提醒<span class="cnt" id="rv-jobs-cnt"></span></button>
         <button data-rv="tools">工具</button>
         <button data-rv="memory">記憶</button>
       </div>
@@ -2068,7 +2127,7 @@ body:not(.view-admin) #admin{display:none}
   let conv=null,es=null,token=null,me=null,admin=false,gateOn=false,meta=null;
   let view='chat',convPreview='',convTitle='',convSession='',convState='idle',running=false;
   let commands=[],models={providers:[],switchable:false},pendingProvider='',searchHits=null,lastAiEl=null,knownRatings={};
-  let planOn=false,turnWasPlan=false,jobs={},pendingImages=[];
+  let planOn=false,turnWasPlan=false,jobs={},pendingImages=[],reminders=[];
   let assistantEl=null,assistantText='',stepsBox=null,composing=false;
   const rows={};          // call id -> step row
   let changes=[];         // change previews for the open conversation
@@ -2198,7 +2257,9 @@ body:not(.view-admin) #admin{display:none}
     todo_write:['list','更新待辦清單'],security_scan:['shield','資安掃描'],ask_user:['help','問你一個問題'],
     subagent:['users','交給子代理'],subagent_batch:['users','交給多個子代理'],
     terminal:['term','終端機'],job_start:['term','背景執行'],job_status:['list','查看背景工作'],job_wait:['list','等背景工作'],
-    job_stop:['stop','停止背景工作'],goal_done:['check','回報目標'],skill:['layers','載入技能']};
+    job_stop:['stop','停止背景工作'],goal_done:['check','回報目標'],skill:['layers','載入技能'],
+    lsp:['search','查程式碼'],workflow:['users','工作流程'],schedule_add:['list','設提醒'],schedule_list:['list','查看提醒'],
+    schedule_cancel:['x','取消提醒']};
   function parseArgs(raw){
     try{const o=JSON.parse(raw||'{}');return o&&typeof o==='object'?o:{};}
     catch(e){const o={};String(raw||'').replace(/"(path|pattern|command|url|query|name|task)"\s*:\s*"((?:[^"\\]|\\.)*)/g,(_,k,v)=>{o[k]=v.replace(/\\n/g,' ').replace(/\\"/g,'"');});return o;}
@@ -2208,7 +2269,9 @@ body:not(.view-admin) #admin{display:none}
     if(!k){if(name.indexOf('memory')===0)k=['bookmark','記憶'];
       else if(name.indexOf('mcp__')===0){const p=name.split('__');k=['plug','MCP '+(p[1]||'')+'・'+p.slice(2).join('__')];}
       else k=['tool',name];}
-    let target=a.path||a.pattern||a.command||a.url||a.query||a.name||a.id||(a.task?String(a.task):'')||(a.summary?String(a.summary):'')||'';
+    let target=a.path||a.pattern||a.command||a.url||a.query||a.name||a.id||a.message||(a.task?String(a.task):'')||(a.summary?String(a.summary):'')||
+      (Array.isArray(a.steps)?a.steps.length+' 個步驟':'')||'';
+    if(name==='lsp'&&a.action)target=a.action+' '+(a.path||'')+(a.symbol?' '+a.symbol:'');
     target=String(target).replace(/\s+/g,' ');if(target.length>90)target=target.slice(0,90)+'…';
     return {icon:k[0],verb:k[1],target};
   }
@@ -2227,7 +2290,8 @@ body:not(.view-admin) #admin{display:none}
     b.title=running?'停止這個任務':'送出';b.setAttribute('aria-label',b.title);
   }
   function setUsage(u){if(!u)return;$('#conv-use').textContent=fmtNum(u.total_tokens)+' tokens・'+(u.tool_calls||0)+' 個步驟';}
-  function addUser(text,images){const w=h('div','m-user');const col=h('div');col.appendChild(h('div','bubble',text));
+  function addUser(text,images,reminder){const w=h('div','m-user');const col=h('div');
+    if(reminder)col.appendChild(h('div','att','提醒時間到，自動送出'));col.appendChild(h('div','bubble',text));
     if(images)col.appendChild(h('div','att','附上 '+images+' 張圖片'));w.appendChild(col);transcript.appendChild(w);toBottom(true);}
   function addNote(text,ic){const n=h('div','m-note');if(ic)n.appendChild(icon(ic));n.appendChild(document.createTextNode(text));transcript.appendChild(n);toBottom();}
   function addError(text){transcript.appendChild(h('div','m-error',text));toBottom(true);}
@@ -2298,7 +2362,13 @@ body:not(.view-admin) #admin{display:none}
   }
   function renderJobs(){
     const box=$('#rv-jobs');box.textContent='';const list=Object.values(jobs);
-    const live=list.filter(j=>j.state==='running').length;$('#rv-jobs-cnt').textContent=live?String(live):'';
+    const live=list.filter(j=>j.state==='running').length+reminders.length;$('#rv-jobs-cnt').textContent=live?String(live):'';
+    if(reminders.length){box.appendChild(h('div','sub','提醒（'+reminders.length+'）'));
+      reminders.forEach(r=>{const c=h('div','job'),hd=h('div','job-h');hd.append(h('span','pill pending',r.due_local),h('span','c',r.message));
+        const x=h('button','linkbtn','取消');x.onclick=async()=>{try{await api('/api/conversations/'+conv+'/reminders',{method:'POST',body:{cancel:r.id}});}catch(e){toast(e.message,true);}};hd.appendChild(x);
+        c.append(hd,h('div','m',r.id+(r.every_minutes?'・每 '+r.every_minutes+' 分鐘，還剩 '+r.remaining+' 次':'')));box.appendChild(c);});
+      if(list.length)box.appendChild(h('div','sub','背景工作'));}
+    if(!list.length&&reminders.length)return;
     if(!list.length){const e=h('div','empty');e.append(h('b',null,'沒有背景工作'),document.createTextNode('模型遇到建置、測試、下載這類長指令時，會用 job_start 丟到背景執行，這裡可以看進度和停止。'));box.appendChild(e);return;}
     list.slice().reverse().forEach(j=>{const c=h('div','job'),hd=h('div','job-h');hd.append(h('span','pill '+j.state,JOB_WORDS[j.state]||j.state),h('span','c',j.command));
       if(j.state==='running'){const st=h('button','linkbtn','停止');st.onclick=async()=>{try{await api('/api/conversations/'+conv+'/jobs',{method:'POST',body:{stop:j.id}});}catch(e){toast(e.message,true);}};hd.appendChild(st);}
@@ -2431,7 +2501,7 @@ body:not(.view-admin) #admin{display:none}
 
   function handle(ev){
     const t=ev.type;
-    if(t==='user'){showLanding(false);closeSteps();addUser(ev.text,ev.images);setState('running');turnWasPlan=planOn;if(!convPreview)setTitle(ev.text);}
+    if(t==='user'){showLanding(false);closeSteps();addUser(ev.text,ev.images,ev.reminder);setState('running');turnWasPlan=planOn;if(!convPreview)setTitle(ev.text);}
     else if(t==='history'){showLanding(false);if(ev.role==='user'){addUser(ev.text);if(!convPreview)setTitle(ev.text);}
       else{const a=h('div','m-ai');a.appendChild(md(ev.text));transcript.appendChild(a);replyBar(a,ev.turn,ev.text);}}
     else if(t==='compacted')compactedNote(ev);
@@ -2439,6 +2509,9 @@ body:not(.view-admin) #admin{display:none}
     else if(t==='goal')goalEvent(ev);
     else if(t==='job')jobEvent(ev);
     else if(t==='attached')addNote('已附加：'+ev.files.join('、'),'file');
+    else if(t==='reminders'){reminders=ev.items||[];renderJobs();}
+    else if(t==='workflow'){if(ev.state==='start')addNote('工作流程開始：'+ev.steps.length+' 個步驟（'+ev.steps.join('、')+'），沒有相依的步驟會同時進行。','users');
+      else addNote('工作流程結束：'+(ev.ok?'全部完成':'有步驟沒有完成，請看結果'),ev.ok?'check':'warn');}
     else if(t==='title'){convTitle=ev.title||'';showTitle();refreshTasks();}
     else if(t==='model')setModelShown(ev.provider,ev.model);   // the command block or a toast already says so
     else if(t==='delta'){
@@ -2479,12 +2552,12 @@ body:not(.view-admin) #admin{display:none}
   }
   function resetThread(){
     transcript.textContent='';assistantEl=null;assistantText='';stepsBox=null;changes=[];lastAiEl=null;convTitle='';knownRatings={};
-    jobs={};renderJobs();$('#goalbar').hidden=true;setPlan(false);
+    jobs={};reminders=[];renderJobs();$('#goalbar').hidden=true;setPlan(false);
     Object.keys(rows).forEach(k=>delete rows[k]);renderChanges();$('#conv-use').textContent='';
   }
   async function openConversation(c){
     conv=c.id;resetThread();convSession=c.session||'';convTitle=c.title||'';knownRatings=c.ratings||{};setTitle(c.preview||'');showLanding(false);setState(c.state||'idle');setUsage(c.usage);
-    setModelShown(c.provider,c.model);setPlan(c.plan_mode);(c.jobs||[]).forEach(j=>{jobs[j.id]=j;});renderJobs();
+    setModelShown(c.provider,c.model);setPlan(c.plan_mode);(c.jobs||[]).forEach(j=>{jobs[j.id]=j;});reminders=c.reminders||[];renderJobs();
     hint.textContent='';showView('chat');await connect(conv,0);closeDrawer();renderTasks();
   }
   async function newConversation(resume){
@@ -2747,6 +2820,11 @@ body:not(.view-admin) #admin{display:none}
         if(!sk.length)box.appendChild(h('div','muted','還沒有技能。把含 SKILL.md 的資料夾放進 .xharness/skills/，模型就會在任務符合時自己載入。'));
         sk.forEach(k=>{const d=h('div','tool'),n=h('div','tn',k.name);n.appendChild(h('span','tag ro',k.source));d.append(n,h('div','td',k.description));box.appendChild(d);});
       }catch(e){}
+      if((tl.hooks||[]).length||tl.notify){box.appendChild(h('div','sub','Hooks（'+tl.hooks.length+'）'));
+        tl.hooks.forEach(k=>{const d=h('div','tool'),n=h('div','tn',k.event);n.appendChild(h('span','tag ro',k.matcher));d.append(n,h('div','td','來源：'+k.source));box.appendChild(d);});
+        if(tl.notify)box.appendChild(h('div','muted','每個任務結束後會通知外部程式（notify）。'));}
+      if((tl.language_servers||[]).length){box.appendChild(h('div','sub','語言伺服器'));
+        tl.language_servers.forEach(l=>{const d=h('div','tool');d.append(h('div','tn',l.name),h('div','td',l.extensions.join('、')));box.appendChild(d);});}
       [['會改東西（走審批）',t=>t.mutating],['唯讀',t=>!t.mutating]].forEach(([label,test])=>{
         const list=tl.tools.filter(test);if(!list.length)return;box.appendChild(h('div','sub',label));
         list.forEach(t=>{const d=h('div','tool'),n=h('div','tn',t.name);n.appendChild(h('span','tag'+(t.mutating?'':' ro'),t.source==='mcp'?'MCP・'+t.server:'內建'));

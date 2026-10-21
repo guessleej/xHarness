@@ -31,6 +31,13 @@ SPILL_KEEP_FILES = 20
 #: Same tool, same arguments, this many times in a row: tell the model the
 #: answer will not change. Advice only -- the call still runs.
 REPEAT_WARNINGS = (3, 5, 8)
+#: Circuit breaker: a tool refused this many times in one task (hook, approval
+#: policy, plan mode), or called identically this many times in a row, is
+#: withdrawn for the rest of the task. Measured 2026-10-21: with bash blocked by
+#: a hook, granite called it 37 times until the turn limit, ignoring the notes.
+MAX_REFUSALS = 3
+MAX_IDENTICAL_CALLS = 12
+REFUSED_PREFIXES = ("blocked by a hook", "denied by approval policy")
 #: Tool results kept verbatim when the conversation no longer fits the model.
 KEEP_RECENT_TOOL_RESULTS = 2
 PRUNED_OUTPUT = "[output removed to fit the context window; run the tool again if you need it]"
@@ -177,6 +184,9 @@ def default_system_prompt(cwd: str, model: str | None = None) -> str:
             f"Working directory: {cwd}",
             "Use the available tools to inspect and change files and to run commands.",
             "Prefer small verified steps: read before you edit, run checks after you change.",
+            # Measured: granite mistyped a long absolute working directory and
+            # concluded that existing files were missing.
+            "Use paths relative to the working directory; do not retype its absolute path.",
             # Measured: half the runs of an ambiguous file task asked without
             # listing the directory, where the candidates were sitting.
             "Look before you ask: when the answer might be in the working directory (which file, "
@@ -257,6 +267,21 @@ def render_transcript(messages: list[dict[str, Any]]) -> str:
     return text[-MAX_SUMMARY_SOURCE_CHARS:]
 
 
+MAX_STOP_CONTINUES = 3
+#: Claude Code's tool names, so hook scripts written for it see familiar input.
+CLAUDE_TOOL_NAMES = {"bash": "Bash", "terminal": "Bash", "read": "Read", "write": "Write", "edit": "Edit",
+                     "glob": "Glob", "grep": "Grep", "webfetch": "WebFetch", "web_search": "WebSearch",
+                     "subagent": "Task", "subagent_batch": "Task", "todo_write": "TodoWrite"}
+
+
+def hook_tool_input(args: dict[str, Any]) -> dict[str, Any]:
+    """Arguments as hooks expect them: Claude Code calls `path` file_path."""
+    data = dict(args)
+    if "path" in data and "file_path" not in data:
+        data["file_path"] = data["path"]
+    return data
+
+
 def with_context(text: str, context: str | None) -> str:
     """A user message as the model receives it, with any harness context."""
     return f"{text}\n\n[{context}]" if context else text
@@ -274,6 +299,9 @@ class Agent:
         self._system_logged = False
         self._repeat: tuple[str, int] = ("", 0)
         self._compact_due = False
+        #: Tools withdrawn for the rest of the current task by the circuit breaker.
+        self._task_hidden: set[str] = set()
+        self._refusals: dict[str, int] = {}
         #: Plan mode (see PLAN_CONTEXT): the change tools are hidden until it is switched off.
         self.plan_mode = False
         if self.options.initial_messages:
@@ -324,6 +352,9 @@ class Agent:
         middle = body[:cut] if cut > 0 else []
         if len(middle) < 2 or (len(middle) == 2 and str(middle[0].get("content", "")).startswith(SUMMARY_PREFIX)):
             return None
+        veto = self._hook("PreCompact", {"trigger": reason})
+        if veto and veto.block:
+            return None
         llm = self.ctx.get("llm")
         request = [{"role": "system", "content": SUMMARY_SYSTEM},
                    {"role": "user", "content": render_transcript(middle)}]
@@ -364,10 +395,21 @@ class Agent:
     def stop_requested(self) -> bool:
         return self._stop.is_set()
 
+    def _hook(self, event: str, payload: dict[str, Any], tool: str | None = None) -> Any:
+        """Run the operator's hooks for `event` (see hooks.py); None when none apply."""
+        runner = self.ctx.optional("hooks")
+        if not runner:
+            return None
+        session = self.ctx.optional("session")
+        base = {"session_id": getattr(session, "id", ""), "transcript_path": getattr(session, "_file", "")}
+        if self.options.name != "main":
+            base["agent"] = self.options.name
+        return runner.run(event, {**base, **payload}, self.options.cwd or os.getcwd(), tool=tool, log=session)
+
     def hidden_tools(self, registry: ToolRegistry) -> set[str]:
         """Tools this agent may not use right now: the configured exclusions, the
         change tools in plan mode, and goal_done when no goal is active."""
-        hidden = set(self.options.exclude_tools)
+        hidden = set(self.options.exclude_tools) | self._task_hidden
         if self.plan_mode:
             # Subagents too: a child does not inherit plan mode and could change things.
             hidden |= {tool.name for tool in registry.list() if tool.mutating} | {"subagent", "subagent_batch"}
@@ -401,9 +443,24 @@ class Agent:
         # Everything the model sees is in the log (a rule taken from DeepSeek
         # Harness): the system prompt -- identity, date, AGENTS.md -- included,
         # so a transcript shows what the model was actually told.
-        if session and not self._system_logged and self.messages and self.messages[0].get("role") == "system":
+        first_run = not self._system_logged
+        if session and first_run and self.messages and self.messages[0].get("role") == "system":
             session.append({"type": "context", "source": "system", "content": self.messages[0]["content"], **self._tag()})
         self._system_logged = True
+        hook_context: list[str] = []
+        if self.options.name == "main":
+            if first_run:
+                started = self._hook("SessionStart", {"source": "resume" if len(self.messages) > 1 else "startup"})
+                if started:
+                    hook_context += started.context
+            submitted = self._hook("UserPromptSubmit", {"prompt": task})
+            if submitted and submitted.block:
+                if session:
+                    session.append({"type": "message", "role": "user", "content": task, "blocked": submitted.reason, **self._tag()})
+                self.ctx.emit("agent/task-end", {"turns": 0, "usage": self.total_usage, "stopped": True})
+                return f"[blocked by a hook: {submitted.reason}]"
+            if submitted:
+                hook_context += submitted.context
         # Everything the harness adds to a request travels with it as context,
         # logged with the request: a new date (a conversation left open
         # overnight), background jobs that finished, plan mode, goal rounds,
@@ -422,6 +479,7 @@ class Agent:
             parts.append(PLAN_CONTEXT)
         if extra_context:
             parts.append(extra_context)
+        parts += [f"From a hook: {text}" for text in hook_context]
         image_note = self._image_context(task, list(images or []), llm)
         if image_note:
             parts.append(image_note)
@@ -439,6 +497,8 @@ class Agent:
             session.append(event)
         self.ctx.emit("agent/task-start", {"task": task})
 
+        stop_continues = 0
+        self._task_hidden, self._refusals = set(), {}
         for turn in range(self.options.max_turns):
             if self._stop.is_set():
                 self.ctx.emit("agent/task-end", {"turns": turn, "usage": self.total_usage, "stopped": True})
@@ -481,7 +541,20 @@ class Agent:
                 )
 
             if not reply.tool_calls:
+                stop = self._hook("Stop", {"stop_hook_active": stop_continues > 0,
+                                           "last_assistant_message": reply.content}) if self.options.name == "main" else None
+                if stop and stop.block and stop_continues < MAX_STOP_CONTINUES:
+                    stop_continues += 1
+                    note = f"A hook asks you to continue: {stop.reason}"
+                    self.messages.append({"role": "user", "content": note})
+                    if session:
+                        session.append({"type": "message", "role": "user", "content": note, "source": "hook", **self._tag()})
+                    continue
                 self.ctx.emit("agent/task-end", {"turns": turn + 1, "usage": self.total_usage})
+                runner = self.ctx.optional("hooks")
+                if runner and self.options.name == "main":
+                    runner.notify({"type": "agent-turn-complete", "input-messages": [task],
+                                   "last-assistant-message": reply.content, "cwd": self.options.cwd or os.getcwd()})
                 return reply.content
 
             for call in reply.tool_calls:
@@ -489,7 +562,18 @@ class Agent:
                     result = ToolResult("skipped: stopped by operator", is_error=True)
                 else:
                     result = self._execute_call(registry, call)
-                    note = self._repeat_note(call)
+                    note = self._repeat_note(call) or ""
+                    refused = result.is_error and (result.output.startswith(REFUSED_PREFIXES) or "plan mode is on" in result.output)
+                    if refused:
+                        self._refusals[call["name"]] = self._refusals.get(call["name"], 0) + 1
+                    if (self._refusals.get(call["name"], 0) >= MAX_REFUSALS or self._repeat[1] >= MAX_IDENTICAL_CALLS) \
+                            and call["name"] not in self._task_hidden:
+                        self._task_hidden.add(call["name"])
+                        why = "it was refused repeatedly" if refused else "it was called with the same arguments too many times"
+                        note = (f"[{call['name']} is no longer available for the rest of this task because {why}. "
+                                "Use other tools, or tell the person what you could not do.]")
+                        if session:
+                            session.append({"type": "tool-withdrawn", "name": call["name"], "reason": why, **self._tag()})
                     if note:
                         result = ToolResult(f"{result.output}\n\n{note}", is_error=result.is_error)
                 self.messages.append(
@@ -584,8 +668,16 @@ class Agent:
         except (json.JSONDecodeError, ValueError):
             return ToolResult("tool arguments are not valid JSON", is_error=True)
 
+        pre = self._hook("PreToolUse", {"tool_name": CLAUDE_TOOL_NAMES.get(call["name"], call["name"]),
+                                        "tool_input": hook_tool_input(args)}, tool=call["name"])
+        if pre and (pre.block or pre.permission == "deny"):
+            return ToolResult(f"blocked by a hook: {pre.reason or 'denied'}", is_error=True)
+        permission = pre.permission if pre else ""
+
         def approve(summary: str) -> bool:
-            if self.options.approval_mode == "auto":
+            if permission == "allow":
+                return True        # a hook vouched for this call
+            if self.options.approval_mode == "auto" and permission != "ask":
                 return True
             if self.options.prompt is None:
                 return False
@@ -603,6 +695,13 @@ class Agent:
             result = tool.execute(args, tool_ctx)
         except Exception as error:  # noqa: BLE001 - a broken tool must not kill the loop
             result = ToolResult(f"tool failed: {error}", is_error=True)
+        post = self._hook("PostToolUse", {"tool_name": CLAUDE_TOOL_NAMES.get(call["name"], call["name"]),
+                                          "tool_input": hook_tool_input(args),
+                                          "tool_response": {"output": result.output[:20_000], "is_error": result.is_error}},
+                          tool=call["name"])
+        if post and (post.block or post.context):
+            notes = ([post.reason] if post.block else []) + post.context
+            result = ToolResult(result.output + "\n\n" + "\n".join(f"[hook] {n}" for n in notes), is_error=result.is_error)
         result = ToolResult(spill_output(result.output, tool_ctx.cwd), is_error=result.is_error)
         if self.options.on_tool_end:
             self.options.on_tool_end(call["name"], result.output, result.is_error)

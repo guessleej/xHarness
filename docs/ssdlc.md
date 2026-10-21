@@ -136,7 +136,11 @@ Rules the architecture enforces:
   functional probes and the bwrap /tmp bind target, fixed probe argv; `B404`/`B603` in
   `tools/jobs.py` and `tools/terminal.py` — running an approved command (in the background, or in a shell
   kept open) is those tools' purpose, under the same approval and sandbox as bash; `B110` in
-  `tools/jobs.py` — a failing UI listener must not take a running job down with it).
+  `tools/jobs.py` — a failing UI listener must not take a running job down with it; `B404`/`B602`/`B603` in
+  `hooks.py` — hooks are the operator's own commands from the operator's own configuration, and shell syntax is
+  part of the Claude Code hook protocol (a repository can never register one); `B404`/`B603`/`B110` in `lsp.py` —
+  a configured or well-known language server binary with fixed argv, and a failing shutdown of a server being
+  stopped changes nothing; `B110` in `schedule.py` — a failing UI listener must not stop reminders).
 
 ### Phase 4 — Verification
 
@@ -182,6 +186,9 @@ Provider presets change no network posture by themselves: local presets stay on 
 - **Plan mode** withdraws every mutating tool and the subagent tools from the model's list and refuses a call to them anyway; **goal mode** only re-prompts within a hard round limit.
 - **Human commands** never reach the model; a bare `/word` that is not a command is answered locally, because a model handed one as a request was seen to report work it never did.
 - **Ratings** are logged for the usage report and never returned to the model.
+- **Hooks** (1.12) run the operator's commands with the server's privileges, so they come only from the operator's configuration (`[hooks]` tables and settings files it names); a repository the agent works on cannot register one, unlike tools that read `.claude/settings.json` from the project. Hook runs are logged; a hook may block or vouch for a tool call but cannot widen the sandbox.
+- **ACP** (`xharness acp`) speaks only on the stdio of the editor that started it; approvals become the editor's permission prompts, client-provided MCP servers are refused, and the session cwd must be an absolute existing directory.
+- **Reminders** fire only as ordinary requests of the conversation that set them, marked as reminders, at most 20 pending and 7 days ahead.
 
 ### Eval subsystem
 

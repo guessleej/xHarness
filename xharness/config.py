@@ -47,6 +47,10 @@ class ResolvedConfig:
     #: [jobs] max_running, max_seconds; [tools] terminal
     jobs: dict[str, Any] = field(default_factory=dict)
     terminal: bool = True
+    #: [hooks]: Claude Code hook protocol and Codex notify (see hooks.py)
+    hooks: dict[str, Any] = field(default_factory=dict)
+    #: [lsp.servers.<name>] command, extensions
+    lsp: dict[str, Any] = field(default_factory=dict)
 
 
 def _find_config_file(explicit_path: str | None) -> str | None:
@@ -132,6 +136,8 @@ def load_config(
         vision=raw.get("vision", {}) or {},
         jobs=raw.get("jobs", {}) or {},
         terminal=bool(raw.get("tools", {}).get("terminal", True)),
+        hooks=raw.get("hooks", {}) or {},
+        lsp=raw.get("lsp", {}) or {},
     )
 
 
