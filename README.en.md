@@ -485,6 +485,25 @@ What keeps a discussion accountable:
 - **Disagreement is kept.** The summary separates what was agreed, where people disagreed (by name), and what still needs checking; a debate adds a verdict, a review its outcome.
 - **Stoppable.** Stop one participant and the others go on; stop the room and it ends at once, summary included.
 
+### Team against team across conversations and machines (halls)
+
+A team in a team-against-team discussion can be played by **another conversation**: another one on this node, someone else's, or xHarness on another machine.
+
+1. The hosting side says "our team is 教務組 (正方, 查資料員); 學務組 joins from another conversation". The discussion block shows an **invite code** (starting `xhall:`) with a copy button, and which teams it is waiting for.
+2. The other conversation, on any machine, pastes it: "join the hall xhall:…, we are 學務組: 反方, 審查員".
+3. Each side runs on its own: every team's internal talk uses **its own machine's members, tools, data and model** and stays in its own conversation; only the spokesperson's public statements go to the hall, which relays them to the other teams. The host writes the summary and both sides receive it. Statements from elsewhere are labelled with their origin and "figures checked by them".
+
+The joining side always calls the hall: .27 joining a hall on .70 only needs .27 to reach .70. Halls use their own credentials instead of accounts: the invite only joins, and stops working when the discussion starts; each joined team gets a token that can read that hall's public record, post its own statement, and leave. The invite is shown on screen and never written to the record. Only the Web UI can host a hall; the terminal can join one.
+
+```toml
+[web]
+public_url = "http://192.168.10.70:3080"   # an address other machines can reach; defaults to the one the browser used
+
+[discussion]
+join_minutes = 10         # how long to wait for other conversations to join
+turn_minutes = 15         # how long to wait for a remote spokesperson
+```
+
 ```toml
 [agents]
 enabled = true

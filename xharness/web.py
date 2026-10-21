@@ -46,6 +46,7 @@ from .commands import CommandHost, CommandResult, dispatch as dispatch_command, 
 from .commands import MAX_FEEDBACK_NOTE, providers_for, switch_model
 from .goal import run_goal
 from .mentions import expand as expand_mentions, list_files
+from .hall import HallRegistry
 from .vision import describer_from_config, save_images
 from .session import (SessionLog, clean_title, export_markdown, messages_from_events, search_sessions,
                       session_summary, sessions_dir)
@@ -188,6 +189,8 @@ class Conversation:
         self.requests = 0
         self.ratings: dict[int, str] = {}
         self.provider = ""
+        #: How the person reached this server (scheme://host:port), for hall invites.
+        self.origin = ""
 
     def push(self, event: dict[str, Any]) -> None:
         with self.cond:
@@ -275,6 +278,7 @@ class WebApp:
         self.lock = threading.Lock()
         self.tickets: dict[str, float] = {}
         self.node_name = node_name(config.fleet)
+        self.halls = HallRegistry()
         self.nodes = {node.name: node for node in load_nodes(config.fleet)}
         self.telegram: TelegramBridge | None = None
         self.users = UserStore(getattr(config, "auth", {}) or {})
@@ -432,6 +436,12 @@ class WebApp:
 
         harness.ctx.on("subagent/start", child_start)
         harness.ctx.on("subagent/end", child_end)
+        # Team-against-team halls: hosted here, joined from anywhere that can reach this address.
+        harness.ctx.provide("halls", self.halls)
+        harness.ctx.provide("host_url", lambda: self.host_url(conv))
+        harness.ctx.provide("node_name", self.node_name)
+        for state in ("invite", "joined"):
+            harness.ctx.on(f"discussion/{state}", lambda info, state=state: conv.push({"type": "discussion", "state": state, **info}))
         live = harness.ctx.optional("agents")
         if live is not None:
             harness.ctx.on("agents/changed", lambda _info: conv.push({"type": "agents", "items": live.public()}))
@@ -616,6 +626,11 @@ class WebApp:
         store = SkillStore(getattr(self.config, "skills", None))
         return [{"name": s.name, "description": s.description, "source": s.source}
                 for s in store.discover(workspace.ensure(principal_name(user)) or os.getcwd())]
+
+    def host_url(self, conv: Conversation) -> str:
+        """Where other conversations reach this node: [web] public_url, else how the person reached it."""
+        configured = str((getattr(self.config, "web", None) or {}).get("public_url") or "").rstrip("/")
+        return configured or conv.origin
 
     def roles(self, user: Any) -> list[dict[str, Any]]:
         from .roles import RoleStore
@@ -925,6 +940,14 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             self.principal = OPERATOR
             return True
 
+        def _hall(self, method: str, hall_id: str, action: str, body: dict[str, Any], query: dict[str, list[str]]) -> None:
+            """Halls authenticate with their own capabilities, not with this server's accounts:
+            the invite's hall secret to join, then the team's own token. Nothing else is reachable this way."""
+            auth = self.headers.get("Authorization") or ""
+            bearer = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+            status, payload = app.halls.handle(method, hall_id, action, bearer, body, query)
+            self._json(status, payload)
+
         def _admin_only(self) -> bool:
             if is_admin(getattr(self, "principal", None)):
                 return True
@@ -971,6 +994,9 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 return
             if parts[:1] != ["api"]:
                 self._json(404, {"error": "not found"})
+                return
+            if len(parts) == 4 and parts[1] == "halls":
+                self._hall("GET", parts[2], parts[3], {}, query)
                 return
             ticket = (query.get("ticket") or [None])[0]
             if not self._guard(sse_ticket=ticket):
@@ -1169,6 +1195,9 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             if parts[1:] == ["login"]:
                 self._login(body)
                 return
+            if len(parts) == 4 and parts[1] == "halls":
+                self._hall("POST", parts[2], parts[3], body, {})
+                return
             if not is_message and not self._guard():
                 return
             if parts[1:] == ["logout"]:
@@ -1222,6 +1251,10 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     self._json(404, {"error": "no such conversation"})
                     return
                 if parts[3] == "messages":
+                    host = self.headers.get("Host") or ""
+                    if host:
+                        scheme = "https" if (self.headers.get("X-Forwarded-Proto") or "").lower() == "https" else "http"
+                        conv.origin = f"{scheme}://{host}"
                     text = str(body.get("text") or "").strip()
                     if not text:
                         self._json(400, {"error": "text is required"})
@@ -1775,6 +1808,11 @@ body.plan-on .composer{box-shadow:0 0 0 3px var(--warn-tint),var(--shadow)}
 .dn .tag.warn{background:var(--warn-tint);color:var(--warn)}
 .dt.m-ai{margin:2px 0 0;font-size:14.5px;animation:none}
 .disc-end{padding:12px 14px 14px;background:var(--surface-2)}
+.disc-invite{padding:12px 14px;background:var(--warn-tint)}
+.disc-invite .cl{font-size:12.5px;font-weight:700;color:var(--warn);margin-bottom:4px}
+.disc-invite .m{font-size:13px;color:var(--ink-2);line-height:1.6}
+.disc-invite .row{display:flex;align-items:center;gap:10px;margin:8px 0}
+.disc-invite code{flex:1;min-width:0;font:12px var(--mono);background:var(--surface);border-radius:8px;padding:6px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .disc-end .cl{font-size:12px;font-weight:700;color:var(--ink-3);letter-spacing:.04em;margin-bottom:2px}
 .job-h{display:flex;align-items:center;gap:8px}
 .job-h .c{flex:1;min-width:0;font:13px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -2330,7 +2368,7 @@ body:not(.view-admin) #admin{display:none}
   const KIND={read:['eye','讀取'],write:['pen','寫入'],edit:['pen','修改'],glob:['folder','找檔案'],grep:['search','搜尋'],
     bash:['term','執行'],webfetch:['globe','開啟網頁'],browser_open:['globe','開啟網頁'],web_search:['globe','搜尋網路'],
     todo_write:['list','更新待辦清單'],security_scan:['shield','資安掃描'],ask_user:['help','問你一個問題'],
-    subagent:['users','交給子代理'],subagent_batch:['users','交給多個子代理'],discussion:['users','開討論'],
+    subagent:['users','交給子代理'],subagent_batch:['users','交給多個子代理'],discussion:['users','開討論'],discussion_join:['users','加入討論廳'],
     terminal:['term','終端機'],job_start:['term','背景執行'],job_status:['list','查看背景工作'],job_wait:['list','等背景工作'],
     job_stop:['stop','停止背景工作'],goal_done:['check','回報目標'],skill:['layers','載入技能'],
     lsp:['search','查程式碼'],workflow:['users','工作流程'],schedule_add:['list','設提醒'],schedule_list:['list','查看提醒'],
@@ -2481,23 +2519,37 @@ body:not(.view-admin) #admin{display:none}
       c.append(hd,h('div','m',r.description||'（沒有說明）'),h('div','m',lim.join('・')));box.appendChild(c);});
   }
   const DISC_MODE={roundtable:'圓桌討論',debate:'辯論',review:'審查',free:'自由討論',teams:'組對組'};
-  const DISC_END={rounds:'輪數用完',converged:'整輪都沒有新意見',approved:'審查者全數通過',moderator:'主持人判斷已有結論',budget:'token 額度用完',stopped:'被停止'};
+  const DISC_END={rounds:'輪數用完',converged:'整輪都沒有新意見',approved:'審查者全數通過',moderator:'主持人判斷已有結論',budget:'token 額度用完',stopped:'被停止',
+    host:'討論廳結束','host-lost':'連不上討論廳','no-hall':'這裡不能開討論廳','not-enough':'加入的組別不足兩組'};
   function discussionEvent(ev){
     if(ev.state==='start'){
       finishAssistant();closeSteps();
       const box=h('div','disc'),hd=h('div','disc-h'),ic=h('span','ic'),tt=h('div','tt');ic.appendChild(icon('users'));
       const teams=ev.teams||[],lineup=teams.length?teams.map(t=>t.name+'（'+t.members.join('、')+'）').join(' 對 '):(ev.participants||[]).join('、');
-      tt.append(h('b',null,(DISC_MODE[ev.mode]||ev.mode)+'：'+ev.topic),h('span','m',lineup));
+      tt.append(h('b',null,(ev.hall?'加入討論廳（'+ev.hall+'）':(DISC_MODE[ev.mode]||ev.mode))+'：'+ev.topic),h('span','m',lineup));
       const st=h('button','linkbtn','停止討論');st.onclick=()=>agentAction({room:ev.room});
       hd.append(ic,tt,st);const body=h('div','disc-body');box.append(hd,body);transcript.appendChild(box);
       discs[ev.room]={box,body,stop:st,names:ev.participants||[],teams:teams.map(t=>t.name)};toBottom();return;}
     const d=discs[ev.room];if(!d)return;
+    if(ev.state==='invite'){
+      // The invite is a credential: shown here to copy, never written to the record.
+      const card=h('div','disc-invite'),row=h('div','row'),code=h('code',null,ev.invite),cp=h('button','linkbtn','複製邀請碼');
+      cp.onclick=async()=>{await copyText(ev.invite);toast('已複製邀請碼');};row.append(code,cp);
+      card.append(h('div','cl','等其他對話加入'),h('div','m','把邀請碼貼到另一個對話（這台或別台機器的 xHarness 都可以），說「加入討論廳，我們是 '
+        +(ev.open||[])[0]+'：成員…」。加入的組用它自己的成員、資料與模型；只有代表的公開發言會傳過來。'),row,h('div','m wait','還在等：'+(ev.open||[]).join('、')));
+      d.box.insertBefore(card,d.body);d.invite=card;toBottom();return;}
+    if(ev.state==='joined'){if(!d.invite)return;
+      const joined=(ev.teams||[]).map(t=>t.name+(t.node?'（'+t.node+'）':'')).join('、');
+      d.invite.querySelector('.wait').textContent=(joined?'已加入：'+joined:'')+((ev.open||[]).length?(joined?'；':'')+'還在等：'+ev.open.join('、'):'');
+      if(ev.started){const r=d.invite.querySelector('.row');if(r)r.remove();const how=d.invite.querySelector('.m:not(.wait)');if(how)how.remove();
+        d.invite.querySelector('.cl').textContent='討論廳已開始，邀請碼已失效';}
+      return;}
     if(ev.state==='turn'){
       // Teams mode: one colour per team, so who argues for whom is visible at a glance.
       const idx=Math.max(0,ev.team?d.teams.indexOf(ev.team):d.names.indexOf(ev.speaker)),row=h('div','dturn'+(ev.scope==='caucus'?' caucus':'')),av=h('span','av',String(ev.speaker||'?').slice(0,1));
       av.style.setProperty('--c','var(--sp-'+(idx%6+1)+')');
       const b=h('div','db'),nm=h('div','dn');nm.appendChild(h('b',null,ev.speaker));
-      if(ev.team)nm.appendChild(h('span','tag',ev.team+(ev.scope==='caucus'?'・組內（其他組看不到）':'・代表發言')));
+      if(ev.team)nm.appendChild(h('span','tag',ev.team+(ev.scope==='caucus'?'・組內（其他組看不到）':'・代表發言')+(ev.remote?'（來自 '+ev.remote+'，數字由對方查核）':'')));
       else if(ev.stance||ev.role)nm.appendChild(h('span','tag',ev.stance||ev.role));
       if(ev.unverified&&ev.unverified.length){const w=h('span','tag warn','未查證：'+ev.unverified.join('、'));
         w.title='這些數字在查到的資料裡找不到原文，可能是推算或捏造';nm.appendChild(w);}

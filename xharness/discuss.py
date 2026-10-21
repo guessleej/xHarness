@@ -10,7 +10,10 @@ Four ways to run one:
   teams       team against team: each round every team first talks among
               itself (the other teams cannot see it), then its spokesperson
               speaks for the team to everyone; the next round's internal
-              talk starts from what the other teams said in public
+              talk starts from what the other teams said in public; a team
+              can be `remote`: another conversation, here or on another
+              node, joins it with an invite code (see hall.py) and brings its
+              own members, tools, data and model
 
 Each participant is an agent of its own -- own conversation, instructions (a
 role from roles.py, or a brief), tools and model -- so it can look things up
@@ -162,13 +165,15 @@ class Seat:
     spokesperson: bool = False
 
 
-def _seat_prompt(seat: Seat, seats: list[Seat], topic: str, mode: str, context: str, author: bool) -> str:
+def _seat_prompt(seat: Seat, seats: list[Seat], topic: str, mode: str, context: str, author: bool,
+                 teams: list[dict[str, Any]] | None = None) -> str:
     others = "、".join(s.name + (f"（{s.stance}）" if s.stance else "") for s in seats if s is not seat)
     rule = (AUTHOR_RULE if author else REVIEWER_RULE) if mode == "review" else MODE_RULES[mode]
     if mode == "teams":
         mates = "、".join(s.name for s in seats if s.team == seat.team and s is not seat) or "（只有你一人）"
-        rivals = "；".join(f"「{team}」：{'、'.join(s.name for s in seats if s.team == team)}"
-                          for team in dict.fromkeys(s.team for s in seats) if team != seat.team)
+        names = [t["name"] for t in teams] if teams else list(dict.fromkeys(s.team for s in seats))
+        rivals = "；".join(f"「{team}」：{'、'.join(s.name for s in seats if s.team == team) or '在另一個對話'}"
+                          for team in names if team != seat.team)
         lines = [f"You are {seat.name}, a member of team 「{seat.team}」 in a team-against-team discussion.",
                  f"Your teammates: {mates}. Other teams: {rivals}.", f"Topic: {topic}"]
         if seat.stance:
@@ -240,6 +245,10 @@ class Room:
         self.corpus = "\n".join([topic, context] + [s.brief for s in seats])
         self.files: set[str] = set()
         self.teams = teams or []
+        self.hall: Any = None           # a hall when some teams join from other conversations
+        self.flag: Any = None           # the hall's own stop switch, registered with the room's agents
+        self.join_seconds = 600.0
+        self.turn_seconds = 900.0
 
     # -- bookkeeping -----------------------------------------------------------
     def tokens(self) -> int:
@@ -278,7 +287,7 @@ class Room:
                 name=f"{self.id}/{seat.name}",
                 cwd=self.tool_ctx.cwd,
                 system_prompt=_seat_prompt(seat, self.seats, self.topic, self.mode, self.context,
-                                           author=(self.mode == "review" and index == 0)),
+                                           author=(self.mode == "review" and index == 0), teams=self.teams),
                 max_turns=min(seat.role.max_turns or self.speak_turns, self.speak_turns) if seat.role else self.speak_turns,
                 approval_mode="prompt",
                 prompt=lambda summary, seat=seat: self._approve(seat, summary),
@@ -400,6 +409,87 @@ class Room:
     def active(self) -> list[Seat]:
         return [s for s in self.seats if not s.left]
 
+    def stopped(self) -> bool:
+        """The whole room was stopped: its hall switch, or every local seat."""
+        if self.flag is not None and (self.flag.stop_requested or (self.live is not None and self.live.stopping(self.flag.live_id))):
+            return True
+        return bool(self.seats) and all(self._stop_wanted(s) or s.left == "stopped" for s in self.seats)
+
+    # -- teams from other conversations ---------------------------------------------
+    def remote_names(self) -> list[str]:
+        return [t["name"] for t in self.teams if t.get("remote")]
+
+    def open_hall(self) -> bool:
+        halls, host = self.ctx.optional("halls"), self.ctx.optional("host_url")
+        base = host() if callable(host) else host
+        if halls is None or not base:
+            self._log({"type": "discussion-note", "room": self.id,
+                       "text": "跨對話的組別只能在網頁介面開：這裡沒有討論廳可以接受其他對話加入"})
+            self.ended = "no-hall"
+            return False
+        local = [{"name": t["name"], "stance": t.get("stance", ""),
+                  "members": [s.name for s in self.seats if s.team == t["name"]]} for t in self.teams if not t.get("remote")]
+        self.hall = halls.create(self.topic, self.rounds, self.context, base, self.remote_names(), local, self.join_seconds)
+        self.flag = _HallSwitch()
+        if self.live is not None:
+            self.flag.live_id = self.live.start(self.flag, "討論廳主持人", "", "discussion", self.topic, room=self.id)
+        # The invite is a credential: it goes to the screen, not into the session log.
+        self.ctx.emit("discussion/invite", {"room": self.id, "invite": self.hall.invite(), "open": self.remote_names(),
+                                            "until": self.hall.join_until})
+        self._log({"type": "discussion-note", "room": self.id,
+                   "text": f"討論廳開放加入，等待 {'、'.join(self.remote_names())}（邀請碼只顯示在畫面上，不寫入紀錄）"})
+        seen = 0
+        while time.time() < self.hall.join_until and self.hall.open_seats() and not self.stopped():
+            with self.hall.cond:
+                self.hall.cond.wait(1.0)
+            joined = self.hall.joined()
+            if len(joined) != seen:
+                seen = len(joined)
+                self.ctx.emit("discussion/joined", {"room": self.id, "teams": [s.public() for s in joined],
+                                                    "open": self.hall.open_seats()})
+        missing = self.hall.open_seats()
+        self.hall.start()
+        if missing:
+            self._log({"type": "discussion-note", "room": self.id, "text": f"{'、'.join(missing)} 沒有在時限內加入"})
+        self.teams = [t for t in self.teams if not t.get("remote")] + [
+            {"name": s.name, "stance": s.stance, "remote": True, "members": s.members, "node": s.node}
+            for s in self.hall.joined()]
+        if self.stopped():
+            self.ended = "stopped"
+            return False
+        if len(self.teams) < 2:
+            self.ended = "not-enough"
+            return False
+        self.ctx.emit("discussion/joined", {"room": self.id, "teams": [s.public() for s in self.hall.joined()],
+                                            "open": [], "started": True})
+        return True
+
+    def await_remote(self, team: str, round_no: int) -> dict[str, Any] | None:
+        """Wait for a remote team's public statement for this round."""
+        seat = self.hall.seats.get(team)
+        deadline = time.time() + self.turn_seconds
+        while seat is not None and not seat.left:
+            entry = self.hall.statement(team, round_no)
+            if entry is not None:
+                entry = {**entry, "role": "", "stance": seat.stance, "tokens": 0, "rechecked": False, "ts": time.time()}
+                self.transcript.append(entry)
+                self._log({"type": "discussion-turn", "room": self.id, **{k: v for k, v in entry.items() if k != "ts"}})
+                self.ctx.emit("discussion/turn", {"room": self.id, **entry})
+                self.hall.publish(entry)
+                return entry
+            if self.stopped():
+                self.ended = self.ended or "stopped"
+                return None
+            if time.time() > deadline:
+                self.hall.leave(seat, "沒有在時限內發言")
+                self._log({"type": "discussion-note", "room": self.id, "text": f"{team} 沒有在時限內發言，之後不再等它"})
+                return None
+            with self.hall.cond:
+                self.hall.cond.wait(1.0)
+        if seat is not None and seat.left:
+            self._log({"type": "discussion-note", "room": self.id, "text": f"{team} 離開了討論（{seat.left}）"})
+        return None
+
     # -- the moderator ---------------------------------------------------------
     def moderator(self, system: str, prompt: str) -> str:
         llm = self.ctx.get("llm")
@@ -461,8 +551,16 @@ class Room:
             self._rounds()
         finally:
             if not self.ended:
-                self.ended = "stopped" if not self.active() else "rounds"
-        summary = self.close()
+                still = self.active() or (self.hall is not None and self.hall.joined())
+                self.ended = "stopped" if not still else "rounds"
+        summary = ""
+        try:
+            summary = self.close()
+        finally:
+            if self.hall is not None:      # remote teams get the summary, or at least hear that it is over
+                self.hall.end(summary)
+            if self.flag is not None and self.live is not None:
+                self.live.end(self.flag.live_id, ok=True)
         for seat in self.seats:
             if self.live is not None and seat.live_id:
                 self.live.end(seat.live_id, ok=not seat.left.startswith("failed"))
@@ -478,8 +576,13 @@ class Room:
         return out[:MAX_OUTPUT] + ("\n[transcript truncated; the full one is in the session log]" if len(out) > MAX_OUTPUT else "")
 
     def _team_rounds(self) -> None:
+        if self.remote_names() and not self.open_hall():
+            return
         names = [t["name"] for t in self.teams]
+        remote = {t["name"] for t in self.teams if t.get("remote")}
         for round_no in range(1, self.rounds + 1):
+            for team in remote:    # remote teams start their internal talk on their own side, now
+                self.hall.ask(team, round_no)
             for team in names:     # internal talk first; the spokesperson speaks last, so it can sum up
                 members = [s for s in self.seats if s.team == team and not s.left]
                 if len(members) < 2:
@@ -489,14 +592,20 @@ class Room:
                         return
                     self.speak(seat, round_no, "caucus")
             for team in names:     # then each team speaks to everyone
+                if self.ended or self.stopped():
+                    self.ended = self.ended or "stopped"
+                    return
+                if team in remote:
+                    self.await_remote(team, round_no)
+                    continue
                 members = [s for s in self.seats if s.team == team and not s.left]
                 voice = next((s for s in members if s.spokesperson), None) or (members[0] if members else None)
                 if voice is None:
                     continue
-                if self.ended:
-                    return
-                self.speak(voice, round_no, "plenary")
-            if not self.active():
+                entry = self.speak(voice, round_no, "plenary")
+                if entry and self.hall is not None:
+                    self.hall.publish(entry)
+            if not self.active() and not (self.hall is not None and self.hall.joined()):
                 return
 
     def _rounds(self) -> None:
@@ -581,11 +690,19 @@ def parse_teams(ctx: Context, items: Any, cwd: str) -> tuple[list[Seat], list[di
         name = str(item.get("name") or "").strip()
         if not NAME_RE.match(name) or any(t["name"] == name for t in teams):
             return [], [], f"team name {name!r} is empty, repeated, too long, or has brackets or line breaks"
+        if item.get("remote"):
+            # Filled by another conversation through an invite; its members live there.
+            teams.append({"name": name, "stance": str(item.get("stance") or "").strip()[:200], "remote": True})
+            continue
         members = item.get("members")
         if isinstance(members, str):
             members = [part.strip() for part in re.split(r"[,，、]", members) if part.strip()]
+        if isinstance(members, list):     # a blank member is a model's placeholder, not a person
+            members = [m for m in members if (str(m).strip() if not isinstance(m, dict)
+                                              else str(m.get("name") or m.get("agent") or "").strip())]
         if not isinstance(members, list) or not members:
-            return [], [], f"team {name!r} has no members"
+            return [], [], (f"team {name!r} has no members; if it will join from another conversation, write "
+                            f'{{"name": "{name}", "remote": true}}')
         # The participant rules (names, roles) apply; a team may have a single member.
         found, problem = parse_participants(ctx, members, "roundtable", cwd, limit=MAX_TEAM_SEATS, minimum=1)
         if problem:
@@ -606,8 +723,117 @@ def parse_teams(ctx: Context, items: Any, cwd: str) -> tuple[list[Seat], list[di
     return seats, teams, ""
 
 
+class GuestRoom(Room):
+    """This conversation's team in a hall hosted elsewhere: talk inside here, speak there."""
+
+    def __init__(self, ctx: Context, tool_ctx: ToolContext, client: Any, joined: dict[str, Any],
+                 seats: list[Seat], speak_turns: int, max_tokens: int) -> None:
+        team = str(joined.get("team"))
+        teams = [{"name": t["name"], "stance": t.get("stance", ""), "remote": t["name"] != team,
+                  "members": t.get("members") or []} for t in joined.get("teams") or []]
+        super().__init__(ctx, tool_ctx, str(joined.get("topic") or "")[:500], "teams", seats,
+                         int(joined.get("rounds") or DEFAULT_ROUNDS), max_tokens, str(joined.get("context") or "")[:6000],
+                         speak_turns, teams)
+        self.client, self.team, self.host = client, team, client.base.split("/api/")[0]
+
+    def _hear(self, entry: dict[str, Any]) -> None:
+        """Another team's public statement, as the hall relayed it."""
+        said = {"round": entry.get("round"), "speaker": str(entry.get("speaker") or ""), "role": "", "stance": "",
+                "text": str(entry.get("text") or ""), "tools": [], "tokens": 0, "rechecked": False,
+                "unverified": list(entry.get("unverified") or []), "uncited": list(entry.get("uncited") or []),
+                "team": str(entry.get("team") or ""), "scope": "plenary",
+                "remote": str(entry.get("remote") or self.host), "ts": time.time()}
+        self.transcript.append(said)
+        self._log({"type": "discussion-turn", "room": self.id, **{k: v for k, v in said.items() if k != "ts"}})
+        self.ctx.emit("discussion/turn", {"room": self.id, **said})
+
+    def run(self) -> str:
+        self.seat_up()
+        self._log({"type": "discussion-start", "room": self.id, "topic": self.topic, "mode": "teams",
+                   "rounds": self.rounds, "max_tokens": self.max_tokens, "hall": self.host,
+                   "participants": [{"name": s.name, "role": s.role.name if s.role else "", "stance": s.stance,
+                                     "team": s.team, "spokesperson": s.spokesperson} for s in self.seats]})
+        self.ctx.emit("discussion/start", {"room": self.id, "topic": self.topic, "mode": "teams", "hall": self.host,
+                                           "participants": [s.name for s in self.seats],
+                                           "teams": [{"name": t["name"], "stance": t.get("stance", ""),
+                                                      "members": t.get("members") or
+                                                      [s.name for s in self.seats if s.team == t["name"]]}
+                                                     for t in self.teams]})
+        summary, failures = "", 0
+        while True:
+            if self.stopped():
+                self.client.leave("stopped")
+                self.ended = "stopped"
+                break
+            try:
+                reply = self.client.next()
+                failures = 0
+            except (ConnectionError, RuntimeError) as error:
+                failures += 1
+                if failures >= 4:
+                    self._log({"type": "discussion-note", "room": self.id, "text": f"連不上討論廳：{error}"})
+                    self.ended = "host-lost"
+                    break
+                time.sleep(5)
+                continue
+            for entry in reply.get("news") or []:
+                self._hear(entry)
+            if reply.get("state") == "ended":
+                summary, self.ended = str(reply.get("summary") or ""), "host"
+                break
+            if reply.get("state") != "turn":
+                continue
+            round_no = int(reply.get("round") or 1)
+            members = [s for s in self.seats if not s.left]
+            if len(members) > 1:
+                for seat in sorted(members, key=lambda s: s.spokesperson):
+                    if self.stopped():
+                        break
+                    self.speak(seat, round_no, "caucus")
+            voice = next((s for s in members if s.spokesperson and not s.left), None) or next(iter(self.active()), None)
+            entry = self.speak(voice, round_no, "plenary") if voice is not None and not self.stopped() else None
+            if entry is None:
+                continue        # stopped or out of tokens: the next pass leaves the hall
+            try:
+                self.client.statement({k: entry.get(k) for k in ("round", "speaker", "text", "unverified", "uncited", "tools")})
+            except (ConnectionError, RuntimeError) as error:
+                self._log({"type": "discussion-note", "room": self.id, "text": f"發言沒有送到討論廳：{error}"})
+        for seat in self.seats:
+            if self.live is not None and seat.live_id:
+                self.live.end(seat.live_id, ok=not seat.left.startswith("failed"))
+        tokens = self.tokens()
+        summary = summary or "（討論廳沒有傳回結論）"
+        self._log({"type": "discussion-end", "room": self.id, "reason": self.ended, "turns": len(self.transcript),
+                   "tokens": tokens, "summary": summary})
+        self.ctx.emit("discussion/end", {"room": self.id, "reason": self.ended, "turns": len(self.transcript),
+                                         "tokens": tokens, "summary": summary})
+        lines = "\n".join(_line(e) for e in self.transcript)
+        out = (f"Joined the hall at {self.host} as {self.team}: {len(self.transcript)} turns, ended because "
+               f"{END_REASONS.get(self.ended, self.ended)}, {tokens:,} tokens on this side.\n\n## Summary from the hall\n"
+               f"{summary}\n\n## Transcript (your team's internal talk and everyone's public statements)\n{lines}")
+        return out[:MAX_OUTPUT]
+
+
 END_REASONS = {"rounds": "輪數用完", "converged": "整輪都沒有新意見", "approved": "審查者全數通過",
-               "moderator": "主持人判斷已有結論", "budget": "token 額度用完", "stopped": "被停止"}
+               "moderator": "主持人判斷已有結論", "budget": "token 額度用完", "stopped": "被停止",
+               "no-hall": "這裡不能開討論廳（只有網頁介面可以）", "not-enough": "加入的組別不足兩組",
+               "host": "討論廳結束", "host-lost": "連不上討論廳"}
+
+
+class _HallSwitch:
+    """Stands in for an agent in the live-agent register, so Stop reaches a hall that is waiting."""
+
+    def __init__(self) -> None:
+        self.stop_requested = False
+        self.live_id = ""
+        self.llm_calls = 0
+        self.llm = None
+        from .llm import Usage
+
+        self.total_usage = Usage()
+
+    def stop(self) -> None:
+        self.stop_requested = True
 
 
 #: Appended to every argument error: local models recover from a malformed call far
@@ -616,7 +842,9 @@ END_REASONS = {"rounds": "輪數用完", "converged": "整輪都沒有新意見"
 EXAMPLE = ('Simplest valid call: {"topic": "要不要調降招生名額", "mode": "debate", '
            '"participants": ["正方", "反方"], "rounds": 2}')
 TEAM_EXAMPLE = ('Simplest valid team call: {"topic": "要不要開夜間班", "mode": "teams", "rounds": 2, "teams": '
-                '[{"name": "教務組", "members": ["正方", "查資料員"]}, {"name": "學務組", "members": ["反方", "審查員"]}]}')
+                '[{"name": "教務組", "members": ["正方", "查資料員"]}, {"name": "學務組", "members": ["反方", "審查員"]}]}. '
+                'When a team will join from another conversation, give it no members and set remote: '
+                '{"name": "學務組", "remote": true}; every team needs a name.')
 
 
 def parse_participants(ctx: Context, items: Any, mode: str, cwd: str,
@@ -659,6 +887,8 @@ def discussion_plugin(config: dict[str, Any] | None = None) -> Plugin:
     max_rounds = int(settings.get("max_rounds", MAX_ROUNDS))
     max_tokens = int(settings.get("max_tokens", DEFAULT_MAX_TOKENS))
     speak_turns = int(settings.get("speak_turns", SPEAK_TURNS))
+    join_seconds = float(settings.get("join_minutes", 10)) * 60
+    turn_seconds = float(settings.get("turn_minutes", 15)) * 60
 
     def apply(ctx: Context, _config: Any) -> None:
         def run(args: dict[str, Any], tool_ctx: ToolContext) -> ToolResult:
@@ -686,6 +916,36 @@ def discussion_plugin(config: dict[str, Any] | None = None) -> Plugin:
                 return refuse("rounds must be a number")
             room = Room(ctx, tool_ctx, topic[:500], mode, seats, max(1, min(rounds, max_rounds)),
                         max_tokens, str(args.get("context") or "")[:6000], speak_turns, teams)
+            room.join_seconds, room.turn_seconds = join_seconds, turn_seconds
+            return ToolResult(room.run())
+
+        def join(args: dict[str, Any], tool_ctx: ToolContext) -> ToolResult:
+            from .hall import HallClient, parse_invite
+
+            try:
+                invite = parse_invite(str(args.get("invite") or ""))
+            except ValueError as error:
+                return ToolResult(f"{error}. Ask the person for the invite code the hosting conversation shows "
+                                  "(it starts with xhall:).", is_error=True)
+            team = str(args.get("team") or "").strip()
+            seats, problem = parse_participants(ctx, args.get("members"), "roundtable", tool_ctx.cwd,
+                                                limit=MAX_TEAM_SEATS, minimum=1)
+            if not team or problem:
+                return ToolResult((problem or "team is required") + '. Example: {"invite": "xhall:...", "team": "學務組", '
+                                  '"members": ["反方", "審查員"]}', is_error=True)
+            wanted = str(args.get("spokesperson") or "").strip()
+            stance = str(args.get("stance") or "").strip()[:200]
+            for index, seat in enumerate(seats):
+                seat.team, seat.stance = team, stance or seat.stance
+                seat.spokesperson = (seat.name == wanted) if wanted else index == 0
+            node = ctx.optional("node_name")
+            client = HallClient(invite)
+            try:
+                joined = client.join(team, [s.name for s in seats], next(s.name for s in seats if s.spokesperson),
+                                     stance, (node() if callable(node) else node) or "")
+            except (ConnectionError, RuntimeError) as error:
+                return ToolResult(f"could not join: {error}", is_error=True)
+            room = GuestRoom(ctx, tool_ctx, client, joined, seats, speak_turns, max_tokens)
             return ToolResult(room.run())
 
         register_tools(ctx, [Tool(
@@ -696,7 +956,10 @@ def discussion_plugin(config: dict[str, Any] | None = None) -> Plugin:
                 "verdict), review (the first participant writes, the others review until they approve), free (a "
                 "moderator picks who speaks), teams (team against team: each team talks internally, then its "
                 "spokesperson -- the first member unless named -- speaks for it to everyone; give `teams` instead "
-                "of `participants`). Each participant is an agent with its own tools. Simplest form: "
+                "of `participants`). When the person says a team will come from another conversation or another "
+                'machine, list it as {"name": "<team>", "remote": true} with no members: the screen then shows an '
+                "invite code for that conversation to join with. Each participant is an agent with its own tools. "
+                "Simplest form: "
                 'participants = ["正方", "反方"] (agent role names or plain names); use objects with '
                 "name / agent / brief / stance only when a participant needs more. Use it when the person wants "
                 f"several viewpoints, an argument tested, or a draft reviewed. 2-{MAX_PARTICIPANTS} participants, "
@@ -720,12 +983,30 @@ def discussion_plugin(config: dict[str, Any] | None = None) -> Plugin:
                         "members": {"type": "array", "description": 'e.g. ["正方", "查資料員"]', "items": {
                             "type": "object", "properties": {"name": {"type": "string"}, "agent": {"type": "string"},
                                                              "brief": {"type": "string"}}, "required": ["name"]}},
-                        "spokesperson": {"type": "string", "description": "Member who speaks for the team"}},
-                    "required": ["name", "members"]}},
+                        "spokesperson": {"type": "string", "description": "Member who speaks for the team"},
+                        "remote": {"type": "boolean", "description": "Filled by another conversation through an invite"}},
+                    "required": ["name"]}},
                 "rounds": {"type": "integer", "description": f"1-{max_rounds}, default {DEFAULT_ROUNDS}"},
                 "context": {"type": "string", "description": "Background every participant gets"},
             }, "required": ["topic"]},
             execute=run,
+            mutating=True,
+        ), Tool(
+            name="discussion_join",
+            description=(
+                "Join a team-against-team discussion hosted by another conversation (here or on another machine) "
+                "with the invite code it shows (starts with xhall:). Your team talks internally here with its own "
+                "tools and data; only its spokesperson's public statements go to the hall. Returns the hall's summary."),
+            parameters={"type": "object", "properties": {
+                "invite": {"type": "string", "description": "The invite code, starting with xhall:"},
+                "team": {"type": "string", "description": "Your team's name, e.g. 學務組"},
+                "members": {"type": "array", "description": 'e.g. ["反方", "審查員"]', "items": {
+                    "type": "object", "properties": {"name": {"type": "string"}, "agent": {"type": "string"},
+                                                     "brief": {"type": "string"}}, "required": ["name"]}},
+                "stance": {"type": "string", "description": "Your team's position"},
+                "spokesperson": {"type": "string", "description": "Member who speaks for the team"},
+            }, "required": ["invite", "team", "members"]},
+            execute=join,
             mutating=True,
         )])
 

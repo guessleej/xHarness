@@ -2,6 +2,28 @@
 
 中文 | English below
 
+## 1.15.0 — 2026-10-21
+
+跨對話、跨機器的組對組：討論廳。
+
+- **一組可以由另一個對話負責**：組對組裡把某一組標成遠端（`{"name": "學務組", "remote": true}`），討論區塊就出現邀請碼（`xhall:` 開頭）與「複製邀請碼」；另一個對話——同一台、別人的、或另一台機器的 xHarness——說「加入討論廳 xhall:…，我們是學務組：反方、審查員」就加入。新工具 `discussion_join`。
+- **各組用自己那台的人、資料與模型**：組內討論只留在自己的對話，只有代表的公開發言送到討論廳、再轉給其他組；結論由開討論的一方寫，兩邊都收到。別台的發言標「來自哪台，數字由對方查核」。
+- **連線方向永遠是加入的一方找討論廳**（長輪詢），.27 加入 .70 只需要 .27 連得到 .70。
+- **討論廳用自己的憑證、不走帳號**：邀請碼只能加入、而且討論一開始就失效；加入後每組拿到自己的權杖，只能讀這一廳的公開紀錄、送自己這組的發言、離開；密鑰只放 Authorization 標頭、constant-time 比對；邀請碼只顯示在畫面上、不寫進紀錄；發言長度、組員數、同時開放的廳數有上限。SSDLC 威脅表新增一列。
+- 實測跨機器：.70（gemma-4-31b-xvita）開討論廳、教務組用 招生數據.csv；.27（自己設定的模型）以學務組加入、用只有 .27 才有的 學務資料.csv。8 次發言、約 10 分鐘；學務組逐行引用自己的資料，還抓出檔案裡損益兩平人數算不起來；.70 的紀錄裡沒有任何一句學務組的組內討論，也沒有邀請碼。實測跨對話（同一台兩個分頁）：邀請碼、加入、標示都正常。
+- 修：模型把要由別的對話加入的組寫成空成員時，錯誤訊息直接示範 `"remote": true` 的寫法（原本只說名字是空的，模型連錯三次）；結束原因的中文；加入討論廳的步驟名稱。
+- 設定：`[discussion] join_minutes`、`turn_minutes`；`[web] public_url`（別台連得到的位址，不設就用瀏覽器連進來的位址）。只有網頁介面能開討論廳，終端機可以加入。
+
+Team against team across conversations and machines: halls.
+
+- **A team can be played by another conversation**: mark a team remote (`{"name": "學務組", "remote": true}`) and the discussion shows an invite code (starting `xhall:`) with a copy button; another conversation -- on this node, someone else's, or xHarness on another machine -- says "join the hall xhall:…, we are 學務組: 反方, 審查員" and joins. New tool `discussion_join`.
+- **Every team uses its own machine's people, data and model**: internal talk stays in its own conversation; only spokesperson statements go to the hall, which relays them; the host writes the summary and both sides receive it. Statements from elsewhere are labelled with their origin and "figures checked by them".
+- **The joining side always calls the hall** (long polling): .27 joining a hall on .70 needs only .27 to reach .70.
+- **Halls use their own credentials, not accounts**: the invite only joins and stops working when the discussion starts; each joined team gets a token that can read that hall's public record, post its own statement and leave; secrets travel only in the Authorization header and are compared in constant time; the invite is shown on screen and never written to the record; statement length, members and open halls are capped. A new row in the SSDLC threat table.
+- Measured across machines: .70 (gemma-4-31b-xvita) hosted with 教務組 on 招生數據.csv; .27 (its own configured model) joined as 學務組 with 學務資料.csv, which only .27 has. 8 utterances, about 10 minutes; 學務組 cited its own file line by line and found that the file's break-even figure does not add up; the .70 record holds none of 學務組's internal talk and no invite. Measured across conversations (two tabs on one node): invite, joining and labels all work.
+- Fix: when a model writes a team that should join from elsewhere with blank members, the error now shows the `"remote": true` form (it used to say only that a name was empty, and the model failed three times); end reasons in Chinese; the join step's label.
+- Settings: `[discussion] join_minutes`, `turn_minutes`; `[web] public_url` (an address other machines can reach; defaults to the one the browser used). Only the Web UI hosts a hall; the terminal can join.
+
 ## 1.14.0 — 2026-10-21
 
 組對組討論：一個討論群跟另一個討論群討論。

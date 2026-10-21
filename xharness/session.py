@@ -279,6 +279,7 @@ def export_markdown(session_id: str, user: str | None) -> str | None:
         elif kind == "discussion-turn":
             used = f"（查了 {'、'.join(event['tools'])}）" if event.get("tools") else ""
             where = (f"・{event.get('team')}{'組內' if event.get('scope') == 'caucus' else '代表發言'}" if event.get("team") else "")
+            where += f"（來自 {event['remote']}，數字由對方查核）" if event.get("remote") else ""
             lines += [f"**第 {event.get('round')} 輪{where}・{event.get('speaker')}**{used}　{_taipei(str(event.get('ts', '')))}",
                       "", str(event.get("text") or ""), ""]
             if event.get("unverified"):

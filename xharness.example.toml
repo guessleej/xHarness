@@ -213,3 +213,7 @@ model = "your-model-id"
 # max_rounds = 8
 # max_tokens = 80000           # per discussion, moderator included
 # speak_turns = 6              # model calls per utterance, lookups included
+# join_minutes = 10            # team against team across conversations: how long to wait for joins
+# turn_minutes = 15            # how long to wait for a remote spokesperson
+# [web]
+# public_url = "http://192.168.10.70:3080"   # an address other machines can reach (for hall invites)

@@ -209,3 +209,7 @@ model = "your-model-id"
 # max_rounds = 8               # 每場最多幾輪
 # max_tokens = 80000           # 每場討論（含主持人）的 token 上限
 # speak_turns = 6              # 每次發言最多幾次模型呼叫（含查資料）
+# join_minutes = 10            # 跨對話的組對組：等其他對話加入的時限
+# turn_minutes = 15            # 等別台代表發言的時限
+# [web]
+# public_url = "http://192.168.10.70:3080"   # 別台連得到的位址（討論廳邀請碼用）
