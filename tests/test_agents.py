@@ -652,3 +652,12 @@ def test_role_names_may_be_chinese(tmp_path):
     assert parse_role("---\nname: 審查員-2\n---\nx", "x", "", "").name == "審查員-2"
     for bad in ("a b", "../x", "_x", "x/y", ""):
         assert parse_role(f"---\nname: {bad}\n---\nx", "", "", "") is None, bad
+
+
+def test_arrow_keys_in_the_command_menu_do_not_rebuild_it():
+    from xharness.web import INDEX_HTML
+
+    move = INDEX_HTML.split("function movePop(d)")[1].split("}")[0]
+    assert "markPop()" in move and "updatePop" not in move and "showMentions" not in move
+    assert "pop.scrollTop" in INDEX_HTML.split("function markPop()")[1].split("function movePop")[0]
+    assert ".cmdpop .ci:hover" not in INDEX_HTML        # one highlight, moved by keys and mouse alike

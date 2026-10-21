@@ -2,6 +2,12 @@
 
 中文 | English below
 
+## 1.13.4 — 2026-10-21
+
+- **指令選單用方向鍵選時跟得上**：輸入 `/` 後按 ↓，原本每按一次就把整個選單重建，清單的捲動位置被拉回頂端，超過第八項以後反白跑到看不見的地方、畫面像卡住。改成方向鍵只移動反白、清單在自己的框內捲動讓反白一直看得到（不捲動整頁）；滑鼠移過去與方向鍵共用同一個反白，不再同時亮兩列。實測 .70：按 ↓ 12 次停在第 13 項 `/feedback`，仍在框內可見。`@檔案` 選單同樣修正。
+
+- **Arrow keys in the command menu keep up**: after typing `/`, every ↓ used to rebuild the whole menu, which reset its scroll to the top, so past the eighth item the highlight sank out of sight and the screen looked stuck. Arrow keys now only move the highlight, and the list scrolls inside its own box to keep it in view (the page does not move); hovering moves the same single highlight instead of lighting a second row. Measured on .70: twelve presses of ↓ land on item 13, `/feedback`, still in view. The `@file` menu is fixed the same way.
+
 ## 1.13.3 — 2026-10-21
 
 - **角色名稱可以用中文**：原本只收英數字，所以範例角色只能叫 advocate、skeptic；現在任何文字都行（不能有空白或路徑符號），四個範例改名為 `查資料員`、`審查員`、`正方`、`反方`，首頁「代理討論」的範本改成「讓 正方 和 反方 辯論」。

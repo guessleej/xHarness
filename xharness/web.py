@@ -1711,7 +1711,7 @@ body:not(.landing) .landing{display:none}
 .cmdpop{position:absolute;left:0;right:0;bottom:calc(100% + 8px);background:var(--surface);border-radius:16px;box-shadow:var(--shadow);padding:6px;
   max-height:300px;overflow-y:auto;z-index:30;animation:rise .18s var(--ease)}
 .cmdpop .ci{display:flex;align-items:baseline;gap:10px;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:14px}
-.cmdpop .ci.on,.cmdpop .ci:hover{background:var(--tint)}
+.cmdpop .ci.on{background:var(--tint)}
 .cmdpop .cn{font-family:var(--mono);font-weight:700;color:var(--brand);white-space:nowrap}
 .cmdpop .ca{font-family:var(--mono);font-size:12.5px;color:var(--ink-3);white-space:nowrap}
 .cmdpop .ch{color:var(--ink-2);font-size:13.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -2810,8 +2810,8 @@ body:not(.view-admin) #admin{display:none}
     if(!items.length){closePop();return;}
     items.forEach((f,i)=>{const it=h('div','ci'+(i===popIndex?' on':''));it.setAttribute('role','option');
       it.append(h('span','cn','@'),h('span','ch',f.path),h('span','ca',humanSize(f.bytes)));
-      it.onmousedown=ev=>{ev.preventDefault();popIndex=i;pickPop();};pop.appendChild(it);});
-    pop.hidden=false;
+      it.onmousedown=ev=>{ev.preventDefault();popIndex=i;pickPop();};it.onmousemove=()=>{if(popIndex!==i){popIndex=i;markPop();}};pop.appendChild(it);});
+    pop.hidden=false;markPop();
   }
   function updatePop(){
     const t=input.value;const pop=$('#cmdpop');
@@ -2824,11 +2824,18 @@ body:not(.view-admin) #admin{display:none}
     popIndex=Math.min(popIndex,popItems.length-1);pop.textContent='';
     popItems.forEach((c,i)=>{const it=h('div','ci'+(i===popIndex?' on':''));it.setAttribute('role','option');
       it.append(h('span','cn','/'+c.name),h('span','ca',c.args||''),h('span','ch',c.help));
-      it.onmousedown=ev=>{ev.preventDefault();popIndex=i;pickPop();};pop.appendChild(it);});
-    pop.hidden=false;
+      it.onmousedown=ev=>{ev.preventDefault();popIndex=i;pickPop();};it.onmousemove=()=>{if(popIndex!==i){popIndex=i;markPop();}};pop.appendChild(it);});
+    pop.hidden=false;markPop();
   }
-  function movePop(d){if(!popItems.length)return;popIndex=(popIndex+d+popItems.length)%popItems.length;
-    if(popMode==='file')showMentions(popItems);else updatePop();}
+  // Arrow keys move the highlight only. Rebuilding the list on every key reset its scroll
+  // to the top, so past the eighth item the highlight sank out of sight.
+  function markPop(){
+    const pop=$('#cmdpop');[...pop.children].forEach((el,i)=>{el.classList.toggle('on',i===popIndex);el.setAttribute('aria-selected',String(i===popIndex));});
+    const cur=pop.children[popIndex];if(!cur)return;
+    const pr=pop.getBoundingClientRect(),cr=cur.getBoundingClientRect();   // scroll the list only, never the page
+    if(cr.top<pr.top)pop.scrollTop-=pr.top-cr.top+4;else if(cr.bottom>pr.bottom)pop.scrollTop+=cr.bottom-pr.bottom+4;
+  }
+  function movePop(d){if(!popItems.length)return;popIndex=(popIndex+d+popItems.length)%popItems.length;markPop();}
   function pickPop(){const c=popItems[popIndex];if(!c)return;
     if(popMode==='file'){const pos=input.selectionStart;const v=input.value;const insert='@'+c.path+' ';
       input.value=v.slice(0,mentionAt)+insert+v.slice(pos);const caret=mentionAt+insert.length;closePop();autosize();input.focus();input.setSelectionRange(caret,caret);return;}
