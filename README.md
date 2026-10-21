@@ -426,6 +426,12 @@ max_tokens: 40000              # 選填，這個代理的 token 上限
 
 `subagent`、`subagent_batch`、`workflow` 的每一步與討論的參與者都可以帶 `agent: analyst`，模型會在 system prompt 看到角色清單。角色只能**縮小**權限：工具清單與這個人原本就有的工具取交集（使用者分層拒絕的工具早已拿掉），模型必須是設定檔裡、而且這個人可以用的；不符合就用呼叫者的模型，並在結果裡說明。
 
+**現成的四個角色**：repo 的 `examples/agents/` 有 `researcher`（查資料員）、`reviewer`（審查員）、`advocate`（正方）、`skeptic`（反方），複製到站台的 `.xharness/agents/` 就給所有人用：
+
+```bash
+mkdir -p .xharness/agents && cp examples/agents/*.md .xharness/agents/
+```
+
 ### 代理管理
 
 每段對話會登記正在工作的代理：子代理、工作流程的步驟、討論的參與者。網頁右側「檢視 → 代理」列出每一個的角色、模型、正在做什麼、用了多少 token 與幾次呼叫，可以單獨停止、停止整場討論或全部停止；按下對話的「停止」也會連同所有代理一起停。終端機用 `/agents` 看清單、`/agents stop` 全部停止。每個代理結束時在 session 留一筆 `agent-run`，服務使用報告依角色拆開用量、失敗與被停止的次數。

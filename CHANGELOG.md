@@ -2,6 +2,14 @@
 
 中文 | English below
 
+## 1.13.1 — 2026-10-21
+
+- **找得到代理功能**：首頁「從這裡開始」新增「代理討論」，點下去把範本填進輸入框、選取題目讓你直接改，不會自己送出（原本登入後看不到任何代理相關的入口）。
+- **現成角色**：`examples/agents/` 附四個角色：`researcher`（查資料員）、`reviewer`（審查員）、`advocate`（正方）、`skeptic`（反方），複製到站台的 `.xharness/agents/` 就給所有人用。
+
+- **Finding the agents**: the home page's starters gain "代理討論" (agent discussion), which fills a template into the input box and selects the topic for you to type over, without sending it (until now nothing after sign-in pointed at the agent features).
+- **Ready-made roles**: `examples/agents/` ships `researcher`, `reviewer`, `advocate` and `skeptic`; copy them into the site's `.xharness/agents/` to give them to everyone.
+
 ## 1.13.0 — 2026-10-21
 
 管理 AI agent，並讓 agent 之間互相對話。

@@ -612,3 +612,13 @@ def test_a_stop_before_the_recheck_skips_it(tmp_path):
     run_room(h, tmp_path, topic="t", participants=["甲", "乙"], rounds=3)
     assert len(llm.asked("You are 甲,")) == 1          # no recheck run after the stop
     assert log.of("discussion-end")[0]["reason"] == "stopped" and not log.of("discussion-turn")
+
+
+def test_the_home_page_offers_a_discussion_and_the_example_roles_parse():
+    from xharness.web import INDEX_HTML
+
+    assert "代理討論" in INDEX_HTML and "setSelectionRange" in INDEX_HTML      # fills the box, does not send
+    here = os.path.join(os.path.dirname(__file__), "..", "examples", "agents")
+    roles = RoleStore({"dirs": [here]}, site_dir=here).discover(None)
+    assert {r.name for r in roles} == {"researcher", "reviewer", "advocate", "skeptic"}
+    assert all(r.description and r.prompt and r.tools for r in roles)

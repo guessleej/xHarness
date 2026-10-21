@@ -2837,14 +2837,17 @@ body:not(.view-admin) #admin{display:none}
   // ---- landing ----------------------------------------------------------------------
   const STARTERS=[
     ['認識專案','eye','摘要這個工作目錄在做什麼','摘要這個工作目錄在做什麼，先看有哪些檔案再回答。'],
-    ['找東西','search','最近改過哪些檔案，各自在做什麼','列出這個目錄最近修改過的 10 個檔案，說明各自的用途。'],
+    // A discussion needs a topic: this one only fills the box (prefill) and waits for the person.
+    ['代理討論','users','讓幾個代理針對一個題目辯論','讓 advocate 和 skeptic 辯論：在這裡寫題目，兩輪。發言前先查資料。','在這裡寫題目'],
     ['資安','shield','掃一次這個專案的資安問題','對這個目錄跑一次 security_scan，並用白話解釋每一項發現。'],
     ['交接','users','新同事接手該先讀哪三個檔案','這個專案如果要交給新同事接手，最需要先讀的三個檔案是哪些？為什麼？']];
   function renderLanding(){
     const box=$('#starters');if(!box.childElementCount){
-      STARTERS.forEach(([k,ic,v,task])=>{const b=h('button','start'),i=h('span','ic');i.appendChild(icon(ic));
+      STARTERS.forEach(([k,ic,v,task,blank])=>{const b=h('button','start'),i=h('span','ic');i.appendChild(icon(ic));
         const tx=h('span');tx.append(h('span','sk',k),h('span','sv',v));b.append(i,tx);
-        b.onclick=()=>{input.value=task;autosize();send();};box.appendChild(b);});
+        b.onclick=()=>{input.value=task;autosize();
+          if(blank){const at=task.indexOf(blank);input.focus();input.setSelectionRange(at,at+blank.length);return;}
+          send();};box.appendChild(b);});
     }
     const hour=new Date().getHours(),greet=hour<11?'早安':hour<14?'午安':hour<18?'午安':'晚安';
     $('#hero-title').textContent=greet+(me?'，'+me.display:'')+'。今天要交給 agent 什麼事？';

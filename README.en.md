@@ -451,6 +451,12 @@ You analyse institutional indicators. Look the data up before you answer and quo
 
 `subagent`, `subagent_batch`, every `workflow` step and every discussion participant take `agent: analyst`; the model sees the list of roles in its system prompt. A role can only **narrow** what an agent may do: its tool list is intersected with the tools the person already has (a tier's denied tools are gone before that), and its model must be configured and allowed for this person; otherwise the caller's model runs it and the result says so.
 
+**Four ready-made roles**: `examples/agents/` in the repo holds `researcher`, `reviewer`, `advocate` and `skeptic`; copy them into the site's `.xharness/agents/` to give them to everyone:
+
+```bash
+mkdir -p .xharness/agents && cp examples/agents/*.md .xharness/agents/
+```
+
 ### Managing agents
 
 Every conversation registers the agents working for it: children, workflow steps, discussion participants. In the Web UI, Review → Agents lists each one's role, model, what it is doing, tokens and calls, and stops one, a whole discussion, or all of them; the conversation's Stop button stops them all too. In the terminal `/agents` lists them and `/agents stop` stops them. Each agent leaves an `agent-run` record in the session, and the usage report breaks spending, failures and stops down by role.
