@@ -43,8 +43,16 @@ def _parse_ts(value: Any) -> datetime | None:
 
 
 def task_records(directory: str | None, since: datetime) -> list[dict[str, Any]]:
-    """Per-task usage deltas from every session log touched since `since`."""
-    directory = directory or sessions_dir()
+    """Per-task usage deltas from every session log touched since `since`.
+
+    No directory means all of them: the shared store and, with accounts on, every
+    person's own (the fleet chart read only the shared one and stayed at zero)."""
+    if directory is None:
+        from .session import session_owners
+
+        merged = [record for _user, path in session_owners() for record in task_records(path, since)]
+        merged.sort(key=lambda record: record["ts"])
+        return merged
     if not os.path.isdir(directory):
         return []
     records: list[dict[str, Any]] = []

@@ -2,6 +2,18 @@
 
 中文 | English below
 
+## 1.13.2 — 2026-10-21
+
+- **艦隊頁不再跳動**：頁面每 2.5 秒更新一次，原本每次都把所有卡片與數字方塊整個拆掉重建，卡片的進場動畫（淡入並上移）就每 2.5 秒重播一次，整頁看起來一直在跳；在卡片裡回答代理提問時，打到一半的字也會被清掉。改成依任務比對、只更新有變的卡片，只有執行時間變就只改那個數字，進場動畫只在卡片第一次出現時播；正在輸入的卡片不會被換掉。實測 .70：連續三次更新，卡片元素不變、動畫 0 次、新增節點 0 個。
+- **用量趨勢圖是平的**：開了帳號之後每個人的 session 存在自己的目錄，趨勢圖只讀共用目錄，所以總用量有三萬多 tokens 圖卻是 0；現在管理者看到所有人的、一般使用者看到自己的。
+- **縱軸刻度**：最大值很小時刻度四捨五入成 1、1、1、0、0；改用 1、2、5 倍數的整數刻度。
+- **「代理」數字**：艦隊頁的數字方塊與卡片原本只算子代理，現在連工作流程步驟與討論參與者一起算，卡片列出正在工作的代理名稱與角色。
+
+- **The fleet page no longer jumps**: it refreshes every 2.5 seconds and used to tear down and rebuild every card and tile each time, replaying their entrance animation (fade in, slide up) so the whole page appeared to jump, and wiping a half-typed answer to an agent's question. Cards are now matched by task and only changed ones are redrawn; a new running time only updates that number; the entrance animation plays once; a card being typed in is never replaced. Measured on .70: three refreshes, same elements, 0 animations, 0 nodes added.
+- **The usage trend was flat**: with accounts on, each person's sessions live in their own directory and the chart read only the shared one, showing 0 beside a total of over 30,000 tokens; admins now see everyone's and others their own.
+- **Axis ticks**: a small maximum rounded its quarter ticks to 1, 1, 1, 0, 0; ticks are now whole 1-2-5 steps.
+- **The "agents" count**: the fleet tile and cards counted only subagents; workflow steps and discussion participants count too, and cards list the working agents with their roles.
+
 ## 1.13.1 — 2026-10-21
 
 - **找得到代理功能**：首頁「從這裡開始」新增「代理討論」，點下去把範本填進輸入框、選取題目讓你直接改，不會自己送出（原本登入後看不到任何代理相關的入口）。

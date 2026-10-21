@@ -622,3 +622,26 @@ def test_the_home_page_offers_a_discussion_and_the_example_roles_parse():
     roles = RoleStore({"dirs": [here]}, site_dir=here).discover(None)
     assert {r.name for r in roles} == {"researcher", "reviewer", "advocate", "skeptic"}
     assert all(r.description and r.prompt and r.tools for r in roles)
+
+
+def test_usage_history_reads_every_persons_sessions(monkeypatch, tmp_path):
+    from xharness.usage import history
+
+    def write(directory, name, tokens):
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, name), "w", encoding="utf-8") as handle:
+            handle.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
+                                     "type": "telemetry", "total_tokens": tokens, "calls": 1}) + "\n")
+    write(sessions_dir(None), "shared.jsonl", 100)
+    write(sessions_dir("jefflee"), "mine.jsonl", 900)
+    assert history(since="1d")["totals"]["total_tokens"] == 1000                    # the fleet chart: everyone
+    assert history(directory=sessions_dir("jefflee"), since="1d")["totals"]["total_tokens"] == 900
+
+
+def test_the_fleet_page_updates_cards_in_place():
+    from xharness.web import INDEX_HTML
+
+    assert "function syncCards" in INDEX_HTML and "data-key" not in INDEX_HTML.split("function syncCards")[0][-200:]
+    assert ".fc{background:var(--surface);border-radius:18px;padding:16px 18px;box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:8px}" in INDEX_HTML
+    assert "kp.textContent='';" not in INDEX_HTML.split("async function renderFleet")[1].split("function enter")[0].replace(
+        "if(kp.children.length!==tiles.length){kp.textContent='';", "")     # tiles are not rebuilt on every poll

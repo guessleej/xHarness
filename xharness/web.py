@@ -688,7 +688,9 @@ class WebApp:
                 "conversations": len(items),
                 "running": sum(1 for item in items if item["state"] == "running"),
                 "waiting": sum(1 for item in items if item["state"] == "waiting"),
-                "children": sum(len(item["children"]) for item in items),
+                # Every agent working, not only subagents: workflow steps and discussion participants too.
+                "children": sum(max(len(item["children"]), sum(1 for a in item.get("agents") or [] if a["status"] == "running"))
+                                for item in items),
                 "total_tokens": usage_total,
             },
             "items": items,
@@ -1092,7 +1094,9 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 bucket = (query.get("bucket") or [None])[0] or choose_bucket(parse_since(since))
                 self._json(200, {
                     "node": app.node_name,
-                    "history": history(since=since, bucket=bucket),
+                    # Everyone's usage for an admin (and a hub); a signed-in person sees their own.
+                    "history": history(directory=None if is_admin(self.principal) else sessions_dir(principal_name(self.principal)),
+                                       since=since, bucket=bucket),
                     "nodes": poll_usage_all(list(app.nodes.values()), since, bucket) if app.nodes else [],
                 })
                 return
@@ -1836,7 +1840,8 @@ body:not(.view-chat) .conv,body:not(.view-chat) .review{display:none}
 body:not(.view-fleet) #fleet{display:none}
 body:not(.view-admin) #admin{display:none}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:6px 0 18px}
-.kpi{background:var(--surface);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow-sm);animation:rise .45s var(--ease) both}
+.kpi{background:var(--surface);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow-sm)}
+.kpi.enter,.fc.enter{animation:rise .4s var(--ease) both}
 .kpi .n{font-size:26px;font-weight:800;line-height:1.15}
 .kpi .l{font-size:12.5px;color:var(--ink-3);margin-top:2px}
 .kpi.hot .n{color:var(--warn)}
@@ -1845,7 +1850,7 @@ body:not(.view-admin) #admin{display:none}
 .sect .m{font-size:12.5px;color:var(--ink-3)}
 .sect .down{color:var(--brand);font-size:13px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.fc{background:var(--surface);border-radius:18px;padding:16px 18px;box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:8px;animation:rise .4s var(--ease) both}
+.fc{background:var(--surface);border-radius:18px;padding:16px 18px;box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:8px}
 .fc.current{background:var(--tint)}
 .fc .head{display:flex;align-items:center;gap:8px}
 .fc .prev{font-size:15px;line-height:1.45;max-height:4.3em;overflow:hidden}
@@ -3087,21 +3092,41 @@ body:not(.view-admin) #admin{display:none}
       const f=await api('/api/fleet');const k=Object.assign({},f.summary);
       (f.nodes||[]).forEach(n=>{const s=n.summary||{};['conversations','running','waiting','children','total_tokens'].forEach(key=>{k[key]=(k[key]||0)+(s[key]||0);});});
       const nodesUp=(f.nodes||[]).filter(n=>n.ok).length,nodesAll=(f.nodes||[]).length;
-      const kp=$('#kpis');kp.textContent='';
-      [['任務',k.conversations],['執行中',k.running],['等你回應',k.waiting,k.waiting>0],['子代理',k.children],['總 tokens',fmtNum(k.total_tokens)]].concat(nodesAll?[['節點在線',nodesUp+'/'+nodesAll]]:[])
-        .forEach(([l,n,hot])=>{const d=h('div','kpi'+(hot?' hot':''));d.append(h('div','n',String(n==null?0:n)),h('div','l',l));kp.appendChild(d);});
+      // Redrawn every 2.5 s: only what changed is touched, and the entrance animation
+      // plays once per element -- rebuilding everything made the whole page jump.
+      const kp=$('#kpis');
+      const tiles=[['任務',k.conversations],['執行中',k.running],['等你回應',k.waiting,k.waiting>0],['代理',k.children],['總 tokens',fmtNum(k.total_tokens)]].concat(nodesAll?[['節點在線',nodesUp+'/'+nodesAll]]:[]);
+      if(kp.children.length!==tiles.length){kp.textContent='';tiles.forEach(()=>{const d=enter(h('div','kpi'));d.append(h('div','n'),h('div','l'));kp.appendChild(d);});}
+      tiles.forEach(([l,n,hot],i)=>{const d=kp.children[i];d.classList.toggle('hot',!!hot);
+        const v=String(n==null?0:n);if(d.firstChild.textContent!==v)d.firstChild.textContent=v;if(d.lastChild.textContent!==l)d.lastChild.textContent=l;});
       const fc=$('#fleet-cnt');fc.hidden=!k.waiting;fc.textContent=k.waiting||'';
-      const lh=$('#local-head');lh.textContent='';lh.append(h('h2',null,'本機：'+f.node),h('span','m','v'+f.version+'・'+f.model));
-      const g=$('#fleet-grid');g.textContent='';
-      if(!f.items.length)g.appendChild(h('div','empty','本機還沒有任務。到「工作台」交代第一件事。'));
-      f.items.forEach(it=>g.appendChild(card(it,null)));
-      const nb=$('#nodes');nb.textContent='';
-      (f.nodes||[]).forEach(n=>{const hd=h('div','sect');hd.append(h('h2',null,'節點：'+n.name),h('span','m',n.url+(n.ok?'・v'+(n.version||'?')+'・'+(n.model||'')+'・'+n.latency_ms+'ms':'')));
-        if(!n.ok)hd.appendChild(h('span','down','離線：'+(n.error||'')));
-        nb.appendChild(hd);const gg=h('div','grid');
-        if(n.ok&&!n.items.length)gg.appendChild(h('div','empty','此節點沒有任務。'));
-        (n.items||[]).forEach(it=>gg.appendChild(card(it,n)));nb.appendChild(gg);});
+      const lh=$('#local-head'),head='本機：'+f.node+'|v'+f.version+'・'+f.model;
+      if(lh.dataset.sig!==head){lh.dataset.sig=head;lh.textContent='';lh.append(h('h2',null,'本機：'+f.node),h('span','m','v'+f.version+'・'+f.model));}
+      syncCards($('#fleet-grid'),f.items,null,'本機還沒有任務。到「工作台」交代第一件事。');
+      const nb=$('#nodes');
+      (f.nodes||[]).forEach(n=>{let sec=nb.querySelector('[data-node="'+CSS.escape(n.name)+'"]');
+        if(!sec){sec=h('div');sec.dataset.node=n.name;sec.append(h('div','sect'),h('div','grid'));nb.appendChild(sec);}
+        const hd=sec.firstChild,line=n.url+(n.ok?'・v'+(n.version||'?')+'・'+(n.model||'')+'・'+n.latency_ms+'ms':'');
+        if(hd.dataset.sig!==line+(n.error||'')){hd.dataset.sig=line+(n.error||'');hd.textContent='';hd.append(h('h2',null,'節點：'+n.name),h('span','m',line));
+          if(!n.ok)hd.appendChild(h('span','down','離線：'+(n.error||'')));}
+        syncCards(sec.lastChild,n.ok?(n.items||[]):[],n,n.ok?'此節點沒有任務。':'');});
+      [...nb.children].forEach(sec=>{if(!(f.nodes||[]).some(n=>n.name===sec.dataset.node))sec.remove();});
     }catch(e){console.error(e)}
+  }
+  function enter(el){el.classList.add('enter');el.addEventListener('animationend',()=>el.classList.remove('enter'),{once:true});return el;}
+  function syncCards(grid,items,node,emptyText){
+    // Keyed by conversation: unchanged cards stay put (a card being typed into is never replaced),
+    // a card whose only change is the running time just updates that number.
+    const seen=new Set();
+    grid.querySelectorAll(':scope > .empty').forEach(e=>e.remove());
+    items.forEach((it,i)=>{const key=it.id;seen.add(key);const sig=JSON.stringify(Object.assign({},it,{elapsed:null,last_activity:null}));
+      let el=grid.querySelector(':scope > [data-key="'+CSS.escape(key)+'"]');
+      if(el&&el.dataset.sig!==sig&&!el.contains(document.activeElement)){const fresh=card(it,node);fresh.dataset.key=key;fresh.dataset.sig=sig;el.replaceWith(fresh);el=fresh;}
+      if(!el){el=enter(card(it,node));el.dataset.key=key;el.dataset.sig=sig;}
+      const tm=el.querySelector('.tm'),txt=it.elapsed!=null?it.elapsed+' 秒':'';if(tm&&tm.textContent!==txt)tm.textContent=txt;
+      if(grid.children[i]!==el)grid.insertBefore(el,grid.children[i]||null);});
+    [...grid.children].forEach(el=>{if(el.dataset.key&&!seen.has(el.dataset.key))el.remove();});
+    if(!items.length&&emptyText&&!grid.children.length)grid.appendChild(h('div','empty',emptyText));
   }
   function card(it,node){
     const mine=!node&&it.id===conv,c=h('div','fc'+(mine?' current':''));
@@ -3109,10 +3134,12 @@ body:not(.view-admin) #admin{display:none}
     const u=it.usage||{};
     const head=h('div','head');const pill=h('span','pill '+it.state);pill.append(h('span','dot '+it.state),document.createTextNode(fmtState(it.state)));head.appendChild(pill);
     if(mine)head.appendChild(h('span','pill running','目前開著'));
-    head.appendChild(h('span','grow'));if(it.elapsed!=null)head.appendChild(h('span','tm',it.elapsed+' 秒'));
+    head.appendChild(h('span','grow'));head.appendChild(h('span','tm',it.elapsed!=null?it.elapsed+' 秒':''));
     c.append(head,h('div','prev',it.preview||'（尚未送出訊息）'));
     const meta=h('div','meta');[fmtNum(u.total_tokens)+' tokens',(u.calls||0)+' 次模型呼叫',(it.tool_calls||0)+' 個步驟',it.model,'session '+it.session].forEach(t=>meta.appendChild(h('span',null,t)));c.appendChild(meta);
-    if(it.children.length){const kids=h('div','kids','子代理：');it.children.forEach(ch=>{const s=h('span',null,ch.name);s.title=ch.task;kids.appendChild(s);});c.appendChild(kids);}
+    const working=(it.agents||[]).filter(a=>a.status==='running');
+    if(working.length){const kids=h('div','kids','代理：');working.forEach(a=>{const s=h('span',null,a.name+(a.role?'（'+a.role+'）':''));s.title=a.activity||a.task||'';kids.appendChild(s);});c.appendChild(kids);}
+    else if(it.children.length){const kids=h('div','kids','子代理：');it.children.forEach(ch=>{const s=h('span',null,ch.name);s.title=ch.task;kids.appendChild(s);});c.appendChild(kids);}
     const ap=h('div','apprs');
     it.pending_approvals.forEach(a=>{const d=h('div','appr');d.appendChild(h('span','s',a.summary));
       const ok=h('button','btn primary sm','允許'),no=h('button','btn sm','拒絕');
@@ -3162,7 +3189,10 @@ body:not(.view-admin) #admin{display:none}
     const box=$('#usage-chart');box.textContent='';if(!usageData)return;
     const ref=usageData.series.find(s=>s.history);if(!ref){box.appendChild(h('div','empty','還沒有用量資料。'));return;}
     const buckets=ref.history.series,n=buckets.length,W=box.clientWidth||800,H=240,padL=56,padR=16,padT=12,padB=28;
-    const max=Math.max(1,...usageData.series.flatMap(s=>s.history?s.history.series.map(b=>b.total_tokens):[0]));
+    const top=Math.max(1,...usageData.series.flatMap(s=>s.history?s.history.series.map(b=>b.total_tokens):[0]));
+    // Round tick steps (1, 2, 5 x 10^n): with a small maximum, quarters of it rounded to 0, 0, 1, 1, 1.
+    let step=Math.max(1,Math.pow(10,Math.floor(Math.log10(top/4))));step=[1,2,5,10].map(m=>m*step).find(v=>v*4>=top)||step*10;
+    const max=step*4;
     const x=i=>padL+(n<=1?0:(W-padL-padR)*i/(n-1)),y=v=>padT+(H-padT-padB)*(1-v/max);
     const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 '+W+' '+H);
     const grid=document.createElementNS(ns,'g');grid.setAttribute('class','grid');const axis=document.createElementNS(ns,'g');axis.setAttribute('class','axis');
