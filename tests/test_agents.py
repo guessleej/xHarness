@@ -661,3 +661,12 @@ def test_arrow_keys_in_the_command_menu_do_not_rebuild_it():
     assert "markPop()" in move and "updatePop" not in move and "showMentions" not in move
     assert "pop.scrollTop" in INDEX_HTML.split("function markPop()")[1].split("function movePop")[0]
     assert ".cmdpop .ci:hover" not in INDEX_HTML        # one highlight, moved by keys and mouse alike
+
+
+def test_the_page_revalidates_and_offers_a_reload_after_an_upgrade():
+    from xharness.web import INDEX_HTML
+
+    assert "xHarness 已更新到" in INDEX_HTML and "location.reload()" in INDEX_HTML
+    assert "popIndex=0;}" in INDEX_HTML.split("function closePop()")[1][:120]
+    src = open(os.path.join(os.path.dirname(__file__), "..", "xharness", "web.py"), encoding="utf-8").read()
+    assert 'self.send_header("Cache-Control", "no-cache")' in src.split("def _html")[1][:900]

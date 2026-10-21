@@ -869,6 +869,8 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
+            # Revalidate on every load: after an upgrade a cached page kept running the old interface.
+            self.send_header("Cache-Control", "no-cache")
             self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
@@ -1928,6 +1930,8 @@ body:not(.view-admin) #admin{display:none}
 .toasts{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:95;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
 .toast{background:var(--ink);color:var(--bg);font-size:14px;padding:10px 16px;border-radius:12px;box-shadow:var(--shadow);animation:rise .25s var(--ease);max-width:min(560px,92vw)}
 .toast.bad{background:var(--brand);color:#fff}
+.toast.update{pointer-events:auto;display:flex;align-items:center;gap:12px;position:fixed;top:calc(var(--top) + 10px);left:50%;transform:translateX(-50%);z-index:95}
+.toast.update button{font:inherit;font-weight:700;border:0;border-radius:9px;padding:5px 12px;background:var(--brand);color:#fff;cursor:pointer}
 .dlg-back{position:fixed;inset:0;z-index:92;background:rgba(8,16,22,.45);display:none;place-items:center;padding:16px}
 .dlg-back.on{display:grid}
 .dlg{width:min(420px,100%);background:var(--surface);border-radius:18px;box-shadow:var(--shadow);padding:22px 22px 18px;animation:rise .25s var(--ease)}
@@ -2799,7 +2803,7 @@ body:not(.view-admin) #admin{display:none}
   // ---- slash-command popup ----
   let popIndex=0,popItems=[];
   function exactCommand(){const t=input.value.trim();const c=commandOf(t);return !!c&&(t.length>c.name.length+1||!c.args);}
-  function closePop(){$('#cmdpop').hidden=true;popItems=[];popMode='cmd';}
+  function closePop(){$('#cmdpop').hidden=true;popItems=[];popMode='cmd';popIndex=0;}   // reopened menus start at the top
   let popMode='cmd',mentionAt=-1,mentionTimer=null;
   function mentionQuery(){
     const pos=input.selectionStart,before=input.value.slice(0,pos);const m=before.match(/(^|\s)@([^\s@]*)$/);
@@ -3459,6 +3463,13 @@ body:not(.view-admin) #admin{display:none}
     refreshTasks(true);loadDayUsage();renderLanding();loadModels();
     try{commands=await api('/api/commands');}catch(e){}
     input.focus();
+    // A page left open across an upgrade keeps running the old interface: say so once, with a reload button.
+    const loaded=meta.version;let told=false;
+    setInterval(async()=>{if(told||document.hidden||gateOn)return;
+      try{const m=await api('/api/meta');if(m.version&&m.version!==loaded){told=true;
+        const t=h('div','toast update');t.append(document.createTextNode('xHarness 已更新到 '+m.version+'，重新整理才會用到新版。'));
+        const b=h('button',null,'重新整理');b.onclick=()=>location.reload();t.appendChild(b);document.body.appendChild(t);}}catch(e){}   // top, clear of the composer
+    },60000);
   })();
 })();
 </script>

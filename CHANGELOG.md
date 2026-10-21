@@ -2,6 +2,16 @@
 
 中文 | English below
 
+## 1.13.5 — 2026-10-21
+
+- **升級後不會再看到舊畫面**：網頁本身原本沒有快取指示，部署新版後已開著的分頁照樣跑舊介面（1.13.4 修好的選單方向鍵，舊分頁裡還是壞的）。現在每次載入都向伺服器確認最新版；分頁開著時伺服器升級了，畫面上方會出現「xHarness 已更新到 x.y.z，重新整理才會用到新版」與「重新整理」按鈕。
+- 指令選單每次打開都從第一項開始（原本會停在上次的位置）。
+- 實測 Edge：方向鍵一次移一格（↓ 五次、↑ 兩次依序停在 2→6→4），滑鼠停在選單上按 ↓ 也照常移動；模擬伺服器升級後一分鐘內出現更新提示，位置在導覽列下方、不擋輸入框。
+
+- **No stale interface after an upgrade**: the page itself carried no caching directive, so a tab left open across a deployment kept running the old interface (the arrow-key fix of 1.13.4 stayed broken in such a tab). The page now revalidates on every load, and when the server is upgraded under an open tab a banner says so with a reload button.
+- The command menu starts at the first item each time it opens (it used to remember the last position).
+- Measured in Edge: one row per key press (five ↓ and two ↑ step 2→6→4), arrows still move with the mouse resting over the menu, and after a simulated upgrade the banner appears within a minute, below the navigation bar, clear of the input box.
+
 ## 1.13.4 — 2026-10-21
 
 - **指令選單用方向鍵選時跟得上**：輸入 `/` 後按 ↓，原本每按一次就把整個選單重建，清單的捲動位置被拉回頂端，超過第八項以後反白跑到看不見的地方、畫面像卡住。改成方向鍵只移動反白、清單在自己的框內捲動讓反白一直看得到（不捲動整頁）；滑鼠移過去與方向鍵共用同一個反白，不再同時亮兩列。實測 .70：按 ↓ 12 次停在第 13 項 `/feedback`，仍在框內可見。`@檔案` 選單同樣修正。
