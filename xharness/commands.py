@@ -65,11 +65,24 @@ class Command:
     surfaces: tuple[str, ...] = ("web", "cli")
 
 
+def routing_on(config: Any) -> bool:
+    return bool((getattr(config, "routing", None) or {}).get("enabled"))
+
+
 def providers_for(config: Any, allowed: tuple[str, ...] = ()) -> list[dict[str, Any]]:
-    """Configured providers this person may use, without keys or full URLs."""
+    """Configured providers this person may use, without keys or full URLs.
+
+    With routing on, only the models routing knows about can be picked (a pick still goes
+    through the routing rules), and "auto" comes first."""
     rows = []
     describer = str((getattr(config, "vision", None) or {}).get("provider") or "")
+    routed = set((getattr(config, "routing", None) or {}).get("models") or {}) if routing_on(config) else None
+    if routed is not None:
+        rows.append({"name": "auto", "model": "自動路由", "hosting": "self-hosted", "endpoint": "",
+                     "context_tokens": None, "vision": False})
     for name, entry in (getattr(config, "providers", {}) or {}).items():
+        if routed is not None and name not in routed:
+            continue
         if allowed and name not in allowed:
             continue
         if name == describer:
@@ -94,6 +107,21 @@ def switch_model(host: CommandHost, name: str) -> CommandResult:
     if name not in choices:
         known = "、".join(choices) or "（沒有）"
         return CommandResult(f"沒有這個模型設定：{name}。可以用的有：{known}", ok=False)
+    router = host.ctx.optional("router")
+    if router is not None and host.ctx.optional("llm") is router:
+        # Routing stays on: a pick pins the model, and the rules that keep personal data and
+        # local files away from bought-in models still decide whether it may answer.
+        router.pin(None if name == "auto" else name)
+        host.agent.refresh_system_prompt()
+        session = host.ctx.optional("session")
+        if session:
+            session.append({"type": "model-switch", "provider": name, "model": "auto" if name == "auto" else router.model,
+                            "endpoint": "", "hosting": ""})
+        if name == "auto":
+            return CommandResult("已切換到自動路由：每個請求依規則挑模型。",
+                                 data={"provider": "auto", "model": "自動路由"})
+        return CommandResult(f"已指定 {name}（{router.model}）。個資與本機檔案的規則仍然有效；用 /model auto 回到自動路由。",
+                             data={"provider": name, "model": router.model})
     entry = host.config.providers[name]
     adapter = OpenAIAdapter(**entry)
     host.ctx.replace("llm", adapter)
@@ -136,8 +164,15 @@ def _compact(host: CommandHost, _args: str) -> CommandResult:
 def _model(host: CommandHost, args: str) -> CommandResult:
     name = args.strip()
     if not name:
+        router = host.ctx.optional("router")
         current = getattr(host.ctx.optional("llm"), "model", "")
         rows = providers_for(host.config, host.allowed_providers)
+        if router is not None:
+            state = router.status()
+            current = "自動路由" if not state["pinned"] else state["pinned"]
+            lines = [f"{'＊' if r['name'] == ('auto' if not state['pinned'] else state['pinned']) else '　'}{r['name']}　{r['model']}"
+                     + ("" if r["name"] == "auto" else f"（{'地端' if r['hosting'] == 'self-hosted' else '外部'}）") for r in rows]
+            return CommandResult(f"目前：{current}\n" + "\n".join(lines) + "\n用 /model 名稱 指定，/model auto 自動路由。")
         if not rows:
             return CommandResult(f"目前模型：{current}。設定檔裡沒有其他可切換的模型。")
         lines = [f"{'＊' if r['model'] == current else '　'}{r['name']}　{r['model']}（{'地端' if r['hosting'] == 'self-hosted' else '外部'}）"
@@ -146,6 +181,29 @@ def _model(host: CommandHost, args: str) -> CommandResult:
     if host.running:
         return CommandResult("任務還在進行，等它結束再換模型。", ok=False)
     return switch_model(host, name)
+
+
+def _route(host: CommandHost, _args: str) -> CommandResult:
+    router = host.ctx.optional("router")
+    if router is None:
+        return CommandResult("這台沒有開自動路由。在設定檔加 [routing] enabled = true 與 [routing.models.名稱]。", ok=False)
+    state = router.status()
+    last = state["last"]
+    lines = [("指定模型：" + state["pinned"]) if state["pinned"] else "自動路由中",
+             "這段對話已經接觸過本機檔案或工具結果（之後不送外部模型）" if state["tainted"] else "這段對話還沒有接觸過本機檔案"]
+    if last:
+        lines.append("上一次：" + str(last.get("reason") or ""))
+        for item in last.get("excluded") or []:
+            lines.append(f"　排除 {item['provider']}：{ROUTE_WHY.get(item['why'], item['why'])}")
+    for name, left in state["down"].items():
+        lines.append(f"　{name} 連不上，{left} 秒後再試")
+    lines.append("模型：" + "、".join(f"{m['name']}（{ {'local': '本機', 'private': '私有雲', 'public': '外部'}[m['where']] }，強度 {m['strength']}，成本 {m['cost']:g}）"
+                                      + ("" if m["allowed"] else "［這個帳號沒開］") for m in state["models"]))
+    return CommandResult("\n".join(lines), data=state)
+
+
+ROUTE_WHY = {"tier": "這個帳號沒有開放", "origin": "來源國在禁用清單", "files": "內容來自本機，不送外部",
+             "sensitive": "含個資或機密，不送外部", "tools": "不支援工具呼叫", "context": "上下文不夠"}
 
 
 def _skills(host: CommandHost, _args: str) -> CommandResult:
@@ -339,6 +397,7 @@ COMMANDS: dict[str, Command] = {c.name: c for c in (
     Command("new", "", "開始新的任務（終端機會清空目前對話）", _new),
     Command("compact", "", "把較早的對話整理成摘要，讓長對話可以繼續", _compact),
     Command("model", "[名稱]", "看目前的模型，或切換到設定檔裡的另一個", _model),
+    Command("route", "", "看自動路由：上一次選了哪個模型、為什麼、誰被排除", _route),
     Command("skills", "", "列出可以用的技能", _skills),
     Command("agents", "[stop]", "列出代理角色與這段對話的代理；stop 停止全部", _agents),
     Command("plan", "[on|off]", "計畫模式：先看、提計畫，你核准後才動手", _plan),

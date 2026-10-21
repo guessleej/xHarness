@@ -201,6 +201,28 @@ model = "your-model-id"
 # command = ["jdtls"]
 # extensions = [".java"]
 
+# --- Model routing ---------------------------------------------------------
+# Pick a model per request: hard rules (personal data and local files never go to a public
+# model, origin, account tier) -> capability and cost -> fallback. See README "Model routing".
+# [routing]
+# enabled = true
+# default = "local"
+# prefer = "cost"                 # cost | quality
+# external_sees = "prompt"        # prompt: public models see only what you type | all: files too
+# deny_origins = ["cn"]
+# sensitive_words = ["學號"]
+# decider = "small"               # optional: a small model on your own hardware
+# health_cooldown_seconds = 120
+# [routing.models.local]          # the name matches [providers.local]
+# where = "local"                 # local | private | public
+# strength = 1                    # 1 easy | 2 medium | 3 hard
+# cost = 0
+# origin = "tw"
+# [routing.models.cloud]
+# strength = 3
+# cost = 5
+# origin = "us"
+
 # --- Agent roles and discussions -------------------------------------------
 # Role files live in .xharness/agents/<name>.md (.claude/agents/ is read too),
 # in Claude Code's subagent format.

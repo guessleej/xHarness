@@ -323,7 +323,9 @@ class Agent:
     def build_system_prompt(self) -> str:
         cwd = self.options.cwd or os.getcwd()
         llm = self.llm
-        system = self.options.system_prompt or default_system_prompt(cwd, getattr(llm, "model", None))
+        # A routed model changes between tasks, so the identity line must not name one of them.
+        system = self.options.system_prompt or default_system_prompt(
+            cwd, None if getattr(llm, "routed", False) else getattr(llm, "model", None))
         # Always, even under a custom system prompt: without it the model
         # assumes a date from its training data. Measured 2026-10-14 -- asked
         # to move a notice to "next Friday", granite stated today was
@@ -489,22 +491,30 @@ class Agent:
             parts.append(current_date_line())
             self._told_date = today
         jobs = self.ctx.optional("jobs")
+        internal = False    # context that comes from this machine (files, hooks, jobs, pictures), see router.py
         for job in jobs.finished_unannounced() if jobs is not None and self.options.name == "main" else []:
+            internal = True
             parts.append(f"Background job {job.id} ({job.command[:120]}) ended: {job.state}"
                          + (f", exit {job.exit_code}" if job.exit_code is not None else "")
                          + f". Log: {job.log_path}")
         if self.plan_mode:
             parts.append(PLAN_CONTEXT)
         if extra_context:
+            internal = True
             parts.append(extra_context)
         parts += [f"From a hook: {text}" for text in hook_context]
+        internal = internal or bool(hook_context)
         image_note = self._image_context(task, list(images or []), llm)
         if image_note:
+            internal = True
             parts.append(image_note)
         context = "\n\n".join(parts) if parts else None
         message: dict[str, Any] = {"role": "user", "content": with_context(task, context)}
         if images:
             message["images"] = list(images)
+            internal = True
+        if internal:
+            message["internal"] = True      # never sent on the wire; the router reads it
         self.messages.append(message)
         if session:
             event = {"type": "message", "role": "user", "content": task, **self._tag()}
@@ -512,6 +522,8 @@ class Agent:
                 event["context"] = context
             if images:
                 event["images"] = list(images)
+            if internal:
+                event["internal"] = True
             session.append(event)
         self.ctx.emit("agent/task-start", {"task": task})
 

@@ -2,6 +2,24 @@
 
 中文 | English below
 
+## 1.16.0 — 2026-10-22
+
+自動路由：設定檔列了好幾個模型時，每個請求自己挑一個。預設關閉（`[routing] enabled = true`）。
+
+- **三層決定，由嚴格到寬鬆**：(1) 硬規則由程式決定、不問模型——帳號分層沒開放的、來源國在 `deny_origins`（預設 `cn`）的、不支援工具或上下文放不下的排除；**外部模型永遠看不到個資、金鑰與內網位址**（身分證字號、手機、電子郵件、通過檢查碼的信用卡號、API 金鑰、內網 IP、操作者的關鍵字與規則運算式），預設也看不到任何來自本機的內容（讀過的檔案、工具結果、附件、圖片、hook 輸出；`external_sees = "all"` 才放行檔案），碰過本機內容的對話即使歷史被壓縮成摘要也一直算；送外部模型用精簡系統提示、不帶 `mcp__` 工具；全部被排除就報錯說明原因，不改送到被排除的模型。(2) 能力與成本：請求依字詞、長度、工具迴圈長度分簡單／中等／困難，挑成本最低而夠強的、同分自己的機器優先；中等這段可交給自家機器上的小模型（`decider`，只回一個字）判斷。(3) 備援：連不上的模型暫時跳過、換下一個，只在還沒輸出任何字之前才換；有備援待命時，連不上的模型不再等 8 秒重試。
+- **手動指定仍受規則管**：`/model 名稱` 指定一個模型，個資與本機檔案的規則照樣有效；`/model auto` 回到自動；`/route` 看上一次的決定、誰被排除、誰連不上；`xharness route "請求"` 不呼叫模型直接試算。
+- **看得見、查得到**：每個決定寫進 session（`route`、`route-fallback`，只記類別、不記比對到的內容）；網頁在每一步顯示「選用誰、為什麼」，個資或本機檔案擋下外部模型時明說；使用報告與 Word 月報統計各模型次數、因個資或本機檔案而不送外部的次數、備援次數、拒絕次數；機密防護檢查頁新增三項（外部模型看得到什麼、`where` 與位址不符、中國來源模型有沒有被擋）。
+- Tailscale 位址（100.64.0.0/10）現在算自建（原本被當成外部，使用報告的「自建 vs 外購」會算錯）。
+- 實測 .70（含一個模擬外部的模型與一個在 .27 的中國來源模型）：「你好」第一選擇連不上，改用備援並在畫面標明（連不上的模型有備援待命時只花 0.02 秒，沒有備援才照舊等 8 秒重試）；含身分證字號的請求只用私有模型、畫面說明原因；沒有個資的困難請求用模擬外部模型，它發出讀檔後檔案內容一回來就改走私有模型；對話碰過檔案後手動指定外部模型被拒絕並說明；中國來源模型被排除。決策小模型（OCR 微調的 e4b）把「整理資料夾」判成困難，不適合當決策模型——換用前先用 `xharness route` 驗過。
+
+Model routing: with several models in the config, each request picks one. Off by default (`[routing] enabled = true`).
+
+- **Three layers, strictest first**: (1) hard rules decided by code, never by a model -- models the account's tier does not offer, whose origin is in `deny_origins` (default `cn`), that cannot call tools or whose context is too small are out; **a public model never sees personal data, keys or internal addresses** (national ID, mobile number, e-mail, checksum-valid card numbers, API keys, internal IPs, the operator's words and regexes), and by default nothing from this machine (files read, tool results, attachments, pictures, hook output; `external_sees = "all"` lets files out); a conversation that touched local material stays marked even after its history is compacted into a summary; public-bound calls carry a minimal system prompt and no `mcp__` tools; with nothing left the request fails with the reason instead of falling back to an excluded model. (2) Capability and cost: easy, medium or hard by words, length and tool-loop length; the cheapest strong enough model wins, own hardware first on a tie; an optional small model on your own hardware (`decider`, one-word answer) settles the medium middle. (3) Fallback: an unreachable model is skipped and the next takes over, only before any text was produced; with a stand-in waiting, a dead model no longer costs the 8-second retry.
+- **A manual pick still goes through the rules**: `/model name` pins a model, personal-data and local-file rules still apply; `/model auto` restores routing; `/route` shows the last decision, who was excluded and who is down; `xharness route "request"` rates a request without calling a model.
+- **Visible and checkable**: every decision is written to the session (`route`, `route-fallback`: categories only, never the text that matched); the Web UI says which model was picked and why on every step, and says so when personal data or local files kept a public model out; the usage report and Word report count decisions per model, requests kept off public models, fallbacks and refusals; the security check gains three items (what public models can see, `where` disagreeing with the address, China-origin models not blocked).
+- Tailscale addresses (100.64.0.0/10) now count as self-hosted (they were counted as external, which skewed the report's self-hosted vs bought-in split).
+- Measured on .70 (with a stand-in for a public model and a China-origin model on .27): "你好" with an unreachable first choice moved to the stand-in and said so on screen (a dead model costs 0.02 s when a stand-in waits, still 8 s of retries when none does); a request with a national ID used only private models and explained why; a hard request without personal data used the stand-in public model, which asked to read a file and, as soon as the content came back, the router moved to a private model; after the conversation had touched a file, pinning the public model was refused with an explanation; the China-origin model was excluded. The decider tried (an OCR-tuned e4b) rated "tidy this folder" as hard and is not a good decider -- check yours with `xharness route` first.
+
 ## 1.15.0 — 2026-10-21
 
 跨對話、跨機器的組對組：討論廳。

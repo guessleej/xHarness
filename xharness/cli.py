@@ -43,7 +43,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "users" manages accounts; "report" prints the service usage report; "eval <path>" runs a suite; "acp" serves an editor over the Agent Client Protocol; "web" starts the local UI; "desktop" opens it in a native window; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; "usage" shows token history; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "users" manages accounts; "report" prints the service usage report; "eval <path>" runs a suite; "acp" serves an editor over the Agent Client Protocol; "web" starts the local UI; "desktop" opens it in a native window; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; "route <text>" shows which model routing would pick, and why; "usage" shows token history; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -412,6 +412,35 @@ def _run_report(args: Any, config: Any) -> int:
     return 0
 
 
+def _run_route(args: argparse.Namespace, config: Any) -> int:
+    """`xharness route "task text"`: which model would answer, and why, without calling any model for the answer."""
+    from .router import Router, RouteConfig
+
+    if not (getattr(config, "routing", None) or {}).get("enabled"):
+        print("xharness: routing is off; add [routing] enabled = true and a [routing.models.<name>] section per model",
+              file=sys.stderr)
+        return 1
+    text = " ".join(args.task[1:]).strip()
+    if not text:
+        print('usage: xharness route "the request to rate"', file=sys.stderr)
+        return 2
+    try:
+        router = Router(RouteConfig.from_config(config))
+    except ValueError as error:
+        print(f"xharness: {error}", file=sys.stderr)
+        return 1
+    decision = router.explain(text, decide=bool(router.config.decider_entry))
+    print(f"難度：{decision['level']}（{'小模型判斷' if decision['source'] == 'decider' else '規則判斷'}）")
+    if decision["sensitive"]:
+        print("內容含：" + "、".join(decision["sensitive"]) + "（外部模型一律排除）")
+    print("選擇：" + (decision["choice"] or "沒有模型可以處理"))
+    if len(decision["ranking"]) > 1:
+        print("備援順序：" + " → ".join(decision["ranking"][1:]))
+    for item in decision["excluded"]:
+        print(f"排除 {item['provider']}：{item['why']}")
+    return 0 if decision["choice"] else 3
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.task and args.task[0] == "sessions":
@@ -438,6 +467,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_providers(args, config)
     if args.task and args.task[0] == "fleet":
         return _run_fleet(config)
+    if args.task and args.task[0] == "route":
+        return _run_route(args, config)
     if args.task and args.task[0] == "usage":
         return _run_usage(args, config)
     if args.task and args.task[0] == "users":

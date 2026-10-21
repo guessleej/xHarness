@@ -43,7 +43,7 @@ from .report import collect as collect_report
 from . import seccheck
 from .sandbox import resolve_sandbox
 from .commands import CommandHost, CommandResult, dispatch as dispatch_command, generate_title, listing as command_listing
-from .commands import MAX_FEEDBACK_NOTE, providers_for, switch_model
+from .commands import MAX_FEEDBACK_NOTE, providers_for, routing_on, switch_model
 from .goal import run_goal
 from .mentions import expand as expand_mentions, list_files
 from .hall import HallRegistry
@@ -440,6 +440,7 @@ class WebApp:
         harness.ctx.provide("halls", self.halls)
         harness.ctx.provide("host_url", lambda: self.host_url(conv))
         harness.ctx.provide("node_name", self.node_name)
+        harness.ctx.on("router/decision", lambda info: conv.push({"type": "route", **info}))
         for state in ("invite", "joined"):
             harness.ctx.on(f"discussion/{state}", lambda info, state=state: conv.push({"type": "discussion", "state": state, **info}))
         live = harness.ctx.optional("agents")
@@ -460,7 +461,7 @@ class WebApp:
         harness.ctx.on("agent/compacted", lambda result: conv.push({
             "type": "compacted", "reason": result["reason"], "replaced": result["replaced"],
             "kept": result["kept"], "summary": result["summary"]}))
-        conv.provider = self.config.provider_name
+        conv.provider = "auto" if harness.ctx.optional("router") is not None else self.config.provider_name
         if provider and provider != conv.provider:
             outcome = switch_model(self._command_host(conv, user), provider)
             if not outcome.ok:
@@ -613,7 +614,7 @@ class WebApp:
     def models(self, user: Any) -> dict[str, Any]:
         allowed = tuple(getattr(user, "allowed_providers", ()) or ())
         return {
-            "default": self.config.provider_name,
+            "default": "auto" if routing_on(self.config) else self.config.provider_name,
             "switchable": bool((getattr(self.config, "web", None) or {}).get("model_switch", True)),
             "providers": providers_for(self.config, allowed),
             # A model that describes images for models that cannot see (see vision.py).
@@ -2240,7 +2241,7 @@ body:not(.view-admin) #admin{display:none}
   let conv=null,es=null,token=null,me=null,admin=false,gateOn=false,meta=null;
   let view='chat',convPreview='',convTitle='',convSession='',convState='idle',running=false;
   let commands=[],models={providers:[],switchable:false},pendingProvider='',searchHits=null,lastAiEl=null,knownRatings={};
-  let planOn=false,turnWasPlan=false,jobs={},pendingImages=[],reminders=[],agents=[],roles=null,discs={};
+  let planOn=false,turnWasPlan=false,jobs={},pendingImages=[],reminders=[],agents=[],roles=null,discs={},lastRoute='';
   let assistantEl=null,assistantText='',stepsBox=null,composing=false;
   const rows={};          // call id -> step row
   let changes=[];         // change previews for the open conversation
@@ -2701,6 +2702,12 @@ body:not(.view-admin) #admin{display:none}
     else if(t==='attached')addNote('已附加：'+ev.files.join('、'),'file');
     else if(t==='reminders'){reminders=ev.items||[];renderJobs();}
     else if(t==='agents'){agents=ev.items||[];renderAgents();}
+    else if(t==='route'){
+      // The router picks per request: keep the chip honest, and say so when personal data or local files kept the request off the bought-in models.
+      setModelShown(null,ev.model);
+      const kept=(ev.excluded||[]).some(x=>x.why==='sensitive'||x.why==='files'),key=ev.provider+'|'+kept;
+      const where=({local:'本機',private:'私有雲',public:'外部'}[ev.where]||ev.where);
+      if(key!==lastRoute){lastRoute=key;addNote(ev.fallback?ev.reason+'（'+where+'）':'這一步選用 '+ev.provider+'（'+where+'）：'+ev.reason.replace(/；選 [^；]*$/,''),'shield');}}
     else if(t==='discussion')discussionEvent(ev);
     else if(t==='workflow'){if(ev.state==='start')addNote('工作流程開始：'+ev.steps.length+' 個步驟（'+ev.steps.join('、')+'），沒有相依的步驟會同時進行。','users');
       else addNote('工作流程結束：'+(ev.ok?'全部完成':'有步驟沒有完成，請看結果'),ev.ok?'check':'warn');}
@@ -2744,7 +2751,7 @@ body:not(.view-admin) #admin{display:none}
   }
   function resetThread(){
     transcript.textContent='';assistantEl=null;assistantText='';stepsBox=null;changes=[];lastAiEl=null;convTitle='';knownRatings={};
-    jobs={};reminders=[];renderJobs();agents=[];discs={};renderAgents();$('#goalbar').hidden=true;setPlan(false);
+    jobs={};reminders=[];renderJobs();agents=[];discs={};lastRoute='';renderAgents();$('#goalbar').hidden=true;setPlan(false);
     Object.keys(rows).forEach(k=>delete rows[k]);renderChanges();$('#conv-use').textContent='';
   }
   async function openConversation(c){

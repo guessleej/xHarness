@@ -52,6 +52,53 @@ def _item(key: str, title: str, state: str, detail: str, fix: str = "") -> dict[
     return {"id": key, "title": title, "state": state, "detail": detail, "fix": fix}
 
 
+def _routing_items(config: Any) -> list[dict[str, str]]:
+    """What automatic routing lets leave this install: only when routing is on."""
+    raw = getattr(config, "routing", None) or {}
+    if not raw.get("enabled"):
+        return []
+    from .llm import hosting_of
+    from .router import RouteConfig
+
+    try:
+        route = RouteConfig.from_config(config)
+    except ValueError as error:
+        return [_item("routing-config", "自動路由的設定有誤", FAIL, f"設定檔的 [routing] 載入失敗：{error}", "照訊息修正後重新啟動。")]
+    items: list[dict[str, str]] = []
+    public = [m.name for m in route.models if m.public]
+    if not public:
+        items.append(_item("routing-external", "自動路由只用地端與私有模型", PASS,
+                           "路由清單裡沒有外部模型，請求不會離開你自己的機器與網路。", ""))
+    elif route.external_sees == "all":
+        items.append(_item(
+            "routing-external", "外部模型看得到本機檔案與工具結果", WARN,
+            f"{'、'.join(public)} 是外部模型，而 external_sees = \"all\"：讀過的檔案、工具結果、附件與圖片都可能送出去"
+            "（個資與機密仍會依規則擋下）。",
+            "改成 external_sees = \"prompt\"：外部模型只看得到你打的字，一碰到本機內容就改用地端或私有模型。"))
+    else:
+        items.append(_item(
+            "routing-external", "外部模型只看得到你打的字", PASS,
+            f"{'、'.join(public)} 是外部模型；讀過的檔案、工具結果、附件與圖片、以及含個資或金鑰的內容一律不送，"
+            "送出時用精簡的系統提示（不含專案指示檔與記憶）。", ""))
+    miscast = [m.name for m in route.models if m.where != "public" and hosting_of(m.adapter.base_url) == "external"]
+    if miscast:
+        items.append(_item(
+            "routing-where", "宣告為地端或私有、但位址看起來在外部", WARN,
+            f"{'、'.join(miscast)} 的 where 不是 public，位址卻不在私有網段。如果這是你自己的 VPN 或 Tailscale 位址就沒問題；"
+            "如果是雲端服務，個資規則就不會替它把關。",
+            "確認位址真的在你控制的網路內；不是的話把 where 改成 public。"))
+    cn = [m.name for m in route.models if m.origin == "cn"]
+    if cn and "cn" not in route.deny_origins:
+        items.append(_item(
+            "routing-origin", "中國來源的模型可以被路由到", WARN,
+            f"{'、'.join(cn)} 標了 origin = \"cn\"，而 deny_origins 沒有擋它。政府案與對客交付的系統不得使用中國來源的模型。",
+            "交付用的設定加上 deny_origins = [\"cn\"]；只有內部研究用的設定才可以放行。"))
+    elif cn:
+        items.append(_item("routing-origin", "中國來源的模型不會被路由到", PASS,
+                           f"{'、'.join(cn)} 標了 origin = \"cn\"，deny_origins 已擋下。", ""))
+    return items
+
+
 def run(config: Any, *, bound_host: str | None = None, has_token: bool = False, users: Any = None) -> dict[str, Any]:
     """Every check, against the live configuration. Read-only."""
     items: list[dict[str, str]] = []
@@ -217,6 +264,8 @@ def run(config: Any, *, bound_host: str | None = None, has_token: bool = False, 
             f"{path} {'其他使用者讀得到，裡面是完整的對話內容' if exposed else '只有擁有者讀得到'}。",
             f"chmod -R go-rwx {path}" if exposed else "",
         ))
+
+    items += _routing_items(config)
 
     counts = {state: sum(1 for item in items if item["state"] == state) for state in (PASS, WARN, FAIL)}
     return {

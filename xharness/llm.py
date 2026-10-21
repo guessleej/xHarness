@@ -7,6 +7,7 @@ Tool calls are {"id", "name", "arguments"} with arguments as a raw JSON string.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import sys
@@ -22,6 +23,8 @@ from .context import Context, Plugin
 #: Fields the adapter owns; extra_body may not touch them.
 RESERVED_BODY_KEYS = frozenset({"model", "messages", "stream", "stream_options", "tools"})
 DEFAULT_TIMEOUT_SECONDS = 600
+#: 100.64.0.0/10 is carrier-grade NAT space, which is where a Tailscale network lives.
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 PRIVATE_PREFIXES = ("127.", "10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.",
                     "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
                     "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")
@@ -67,6 +70,11 @@ def hosting_of(base_url: Any) -> str:
         return "unknown"
     if host in ("localhost", "::1") or host.startswith(PRIVATE_PREFIXES):
         return "self-hosted"
+    try:
+        if ipaddress.ip_address(host) in _CGNAT:
+            return "self-hosted"
+    except ValueError:
+        pass
     return "external"
 
 
@@ -93,6 +101,9 @@ class OpenAIAdapter:
         if not model:
             raise ValueError("provider model is required")
         self.base_url = base_url.rstrip("/")
+        #: None: the module's RETRY_DELAYS. The router sets () on a model that has a stand-in
+        #: waiting, so a dead one costs no time before the next takes over.
+        self.retry_delays: tuple[float, ...] | None = None
         self.model = model
         self.api_key = api_key
         self.api_key_env = api_key_env
@@ -122,8 +133,9 @@ class OpenAIAdapter:
         Only failures before the response starts are retried: once tokens have
         streamed to the user, a second attempt would repeat them.
         """
-        for attempt in range(len(RETRY_DELAYS) + 1):
-            last = attempt == len(RETRY_DELAYS)
+        delays = RETRY_DELAYS if self.retry_delays is None else self.retry_delays
+        for attempt in range(len(delays) + 1):
+            last = attempt == len(delays)
             try:
                 # Scheme is validated to http/https in __init__, so file:/ and
                 # custom schemes cannot reach this call.
@@ -143,7 +155,7 @@ class OpenAIAdapter:
                     ) from error
                 delay = None
                 reason = str(error.reason)
-            wait = delay if delay is not None else RETRY_DELAYS[attempt]
+            wait = delay if delay is not None else delays[attempt]
             print(f"[xharness] model request failed ({reason}); retrying in {wait:g}s", file=sys.stderr)
             self.sleep(wait)
         raise AssertionError("unreachable")

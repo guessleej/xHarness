@@ -22,6 +22,7 @@ from .schedule import schedule_plugin
 from .workflow import workflow_plugin
 from .discuss import discussion_plugin
 from .roles import roles_plugin
+from .router import router_plugin
 from .tools.jobs import jobs_plugin
 from .tools.terminal import terminal_plugin
 from .subagent import subagent_plugin
@@ -113,7 +114,11 @@ def build_harness(
             "quota",
             quota_plugin(user.name, user.quota_tokens_per_day, user.quota_tokens_per_month),
         )
-    harness.use("llm", llm_plugin(config.provider))
+    if (getattr(config, "routing", None) or {}).get("enabled"):
+        # The router is the "llm" service: it picks among the configured models for every call.
+        harness.use("llm", router_plugin(config, tuple(getattr(user, "allowed_providers", ()) or ())))
+    else:
+        harness.use("llm", llm_plugin(config.provider))
 
     for entry in config.plugins:
         if entry.get("disabled"):

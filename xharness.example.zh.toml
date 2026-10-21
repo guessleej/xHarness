@@ -198,6 +198,27 @@ model = "your-model-id"
 # command = ["jdtls"]
 # extensions = [".java"]
 
+# ── 自動路由 ───────────────────────────────────────────────
+# 每個請求自動挑模型：硬規則（個資與本機檔案不送外部、來源國、帳號分層）→ 能力與成本 → 備援。見 README「自動路由」。
+# [routing]
+# enabled = true
+# default = "local"
+# prefer = "cost"                 # cost｜quality
+# external_sees = "prompt"        # prompt：外部模型只看你打的字｜all：也看檔案與工具結果
+# deny_origins = ["cn"]
+# sensitive_words = ["學號"]
+# decider = "small"               # 選填：自家機器上的小模型
+# health_cooldown_seconds = 120
+# [routing.models.local]          # 名稱要對到 [providers.local]
+# where = "local"                 # local｜private｜public
+# strength = 1                    # 1 簡單｜2 中等｜3 困難
+# cost = 0
+# origin = "tw"
+# [routing.models.cloud]
+# strength = 3
+# cost = 5
+# origin = "us"
+
 # ── 代理角色與討論 ─────────────────────────────────────────
 # 角色檔放在 .xharness/agents/名稱.md（也讀 .claude/agents/），格式同 Claude Code 的 subagent。
 # [agents]

@@ -516,6 +516,51 @@ max_tokens = 80000        # per discussion, moderator included
 speak_turns = 6           # model calls per utterance, lookups included
 ```
 
+## Model routing
+
+When the config lists several models (this machine, a private cloud, a bought-in service) xHarness can pick one per request. Off by default; once on, the Web UI's model menu gets "auto" at the top, and picking a model by hand pins it.
+
+The choice is made in three layers, strictest first, because they fail differently:
+
+1. **Hard rules, decided by code, never by a model.** A model that says "not sensitive" wrongly once has leaked once.
+   - A model the account's tier does not offer is out (the existing user-tier `providers`).
+   - A model whose origin is in `deny_origins` is out (default `["cn"]`: government and customer deliveries may not use China-origin models; only internal research relaxes it).
+   - A **public** model (`where = "public"`) never sees personal data, keys or internal addresses (national ID, mobile number, e-mail, card number, API keys, internal IPs, plus your own `sensitive_words` / `sensitive_patterns`), and by default nothing that came from this machine: files read, tool results, attachments, pictures, hook output (`external_sees = "prompt"`; `"all"` lets files out, the personal-data rule still holds). A conversation that has touched local material stays marked, even after its history is compacted into a summary.
+   - A public model gets a minimal system prompt (no project instructions, working directory or memory) and none of the `mcp__` tools.
+   - A model that cannot call tools, or whose context is too small, is out.
+   - If nothing is left the request fails with the reason. It is **not** sent to a model that was ruled out.
+2. **Capability and cost, among what the rules left.** The request is rated easy, medium or hard (words, length, how long the tool loop has run); the cheapest model strong enough wins, own hardware first on a tie. An optional small **decider** model settles the ambiguous middle (`decider`; it must be self-hosted because it reads every request; it answers one word, and anything else leaves the rule-based rating).
+3. **Failure.** A model that cannot be reached is skipped for a while (`health_cooldown_seconds`) and the next in the ranking takes over -- only before any text was produced, so a reply is never stitched from two models.
+
+```toml
+[routing]
+enabled = true
+default = "local"             # wins ties; the first model by default
+prefer = "cost"               # cost (cheapest strong enough) or quality (strongest)
+external_sees = "prompt"      # prompt: public models see only what you type; all: files and tool results too
+deny_origins = ["cn"]
+sensitive_words = ["學號", "病歷"]          # never sent to a public model
+# sensitive_patterns = ['\bPJ-\d{4}\b']  # regular expressions
+decider = "small"             # optional: a small model on your own hardware for the medium middle
+health_cooldown_seconds = 120
+
+[routing.models.local]        # the name matches [providers.local]
+where = "local"               # local | private | public; by address when omitted (127.* local, LAN and Tailscale private, else public)
+strength = 1                  # 1 easy, 2 medium, 3 hard
+cost = 0                      # relative price; 0 for your own hardware
+origin = "tw"                 # for deny_origins
+tools = true                  # false: cannot call tools
+
+[routing.models.cloud]
+strength = 3
+cost = 5
+origin = "us"
+```
+
+**Seeing and checking it:** `xharness route "refactor this module, student A123456789"` calls no model and prints the rating, the choice, the fallbacks, and who was excluded and why; in a conversation `/route` shows the last decision and what is down, `/model name` pins and `/model auto` restores. Every decision is written to the session (`route`, `route-fallback`: categories only, never the text that matched); the usage report and the Word report count decisions per model, requests kept off public models because of personal data or local files, and fallbacks; the security check says what public models can see, whether `where` agrees with the address, and whether China-origin models are blocked.
+
+**Limits:** the difficulty rating is crude rules -- try your own requests with `xharness route` before trusting it, and the decider too (small models often rate "tidy this folder" as hard); pictures are always put into words by the `[vision]` describer unless every routed model can see; a role file's `model:` bypasses routing.
+
 ## Multi-node fleet
 
 On each node (a machine you want to watch) — non-loopback binding requires a token, which need not appear on the command line:

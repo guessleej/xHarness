@@ -55,6 +55,8 @@ class ResolvedConfig:
     agents: dict[str, Any] = field(default_factory=dict)
     #: [discussion] enabled, max_rounds, max_tokens, speak_turns -- see discuss.py
     discussion: dict[str, Any] = field(default_factory=dict)
+    #: [routing] enabled, models, prefer, external_sees, ... -- see router.py
+    routing: dict[str, Any] = field(default_factory=dict)
 
 
 def _find_config_file(explicit_path: str | None) -> str | None:
@@ -144,6 +146,7 @@ def load_config(
         lsp=raw.get("lsp", {}) or {},
         agents=raw.get("agents", {}) or {},
         discussion=raw.get("discussion", {}) or {},
+        routing=raw.get("routing", {}) or {},
     )
 
 

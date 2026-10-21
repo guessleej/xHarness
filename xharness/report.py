@@ -115,6 +115,29 @@ def _agent_events(directory: str, session_id: str, start: datetime) -> list[dict
     return found
 
 
+def _route_events(directory: str, session_id: str, start: datetime) -> list[dict[str, Any]]:
+    """route, route-fallback records logged since `start` (see router.py)."""
+    path = os.path.join(directory, f"{session_id}.jsonl")
+    found: list[dict[str, Any]] = []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                if '"route' not in line:
+                    continue
+                try:
+                    event = json.loads(line)
+                    stamp = datetime.fromisoformat(str(event.get("ts")))
+                except ValueError:
+                    continue
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=timezone.utc)
+                if event.get("type") in ("route", "route-fallback") and stamp >= start:
+                    found.append(event)
+    except OSError:
+        return found
+    return found
+
+
 def collect(
     config: Any,
     since: str = "30d",
@@ -135,6 +158,8 @@ def collect(
     feedback: dict[str, Any] = {"up": 0, "down": 0, "notes": []}
     roles: dict[str, dict[str, Any]] = {}
     discussions = {"count": 0, "turns": 0, "tokens": 0}
+    routing: dict[str, Any] = {"decisions": 0, "by_model": {}, "by_where": {}, "kept_off_external": 0,
+                               "fallbacks": 0, "refused": 0}
 
     for user, directory in session_owners():
         label = user or "(未歸戶)"
@@ -179,6 +204,19 @@ def collect(
             feedback["up"] += ratings["up"]
             feedback["down"] += ratings["down"]
             feedback["notes"].extend(ratings["notes"])
+            for event in _route_events(directory, session_id, start):
+                if event["type"] == "route-fallback":
+                    routing["fallbacks"] += 1
+                    continue
+                if event.get("provider") is None:
+                    routing["refused"] += 1
+                    continue
+                if event.get("fresh"):
+                    routing["decisions"] += 1
+                    routing["by_model"][event["provider"]] = routing["by_model"].get(event["provider"], 0) + 1
+                    routing["by_where"][event.get("where") or "?"] = routing["by_where"].get(event.get("where") or "?", 0) + 1
+                if any(item.get("why") in ("sensitive", "files") for item in event.get("excluded") or []):
+                    routing["kept_off_external"] += 1
             for event in _agent_events(directory, session_id, start):
                 if event.get("type") == "discussion-end":
                     discussions["count"] += 1
@@ -246,6 +284,7 @@ def collect(
             "unknown": hosting.get("unknown", {"tokens": 0, "sessions": 0}),
         },
         "machines": machines,
+        "routing": routing,
         "agents": {
             "runs": sum(item["runs"] for item in roles.values()),
             "tokens": sum(item["tokens"] for item in roles.values()),
@@ -409,6 +448,17 @@ def _agent_lines(agents: dict[str, Any]) -> list[str]:
     return lines
 
 
+WHERE_WORDS = {"local": "本機", "private": "私有雲", "public": "外部"}
+
+
+def _routing_lines(routing: dict[str, Any]) -> list[str]:
+    if not routing.get("decisions") and not routing.get("refused"):
+        return []
+    where = "、".join(f"{WHERE_WORDS.get(k, k)} {v}" for k, v in sorted(routing["by_where"].items(), key=lambda kv: -kv[1]))
+    return [f"      其中自動路由：{routing['decisions']} 次決定（{where or '—'}）；含個資或本機檔案而不送外部模型 "
+            f"{routing['kept_off_external']} 次；備援切換 {routing['fallbacks']} 次；沒有模型能處理而拒絕 {routing['refused']} 次"]
+
+
 def format_report(report: dict[str, Any]) -> str:
     """Terminal rendering, same numbers as the Word version."""
     people, spend, hosting = report["people"], report["spend"], report["hosting"]
@@ -427,6 +477,7 @@ def format_report(report: dict[str, Any]) -> str:
         f"      {spend['cost']['assumption']}"
         + (f"，估算 {spend['cost']['estimate']:,}" if spend["cost"]["estimate"] else ""),
         *_agent_lines(report.get("agents") or {}),
+        *_routing_lines(report.get("routing") or {}),
         "",
         f"三、自建 vs 外購：地端自建 {hosting['self_hosted']['tokens']:,} tokens／"
         f"外購 API {hosting['external']['tokens']:,} tokens"

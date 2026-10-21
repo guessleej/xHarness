@@ -295,6 +295,18 @@ def build_docx(report: dict, output: str) -> str:
          + (f"，以此換算本期約 {spend['cost']['estimate']:,}。" if spend["cost"]["estimate"] else "。"))
     table(document, ["模型", "使用過的工作階段數"],
           [[name, count] for name, count in spend["models"]] or [["本期無資料", "0"]])
+    routing = report.get("routing") or {}
+    if routing.get("decisions") or routing.get("refused"):
+        names = {"local": "本機", "private": "私有雲", "public": "外部"}
+        body(document, (
+            f"本期自動路由做了 {routing['decisions']} 次決定。含個資、機密或本機檔案的請求有 "
+            f"{routing['kept_off_external']} 次依規則不送外部模型；有 {routing['fallbacks']} 次因為模型連不上改用備援；"
+            f"{routing['refused']} 次沒有任何模型可以處理而拒絕（不會改送到被規則排除的模型）。"
+        ))
+        table(document, ["模型", "次數"], [[name, count] for name, count in sorted(
+            routing["by_model"].items(), key=lambda kv: -kv[1])] or [["本期無資料", 0]])
+        table(document, ["放在哪裡", "次數"], [[names.get(k, k), v] for k, v in sorted(
+            routing["by_where"].items(), key=lambda kv: -kv[1])] or [["本期無資料", 0]])
     agents = report.get("agents") or {}
     talk = agents.get("discussions") or {}
     if agents.get("runs") or talk.get("count"):
