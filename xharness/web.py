@@ -1160,7 +1160,7 @@ document.documentElement.dataset.theme=t||'light';})();
   --code-bg:#0d1922;--code-ink:#dbe4ea;
   --font:"Microsoft JhengHei","PingFang TC","Noto Sans TC",system-ui,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-  --top:58px;--ease:cubic-bezier(.22,.8,.3,1);
+  --top:58px;--col:880px;--ease:cubic-bezier(.22,.8,.3,1);
 }
 :root[data-theme="dark"]{color-scheme:dark;
   --brand:#e0484f;--brand-dk:#bf181f;
@@ -1234,13 +1234,22 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 
 /* ---- the app frame: drawer | work | review -------------------------------- */
 .app{position:fixed;inset:var(--top) 0 0 0;display:flex}
-.drawer{width:316px;flex:none;margin-left:-316px;background:var(--surface);box-shadow:var(--shadow-sm);display:flex;flex-direction:column;
-  transition:margin .32s var(--ease);z-index:20;min-height:0}
-body.drawer-open .drawer{margin-left:0}
+/* Both panels float over the page as rounded cards and start closed: a docked
+   full-height column is the fixed-sidebar layout this product does not use,
+   and it left the page lopsided (panel on one side, empty band on the other). */
+.drawer,.review{position:fixed;top:calc(var(--top) + 10px);bottom:12px;z-index:35;background:var(--surface);border-radius:20px;
+  box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0;transition:transform .34s var(--ease),visibility .34s}
+.drawer{left:12px;width:min(340px,calc(100vw - 24px));transform:translateX(calc(-100% - 24px));visibility:hidden}
+.review{right:12px;width:min(480px,calc(100vw - 24px));transform:translateX(calc(100% + 24px));visibility:hidden}
+body.drawer-open .drawer,body.review-open .review{transform:none;visibility:visible}
 .work{flex:1;min-width:0;display:flex;min-height:0}
-.review{width:460px;flex:none;margin-right:-460px;background:var(--surface);box-shadow:var(--shadow-sm);display:flex;flex-direction:column;
-  transition:margin .32s var(--ease);z-index:20;min-height:0}
-body.review-open .review{margin-right:0}
+/* On a wide screen an open panel moves the column aside instead of covering it;
+   the column stays centred in the space that is left. */
+.conv{transition:padding .34s var(--ease)}
+@media (min-width:1280px){
+  body.drawer-open.view-chat .conv{padding-left:364px}
+  body.review-open.view-chat .conv{padding-right:504px}
+}
 .pane-head{display:flex;align-items:center;gap:8px;padding:14px 14px 8px 18px}
 .pane-head h2{margin:0;font-size:16px;flex:1}
 .pane-body{flex:1;overflow-y:auto;padding:4px 12px 18px;min-height:0}
@@ -1267,7 +1276,7 @@ body.review-open .review{margin-right:0}
 
 /* ---- conversation column ---------------------------------------------------- */
 .conv{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
-.conv-head{display:flex;align-items:center;gap:10px;padding:10px 20px;min-height:54px}
+.conv-head{display:flex;align-items:center;gap:10px;padding:10px 24px;min-height:54px;width:100%;max-width:var(--col);margin:0 auto}
 .conv-head .title{font-weight:700;font-size:15px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .conv-head .use{font-size:12.5px;color:var(--ink-3);white-space:nowrap}
 .pill{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;padding:3px 10px;border-radius:99px;white-space:nowrap;background:var(--surface-2);color:var(--ink-2)}
@@ -1285,7 +1294,7 @@ body.review-open .review{margin-right:0}
 .ghostbtn .cnt{font-size:11px;font-weight:700;background:var(--ink-2);color:var(--surface);border-radius:99px;padding:0 6px;line-height:17px}
 .ghostbtn.on .cnt,.ghostbtn .cnt.hot{background:var(--brand);color:#fff}
 .scroller{flex:1;overflow-y:auto;min-height:0}
-.thread{max-width:820px;margin:0 auto;padding:6px 24px 28px}
+.thread{max-width:var(--col);margin:0 auto;padding:6px 24px 28px}
 body.landing .thread{display:none}
 body:not(.landing) .landing{display:none}
 
@@ -1379,7 +1388,7 @@ body:not(.landing) .landing{display:none}
 
 /* ---- composer ---------------------------------------------------------------- */
 .composer-wrap{padding:0 24px 14px}
-.composer{max-width:820px;margin:0 auto;background:var(--surface);border-radius:20px;box-shadow:var(--shadow);padding:8px 8px 8px 16px;transition:box-shadow .2s}
+.composer{max-width:calc(var(--col) - 48px);margin:0 auto;background:var(--surface);border-radius:20px;box-shadow:var(--shadow);padding:8px 8px 8px 16px;transition:box-shadow .2s}
 .composer.focus{box-shadow:0 0 0 3px var(--tint-2),var(--shadow)}
 .composer.over{box-shadow:0 0 0 3px var(--brand),var(--shadow)}
 .composer textarea{display:block;width:100%;border:0;outline:none;background:transparent;resize:none;font:inherit;font-size:15px;line-height:1.55;color:var(--ink);
@@ -1398,10 +1407,10 @@ body:not(.landing) .landing{display:none}
 .sendbtn.stop{background:var(--surface-3);color:var(--ink)}
 .sendbtn.stop:hover{background:var(--tint-2)}
 .sendbtn svg.i{width:17px;height:17px;stroke-width:2.2}
-.hint{max-width:820px;margin:6px auto 0;font-size:12px;color:var(--ink-3);text-align:center;min-height:18px}
+.hint{max-width:calc(var(--col) - 48px);margin:6px auto 0;font-size:12px;color:var(--ink-3);text-align:center;min-height:18px}
 
 /* ---- landing: what to do when nothing has happened yet ---------------------- */
-.landing{max-width:880px;margin:0 auto;padding:22px 24px 16px}
+.landing{max-width:var(--col);margin:0 auto;padding:22px 24px 16px}
 .hero{position:relative;overflow:hidden;border-radius:22px;background:var(--hero);color:#e8eef3;padding:28px 30px 24px;isolation:isolate;animation:rise .5s var(--ease)}
 .hero .glow{position:absolute;inset:-60% -30% auto auto;width:520px;height:520px;border-radius:50%;z-index:-1;pointer-events:none;
   background:radial-gradient(closest-side,rgba(224,72,79,.26),transparent 70%);animation:drift 26s ease-in-out infinite}
@@ -1557,13 +1566,7 @@ body:not(.view-admin) #admin{display:none}
 .btn.danger{background:var(--brand);color:#fff}
 
 /* ---- narrow screens -------------------------------------------------------------- */
-@media (max-width:1199px){
-  .review{position:fixed;top:var(--top);right:0;bottom:0;width:min(480px,100vw);margin:0;transform:translateX(105%);transition:transform .32s var(--ease);box-shadow:var(--shadow);z-index:35}
-  body.review-open .review{transform:none}
-}
 @media (max-width:899px){
-  .drawer{position:fixed;top:var(--top);left:0;bottom:0;width:min(340px,88vw);margin:0;transform:translateX(-105%);transition:transform .32s var(--ease);box-shadow:var(--shadow);z-index:35}
-  body.drawer-open .drawer{transform:none}
   .modelchip{display:none}
 }
 @media (max-width:640px){
@@ -2131,13 +2134,13 @@ body:not(.view-admin) #admin{display:none}
   }
   async function openConversation(c){
     conv=c.id;resetThread();setTitle(c.preview||'');showLanding(false);setState(c.state||'idle');setUsage(c.usage);
-    hint.textContent='';showView('chat');await connect(conv,0);if(narrow())closeDrawer();renderTasks();
+    hint.textContent='';showView('chat');await connect(conv,0);closeDrawer();renderTasks();
   }
   async function newConversation(resume){
     const c=await api('/api/conversations',{method:'POST',body:resume?{resume}:{}});
     conv=c.id;resetThread();setTitle('');showLanding(!resume);setState('idle');
     hint.textContent=resume?'接續 session '+resume:'';showView('chat');
-    await connect(conv,0);refreshTasks();if(narrow())closeDrawer();input.focus();return c;
+    await connect(conv,0);refreshTasks();closeDrawer();input.focus();return c;
   }
   async function send(){
     if(running){toast('這個任務還在進行；要換方向先按停止。');return;}
@@ -2195,7 +2198,6 @@ body:not(.view-admin) #admin{display:none}
   async function loadDayUsage(){try{const u=await api('/api/usage?since=24h');$('#t-tokens').textContent=fmtNum(u.totals.total_tokens);}catch(e){}}
 
   // ---- drawer: every task, live ones first ---------------------------------------
-  function narrow(){return window.innerWidth<900;}
   function openDrawer(){document.body.classList.add('drawer-open');$('#btn-drawer').setAttribute('aria-expanded','true');$('#btn-drawer').classList.add('on');refreshTasks(true);}
   function closeDrawer(){document.body.classList.remove('drawer-open');$('#btn-drawer').setAttribute('aria-expanded','false');$('#btn-drawer').classList.remove('on');}
   $('#btn-drawer').onclick=()=>document.body.classList.contains('drawer-open')?closeDrawer():openDrawer();
@@ -2220,7 +2222,7 @@ body:not(.view-admin) #admin{display:none}
     const groups=[['等你回應',c=>c.state==='waiting'],['進行中',c=>c.state==='running'],['這次開啟的',c=>c.state==='idle']];
     let shown=0;const liveSessions=new Set();
     groups.forEach(([label,test])=>{
-      const list=liveConvs.filter(c=>test(c)&&match(c.preview));list.forEach(c=>liveSessions.add(c.session));
+      const list=liveConvs.filter(c=>test(c)&&(c.preview||c.state!=='idle')&&match(c.preview));list.forEach(c=>liveSessions.add(c.session));
       if(!list.length)return;box.appendChild(h('div','grp',label));
       list.forEach(c=>{shown++;const u=c.usage||{};
         box.appendChild(taskItem(c.preview||'（尚未送出訊息）',ago(c.last_activity)+(u.total_tokens?'・'+fmtNum(u.total_tokens)+' tokens':''),c.state,c.id===conv,()=>openConversation(c)));});
@@ -2690,8 +2692,8 @@ body:not(.view-admin) #admin{display:none}
     if(e.key!=='Escape')return;
     if($('#dlg').classList.contains('on')){$('#dlg-no').click();return;}
     if(whoMenu.classList.contains('open')){whoMenu.classList.remove('open');return;}
-    if(document.body.classList.contains('review-open')&&window.innerWidth<1200){closeReview();return;}
-    if(document.body.classList.contains('drawer-open')&&narrow()){closeDrawer();return;}
+    if(document.body.classList.contains('review-open')){closeReview();return;}
+    if(document.body.classList.contains('drawer-open')){closeDrawer();return;}
   });
   setInterval(()=>{if(!document.hidden&&!gateOn)refreshTasks();},5000);
 
@@ -2706,7 +2708,6 @@ body:not(.view-admin) #admin{display:none}
     catch(e){if(!gateOn)addError(e.message);return;}
     loadFiles();   // also decides whether the attach button is shown
     refreshTasks(true);loadDayUsage();renderLanding();
-    if(window.innerWidth>=1400)openDrawer();
     input.focus();
   })();
 })();

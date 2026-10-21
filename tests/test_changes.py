@@ -176,3 +176,16 @@ def test_every_enter_to_send_field_is_ime_safe():
     assert "compositionstart" in composer and "isComposing" in composer and "keyCode===229" in composer
     users = script.split("the user-add form submits on Enter", 1)[1][:600]
     assert "compositionstart" in users and "isComposing" in users and "keyCode===229" in users
+
+
+def test_side_panels_float_and_start_closed():
+    """A docked full-height panel is the fixed-sidebar layout the product does
+    not use; it also left the page lopsided. Both panels float and start closed."""
+    from xharness.web import INDEX_HTML
+
+    css = INDEX_HTML.split("<style>", 1)[1].split("</style>", 1)[0]
+    panel = css.split(".drawer,.review{", 1)[1].split("}", 1)[0]
+    assert "position:fixed" in panel and "border-radius" in panel
+    assert "margin-left:-" not in css and "margin-right:-" not in css
+    init = INDEX_HTML.split("async function init(){", 1)[1].split("})();", 1)[0]
+    assert "openDrawer()" not in init and "openReview(" not in init

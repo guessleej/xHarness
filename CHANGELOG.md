@@ -2,6 +2,14 @@
 
 中文 | English below
 
+## 1.9.1 — 2026-10-21
+
+- 修 1.9.0 版面左右不對稱：寬螢幕預設展開任務清單、而且把內容推開，看起來就是固定左側欄；標題列的「新任務」與「檢視」又貼在畫面最左最右，跟置中的內容對不齊，右邊留一大塊空白。現在任務清單與檢視面板都是浮在頁面上的圓角卡片、預設收起，選了任務就收；寬螢幕打開時內容欄在剩下的空間重新置中。標題列、內容、輸入框對齊同一個寬度，收起時左右留白完全相同。
+- 還沒送出任何訊息的空任務不再出現在任務清單。
+
+- Fix 1.9.0's lopsided layout: wide screens opened the task list by default and pushed the content aside, which read as a fixed sidebar, and the header's title and review button sat at the window edges while the content was centred. Both the task list and the review pane are now floating rounded cards that start closed and close after a choice; on a wide screen the column re-centres in the space left when one is open. Header, content and composer share one width, with equal margins on both sides.
+- A task with nothing sent yet no longer appears in the task list.
+
 ## 1.9.0 — 2026-10-20
 
 Web UI 照 Codex 的工作方式重做，並修正一個遮罩漏洞。
