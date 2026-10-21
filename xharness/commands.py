@@ -159,6 +159,39 @@ def _skills(host: CommandHost, _args: str) -> CommandResult:
                          data={"skills": [{"name": s.name, "description": s.description, "source": s.source} for s in skills]})
 
 
+AGENT_WORDS = {"running": "進行中", "done": "完成", "failed": "失敗", "stopped": "已停止"}
+KIND_WORDS = {"subagent": "子代理", "workflow": "工作流程步驟", "discussion": "討論參與者"}
+
+
+def _agents(host: CommandHost, args: str) -> CommandResult:
+    store = host.ctx.optional("roles")
+    live = host.ctx.optional("agents")
+    if args.strip() == "stop":
+        count = live.stop_all() if live is not None else 0
+        return CommandResult(f"已要求 {count} 個代理停止。" if count else "沒有進行中的代理。")
+    cwd = getattr(host.agent.options, "cwd", None) or os.getcwd()
+    roles = store.discover(cwd) if store else []
+    working = live.public() if live is not None else []
+    lines = []
+    if working:
+        lines.append("這段對話的代理：")
+        lines += [f"{a['name']}（{KIND_WORDS.get(a['kind'], a['kind'])}{'・' + a['role'] if a['role'] else ''}）"
+                  f"　{AGENT_WORDS.get(a['status'], a['status'])}・{a['tokens']:,} token・{a['calls']} 次呼叫"
+                  + (f"・{a['activity']}" if a["status"] == "running" and a["activity"] else "") for a in working]
+        lines.append("")
+    if roles:
+        lines.append("可以指派的代理角色（請模型「交給 名稱」或「讓 A、B 辯論」）：")
+        lines += [f"{r.name}（{r.source}）　{r.description}"
+                  + (f"　工具：{'、'.join(r.tools)}" if r.tools else "") + (f"　模型：{r.model}" if r.model else "")
+                  for r in roles]
+    else:
+        lines.append("目前沒有代理角色。在工作目錄的 .xharness/agents/ 放一個 名稱.md（開頭寫 name、description、"
+                     "tools、model），就會出現；Claude Code 的 .claude/agents/ 也讀得到。")
+    if working and any(a["status"] == "running" for a in working):
+        lines.append("\n用 /agents stop 停止這段對話所有進行中的代理。")
+    return CommandResult("\n".join(lines), data={"roles": [r.public() for r in roles], "agents": working})
+
+
 def _title(host: CommandHost, args: str) -> CommandResult:
     text = clean_title(args)
     if not text:
@@ -307,6 +340,7 @@ COMMANDS: dict[str, Command] = {c.name: c for c in (
     Command("compact", "", "把較早的對話整理成摘要，讓長對話可以繼續", _compact),
     Command("model", "[名稱]", "看目前的模型，或切換到設定檔裡的另一個", _model),
     Command("skills", "", "列出可以用的技能", _skills),
+    Command("agents", "[stop]", "列出代理角色與這段對話的代理；stop 停止全部", _agents),
     Command("plan", "[on|off]", "計畫模式：先看、提計畫，你核准後才動手", _plan),
     Command("goal", "[--rounds N] 目標", "目標模式：一輪接一輪做到完成或卡住為止", _goal),
     Command("jobs", "", "列出背景工作", _jobs),

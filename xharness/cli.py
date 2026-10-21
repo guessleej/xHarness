@@ -495,6 +495,10 @@ def main(argv: list[str] | None = None) -> int:
         on_tool_end=lambda name, _output, is_error: print(f"[tool] {name} {'failed' if is_error else 'done'}"),
     )
     agent = Agent(harness.ctx, options)
+    # Discussions run inside one tool call; show each utterance as it happens.
+    harness.ctx.on("discussion/start", lambda info: print(f"\n[討論 {info['room']}] {info['topic']}（{'、'.join(info['participants'])}）"))
+    harness.ctx.on("discussion/turn", lambda info: print(f"\n[第 {info['round']} 輪・{info['speaker']}] {info['text']}"))
+    harness.ctx.on("discussion/end", lambda info: print(f"\n[討論結束] {info['turns']} 次發言、{info['tokens']:,} tokens"))
 
     try:
         if not interactive:

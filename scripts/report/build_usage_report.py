@@ -295,6 +295,17 @@ def build_docx(report: dict, output: str) -> str:
          + (f"，以此換算本期約 {spend['cost']['estimate']:,}。" if spend["cost"]["estimate"] else "。"))
     table(document, ["模型", "使用過的工作階段數"],
           [[name, count] for name, count in spend["models"]] or [["本期無資料", "0"]])
+    agents = report.get("agents") or {}
+    talk = agents.get("discussions") or {}
+    if agents.get("runs") or talk.get("count"):
+        body(document, (
+            f"其中 {agents.get('tokens', 0):,} tokens 由代理用掉：子代理、工作流程步驟與討論參與者共執行 "
+            f"{agents.get('runs', 0):,} 次；代理之間的討論共 {talk.get('count', 0)} 場、{talk.get('turns', 0)} 次發言、"
+            f"{talk.get('tokens', 0):,} tokens（含主持人）。下表依代理角色拆開，失敗與被停止的次數一併列出。"
+        ))
+        table(document, ["代理角色", "執行次數", "tokens", "模型呼叫", "失敗", "被停止"],
+              [[row["role"], row["runs"], f"{row['tokens']:,}", row["calls"], row["failed"], row["stopped"]]
+               for row in agents.get("by_role", [])] or [["本期無資料", 0, "0", 0, 0, 0]])
 
     heading(document, "ch3", CHAPTERS[2][1], 3)
     total = hosting["self_hosted"]["tokens"] + hosting["external"]["tokens"]

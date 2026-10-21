@@ -200,3 +200,16 @@ model = "your-model-id"
 # [lsp.servers.java]
 # command = ["jdtls"]
 # extensions = [".java"]
+
+# --- Agent roles and discussions -------------------------------------------
+# Role files live in .xharness/agents/<name>.md (.claude/agents/ is read too),
+# in Claude Code's subagent format.
+# [agents]
+# enabled = true
+# dirs = ["/srv/xharness/agents"]   # other directories holding role files
+# Agents talking to each other: roundtable, debate, review, free.
+# [discussion]
+# enabled = true
+# max_rounds = 8
+# max_tokens = 80000           # per discussion, moderator included
+# speak_turns = 6              # model calls per utterance, lookups included

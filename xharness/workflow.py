@@ -86,7 +86,8 @@ def workflow_plugin(config: dict[str, Any] | None = None) -> Plugin:
                 context = "\n\n".join(part for part in (shared, str(step.get("context") or ""),
                                                           "\n\n".join(handoff)) if part)
                 return step_id, run_child(ctx, tool_ctx, str(step["task"]).strip(), f"step-{step_id}",
-                                          context=context, max_turns=child_turns, approve_lock=approve_lock)
+                                          context=context, max_turns=child_turns, approve_lock=approve_lock,
+                                          role=str(step.get("agent") or "") or None, kind="workflow")
 
             for wave in waves:
                 runnable = []
@@ -123,6 +124,7 @@ def workflow_plugin(config: dict[str, Any] | None = None) -> Plugin:
                 "steps": {"type": "array", "items": {"type": "object", "properties": {
                     "id": {"type": "string"}, "task": {"type": "string"},
                     "depends_on": {"type": "array", "items": {"type": "string"}},
+                    "agent": {"type": "string", "description": "Optional agent role for this step"},
                     "context": {"type": "string"}}, "required": ["id", "task"]}},
                 "context": {"type": "string", "description": "Shared context every step receives"},
             }, "required": ["steps"]},

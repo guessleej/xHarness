@@ -197,3 +197,15 @@ model = "your-model-id"
 # [lsp.servers.java]
 # command = ["jdtls"]
 # extensions = [".java"]
+
+# ── 代理角色與討論 ─────────────────────────────────────────
+# 角色檔放在 .xharness/agents/名稱.md（也讀 .claude/agents/），格式同 Claude Code 的 subagent。
+# [agents]
+# enabled = true
+# dirs = ["/srv/xharness/agents"]   # 其他放角色檔的目錄
+# 讓代理彼此對話：圓桌、辯論、審查、自由（主持人點名）。
+# [discussion]
+# enabled = true
+# max_rounds = 8               # 每場最多幾輪
+# max_tokens = 80000           # 每場討論（含主持人）的 token 上限
+# speak_turns = 6              # 每次發言最多幾次模型呼叫（含查資料）

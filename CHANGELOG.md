@@ -2,6 +2,28 @@
 
 中文 | English below
 
+## 1.13.0 — 2026-10-21
+
+管理 AI agent，並讓 agent 之間互相對話。
+
+- **代理角色**：一個 Markdown 檔定義一個代理（工作說明、可用工具、模型、輪數與 token 上限），格式與 Claude Code 的 subagent 相同，`.claude/agents/` 也讀得到；`subagent`、`subagent_batch`、`workflow` 的步驟與討論參與者都能指定角色。角色只能縮小權限：工具與這個人原本可用的取交集，模型必須是設定檔裡、這個人可以用的。
+- **代理管理**：每段對話登記正在工作的代理（子代理、工作流程步驟、討論參與者）。網頁「檢視 → 代理」看每個代理的角色、模型、正在做什麼、token 與呼叫次數，可個別停止、停止整場討論或全部停止；終端機 `/agents`、`/agents stop`。每個代理結束時在 session 留下 `agent-run`，服務使用報告與 Word 月報依角色拆開用量、失敗與被停止次數。
+- **討論**：新的 `discussion` 工具讓代理之間對話，圓桌、辯論（自動分正反方、主持人裁決）、審查（寫與審來回到全數通過）、自由（主持人點名）四種形式。每位參與者有自己的對話、角色、工具與模型，只收到上次發言後的新內容；每次發言連同發言者、輪次與查過的工具寫進 session，網頁即時顯示，匯出含完整逐字稿；有輪數、每場 token 與每次發言呼叫數上限；結論分共識、分歧（點名）、待確認。
+- **數字與出處要查得到**：每次發言的數字與引用的出處都和討論室實際握有的資料比對（題目、背景、工作說明、所有工具結果）。沒查資料就引用的參與者會被要求先查再重講一次；仍找不到的標成未查證、提醒後面的發言者、不准寫進共識。實測 gemma-4-31b-xvita：沒有這道檢查時，辯論雙方引用了資料檔裡沒有的註冊率，結論還把捏造的「畢業 42-48 人」列為共識；加上後，一位辯手的初稿列了九個資料裡沒有的數字，被點出後真的去讀 招生數據.csv、改用 57、54、49、46、44 人與 95%→73.3%，四段發言零未查證；另一場有人引用不存在的「六年制電資系研討會」（以及《本系開設夜間部評估方案》）並被後兩位照抄，現在會標成未查證出處。殘留風險：資料裡確實有的數字仍可能被用錯地方（例：把 81.7% 的那年也說成 90% 以上），國字數字（四成）不在比對範圍。
+- **停止會連同代理一起停**：按下對話的停止，原本只停主代理、子代理會繼續跑，現在所有登記中的代理都會停；討論中按停止，正在跑的那次模型呼叫結束後就不再有人發言（實測約 20 秒收尾並寫出結論），在「先查再講」重問時按下也不會被吃掉。
+- 修：從首頁「繼續最近的任務」打開一段仍在執行中的對話，原本會另開一個對話接續同一份 session 記錄、兩邊同時寫入；現在直接回到那段執行中的對話。
+- 新指令 `/agents`；新設定段 `[agents]`、`[discussion]`；`Agent` 可指定自己的模型（`AgentOptions.llm`）與 token 上限（`max_tokens`）。
+
+Managing AI agents, and letting agents talk to each other.
+
+- **Agent roles**: one Markdown file defines an agent (instructions, tools, model, turn and token limits), in Claude Code's subagent format, and `.claude/agents/` is read too; `subagent`, `subagent_batch`, workflow steps and discussion participants can all name a role. A role can only narrow: its tools are intersected with what the person may already use, and its model must be configured and allowed for this person.
+- **Managing agents**: each conversation registers the agents working for it (children, workflow steps, discussion participants). Review → Agents in the Web UI shows each one's role, model, current activity, tokens and calls, and stops one, a whole discussion, or all of them; `/agents` and `/agents stop` in the terminal. Every agent leaves an `agent-run` record, and the usage report and the Word report break spending, failures and stops down by role.
+- **Discussions**: a new `discussion` tool lets agents talk to each other as a round table, a debate (sides assigned, the moderator gives a verdict), a review (write and review until everyone approves) or a free discussion (the moderator picks the speaker). Each participant has its own conversation, role, tools and model and hears only what was said since its last turn; every utterance is logged with speaker, round and tools used, shown live, and exported in full; rounds, tokens per room and calls per utterance are capped; the summary separates agreement, disagreement (by name) and what still needs checking.
+- **Figures and sources must be found**: every number and every named source in an utterance is checked against what the room actually holds (topic, background, instructions, all tool results). A participant that quotes without looking is asked to check and speak again; what is still unsourced is marked, pointed out to later speakers, and kept out of the agreed summary. Measured on gemma-4-31b-xvita: without the check both sides of a debate quoted registration rates that were not in the data file and the summary listed an invented "42-48 graduates" as agreed; with it, a speaker whose first draft listed nine figures not in the data was told so, actually read 招生數據.csv and used 57, 54, 49, 46, 44 and 95% → 73.3%, leaving four utterances with nothing unverified; in other rooms an invented "六年制電資系研討會" (and 《本系開設夜間部評估方案》) copied by later speakers is now marked as an unverified source. Residual risk: a figure that is in the data can still be misapplied (calling a year at 81.7% "above 90%"), and numbers written in Chinese characters are not checked.
+- **Stop stops the agents too**: the conversation's Stop used to stop only the main agent while children kept running; now every registered agent stops. In a discussion nobody speaks after the model call in flight returns (measured: about 20 seconds to wind down and write the summary), and a Stop pressed during a look-it-up retry is no longer lost.
+- Fix: opening a still-running conversation from the home page's recent tasks used to open a second conversation on the same session log, both writing to it; it now returns to the running one.
+- New command `/agents`; new config sections `[agents]` and `[discussion]`; an `Agent` can have its own model (`AgentOptions.llm`) and token ceiling (`max_tokens`).
+
 ## 1.12.0 — 2026-10-21
 
 對照 DeepSeek Harness 補功能的第三批：生態系。三批到此完成。

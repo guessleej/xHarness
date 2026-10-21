@@ -1,6 +1,6 @@
 """xHarness: a plugin-based AI agent harness by xCloudinfo."""
 
-__version__ = "1.12.0"
+__version__ = "1.13.0"
 
 from .agent import Agent, AgentOptions, default_system_prompt, load_project_instructions
 from .config import ResolvedConfig, load_config
@@ -15,6 +15,9 @@ from .presets import build_harness
 from .providers import PRESETS, ProbeResult, apply_preset, probe_provider
 from .sandbox import Sandbox, resolve_sandbox, sandbox_plugin
 from .subagent import run_child, subagent_plugin
+from .roles import LiveAgents, Role, RoleStore, roles_plugin
+from .discuss import discussion_plugin
+from .workflow import workflow_plugin
 from .telemetry import BudgetExceeded, Telemetry, telemetry_plugin
 from .session import SessionLog, harness_home, messages_from_events, session_plugin, sessions_dir
 from .usage import format_history, history, task_records
@@ -96,6 +99,12 @@ __all__ = [
     "run_suite",
     "verify_plan",
     "run_child",
+    "LiveAgents",
+    "Role",
+    "RoleStore",
+    "roles_plugin",
+    "discussion_plugin",
+    "workflow_plugin",
     "subagent_plugin",
     "resolve_sandbox",
     "sandbox_plugin",

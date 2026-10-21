@@ -30,6 +30,7 @@ Agent harnesses tend to hard-wire one vendor's API and ship a large dependency t
 - **Cost brakes (telemetry).** An `llm/stream` middleware counts tokens, tool calls, and latency per model call; `max_total_tokens` / `max_llm_calls` hard-stop a runaway task, the usage summary lands in the session log, and `/usage` shows it in the REPL.
 - **Eval subsystem.** `xharness eval <dir>` runs a scored suite against any model: each case executes in a clean temp workspace and is graded by deterministic checks (files, answers, command results, whether tools were actually called) plus an optional LLM judge, reporting pass rate, per-case tokens and time, with JSONL output. The bundled `evals/basic` suite quantifies whether a model uses tools and follows instructions.
 - **Subagents.** `subagent` delegates one bounded task to a fresh child agent; `subagent_batch` fans independent tasks out in parallel. Children share tools and model, cannot spawn children, and route every side effect through the parent's approval policy.
+- **Agent roles, management and discussions.** Role files (Claude Code's subagent format) give an agent its instructions, tools, model and limits, and can only narrow permissions; the Agents tab shows what each agent is doing and spending and stops any of them; `discussion` lets agents talk to each other as a round table, debate, review or free discussion, with a verbatim record, every figure checked against a source, and disagreements kept.
 - **Desktop app.** `xharness desktop` opens the same Web UI in the operating system's native window (WebKit on macOS, WebView2 on Windows, WebKitGTK on Linux), no browser tab; the server binds a loopback port only this process knows and stops when the window closes. `packaging/desktop/build.py` bundles it with PyInstaller into `xHarness.app` + `.dmg` (macOS) or `xHarness.exe` (Windows) for people without Python. The one optional dependency is pywebview (`pip install "xharness[desktop]"`). `[desktop] node = true` opens a second, token-protected listener on the same window, so a hub can see and steer the machine: usable and governable at once.
 - **Web UI and fleet view.** `xharness web` serves a local interface: streaming transcript, tool cards, approval buttons, conversation, session, and memory lists, usage chips, light/dark theme. The fleet view shows every conversation and subagent on one page — state, usage, pending approvals — with inline approve/deny and a **stop** button per agent. Binds 127.0.0.1 by default; binding elsewhere requires `--token`.
 - **Real-browser search and open.** Point `[tools] browser = "http://127.0.0.1:9377"` at a local camofox (a real Firefox) and two tools appear: `web_search` opens the DuckDuckGo results page in the browser and returns title / URL / snippet (no search API key), and `browser_open` returns the rendered visible text, so JavaScript-rendered pages are readable too. Both go through approval by default; `browser_approval = false` waives it.
@@ -429,6 +430,63 @@ max_turns = 20    # per-child turn limit
 ```
 
 Children share tools, model, telemetry, and the session log (events tagged with the `agent` name; `--resume` rebuilds only the main line). Children cannot see the `subagent` tools, so there is no unbounded recursion, and every side effect goes through the parent's approval policy — a `prompt`-mode parent still asks you.
+
+## Agent roles, agent management and discussions
+
+### Agent roles
+
+Write an agent you use often as a Markdown file in `.xharness/agents/` (in the working directory, the site, or `$XHARNESS_HOME`; Claude Code's `.claude/agents/` is read too). The format is Claude Code's subagent format:
+
+```markdown
+---
+name: analyst
+description: Looks up indicators and states only the figures it found
+tools: read, grep, glob        # optional; Claude Code's Read, Grep work too
+model: granite                 # optional; a name from [providers.*]
+max_turns: 12                  # optional
+max_tokens: 40000              # optional, this agent's token ceiling
+---
+You analyse institutional indicators. Look the data up before you answer and quote figures exactly, with their source.
+```
+
+`subagent`, `subagent_batch`, every `workflow` step and every discussion participant take `agent: analyst`; the model sees the list of roles in its system prompt. A role can only **narrow** what an agent may do: its tool list is intersected with the tools the person already has (a tier's denied tools are gone before that), and its model must be configured and allowed for this person; otherwise the caller's model runs it and the result says so.
+
+### Managing agents
+
+Every conversation registers the agents working for it: children, workflow steps, discussion participants. In the Web UI, Review → Agents lists each one's role, model, what it is doing, tokens and calls, and stops one, a whole discussion, or all of them; the conversation's Stop button stops them all too. In the terminal `/agents` lists them and `/agents stop` stops them. Each agent leaves an `agent-run` record in the session, and the usage report breaks spending, failures and stops down by role.
+
+### Discussions: agents talking to each other
+
+The `discussion` tool has several agents speak to one topic in turn, in four forms:
+
+| Mode | How it runs | When it ends |
+|---|---|---|
+| `roundtable` | everyone speaks each round | rounds run out, or a whole round answers 【無補充】 (nothing to add) |
+| `debate` | sides argue in turn (for/against assigned when not given); the moderator gives a verdict | rounds run out |
+| `review` | the first participant writes, the others review, the author revises | every reviewer answers 【通過】 (approved), or rounds run out |
+| `free` | the moderator picks who speaks next | the moderator calls it (only after everyone spoke), or the turn budget runs out |
+
+Ask in plain words, for example "have advocate and skeptic debate whether to cut the intake, two rounds, check 招生數據.csv first". Each participant is an agent of its own, with its own conversation, role or brief, tools and model, and can look things up before it speaks; on each turn it is told only what was said since it last spoke.
+
+What keeps a discussion accountable:
+
+- **A verbatim record.** Every utterance, with speaker, round and the tools used, goes into the session (`discussion-turn`), shows live in the Web UI, and `/export` produces the full transcript plus a table of agent runs.
+- **Figures and sources must be found.** Every number and every named source ("資料來源：…", "出自「…」") in an utterance is checked against what the room actually has: the topic, the caller's background, the participants' instructions, the files read, and every tool result so far. A participant that quotes without looking anything up is told which ones and asked to check and say it again in full; what still has no source is marked unverified, pointed out to the next speakers, and may not appear in the summary as agreed.
+- **Limits.** Rounds (default 3, at most 8), a token allowance per discussion (moderator included), model calls per utterance; the global budget brake and per-person quotas still apply.
+- **Disagreement is kept.** The summary separates what was agreed, where people disagreed (by name), and what still needs checking; a debate adds a verdict, a review its outcome.
+- **Stoppable.** Stop one participant and the others go on; stop the room and it ends at once, summary included.
+
+```toml
+[agents]
+enabled = true
+dirs = []                 # other directories holding role files
+
+[discussion]
+enabled = true
+max_rounds = 8
+max_tokens = 80000        # per discussion, moderator included
+speak_turns = 6           # model calls per utterance, lookups included
+```
 
 ## Multi-node fleet
 

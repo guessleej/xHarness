@@ -268,7 +268,37 @@ def export_markdown(session_id: str, user: str | None) -> str | None:
                 lines += ["## 回覆", "", str(event.get("content")), ""]
         elif kind == "compaction":
             lines += ["## 較早內容的摘要", "", str(event.get("summary") or ""), ""]
+        elif kind == "discussion-start":
+            mode = DISCUSSION_MODES.get(str(event.get("mode")), str(event.get("mode")))
+            people = "、".join(
+                str(p.get("name")) + (f"（{p.get('stance') or p.get('role')}）" if p.get("stance") or p.get("role") else "")
+                for p in event.get("participants") or [])
+            lines += [f"## {mode}：{event.get('topic')}", "", f"- 討論編號：{event.get('room')}", f"- 參與者：{people}",
+                      f"- 上限：{event.get('rounds')} 輪、{int(event.get('max_tokens') or 0):,} token", ""]
+        elif kind == "discussion-turn":
+            used = f"（查了 {'、'.join(event['tools'])}）" if event.get("tools") else ""
+            lines += [f"**第 {event.get('round')} 輪・{event.get('speaker')}**{used}　{_taipei(str(event.get('ts', '')))}",
+                      "", str(event.get("text") or ""), ""]
+            if event.get("unverified"):
+                lines += [f"> 未查證：{'、'.join(event['unverified'])} 在查到的資料裡找不到原文"
+                          + ("（已要求先查證）" if event.get("rechecked") else ""), ""]
+            if event.get("uncited"):
+                lines += [f"> 未查證出處：{'、'.join(event['uncited'])}", ""]
+        elif kind == "discussion-note":
+            lines += [f"> {event.get('text')}", ""]
+        elif kind == "discussion-end":
+            lines += [f"### 討論結論（{event.get('turns')} 次發言、{int(event.get('tokens') or 0):,} token、"
+                      f"結束原因：{event.get('reason')}）", "", str(event.get("summary") or ""), ""]
+    runs = [e for e in events if e.get("type") == "agent-run"]
+    if runs:
+        lines += ["## 代理執行紀錄", "", "| 代理 | 角色 | 類型 | 狀態 | token | 模型呼叫 | 秒數 |", "|---|---|---|---|---|---|---|"]
+        lines += [f"| {r.get('name')} | {r.get('role') or '—'} | {r.get('kind')} | {r.get('status')} | "
+                  f"{int(r.get('tokens') or 0):,} | {r.get('calls')} | {r.get('seconds')} |" for r in runs]
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+DISCUSSION_MODES = {"roundtable": "圓桌討論", "debate": "辯論", "review": "審查", "free": "自由討論"}
 
 
 def session_plugin(

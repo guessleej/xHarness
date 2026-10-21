@@ -246,6 +246,11 @@ class AgentOptions:
     #: Describes an image for a model that cannot see: (path, request) -> text.
     describe_image: Callable[[str, str], str] | None = None
     describer_name: str = ""
+    #: The model this agent runs on; None means the harness's (see roles.py).
+    llm: Any = None
+    #: Token ceiling for this agent across its runs; None means only the
+    #: harness-wide budget applies. A role sets it per agent.
+    max_tokens: int | None = None
 
 
 def render_transcript(messages: list[dict[str, Any]]) -> str:
@@ -294,6 +299,8 @@ class Agent:
         self.messages: list[dict[str, Any]] = []
         self.total_usage = Usage()
         self._stop = threading.Event()
+        #: Model calls this agent made, for the live-agent panel and the usage report.
+        self.llm_calls = 0
         #: The date the model was last told; None means it has not been told.
         self._told_date: Any = None
         self._system_logged = False
@@ -309,9 +316,13 @@ class Agent:
         if not any(message.get("role") == "system" for message in self.messages):
             self.messages.insert(0, {"role": "system", "content": self.build_system_prompt()})
 
+    @property
+    def llm(self) -> Any:
+        return self.options.llm or self.ctx.optional("llm")
+
     def build_system_prompt(self) -> str:
         cwd = self.options.cwd or os.getcwd()
-        llm = self.ctx.optional("llm")
+        llm = self.llm
         system = self.options.system_prompt or default_system_prompt(cwd, getattr(llm, "model", None))
         # Always, even under a custom system prompt: without it the model
         # assumes a date from its training data. Measured 2026-10-14 -- asked
@@ -328,6 +339,11 @@ class Agent:
         skills = self.ctx.optional("skills")
         if skills is not None and "skill" not in self.options.exclude_tools:
             index = skills.index(cwd)
+            if index:
+                system = f"{system}\n\n{index}"
+        roles = self.ctx.optional("roles")
+        if roles is not None and not {"subagent", "workflow", "discussion"} <= set(self.options.exclude_tools):
+            index = roles.index(cwd)
             if index:
                 system = f"{system}\n\n{index}"
         return system
@@ -355,7 +371,7 @@ class Agent:
         veto = self._hook("PreCompact", {"trigger": reason})
         if veto and veto.block:
             return None
-        llm = self.ctx.get("llm")
+        llm = self.llm
         request = [{"role": "system", "content": SUMMARY_SYSTEM},
                    {"role": "user", "content": render_transcript(middle)}]
         reply: AssistantTurn = self.ctx.invoke(
@@ -436,7 +452,9 @@ class Agent:
 
     def run(self, task: str, extra_context: str | None = None, images: list[str] | None = None) -> str:
         self._stop.clear()
-        llm = self.ctx.get("llm")
+        llm = self.llm
+        if llm is None:
+            raise RuntimeError("no model is configured (llm)")
         registry: ToolRegistry = self.ctx.get("tools")
         session: SessionLog | None = self.ctx.optional("session")
 
@@ -503,6 +521,13 @@ class Agent:
             if self._stop.is_set():
                 self.ctx.emit("agent/task-end", {"turns": turn, "usage": self.total_usage, "stopped": True})
                 return "[stopped by operator]"
+            spent = self.total_usage.prompt_tokens + self.total_usage.completion_tokens
+            if self.options.max_tokens and spent >= self.options.max_tokens:
+                if session:
+                    session.append({"type": "budget-stop", "scope": "agent", "tokens": spent,
+                                    "limit": self.options.max_tokens, **self._tag()})
+                self.ctx.emit("agent/task-end", {"turns": turn, "usage": self.total_usage, "stopped": True})
+                return f"[stopped: this agent used its {self.options.max_tokens:,}-token allowance]"
             hidden = self.hidden_tools(registry)
             schemas = [
                 {"name": tool.name, "description": tool.description, "parameters": tool.parameters}
@@ -516,6 +541,7 @@ class Agent:
                 except Exception as error:  # noqa: BLE001 - a failed summary must not end the task
                     print(f"[xharness] compaction failed: {error}", file=sys.stderr)
             reply = self._call_model(llm, schemas, session)
+            self.llm_calls += 1
             window = getattr(llm, "context_tokens", None)
             if (window and reply.usage and self.options.compaction.get("auto", True)
                     and reply.usage.prompt_tokens >= float(self.options.compaction.get("threshold", 0.8)) * window):

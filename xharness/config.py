@@ -51,6 +51,10 @@ class ResolvedConfig:
     hooks: dict[str, Any] = field(default_factory=dict)
     #: [lsp.servers.<name>] command, extensions
     lsp: dict[str, Any] = field(default_factory=dict)
+    #: [agents] enabled, dirs -- agent roles, see roles.py
+    agents: dict[str, Any] = field(default_factory=dict)
+    #: [discussion] enabled, max_rounds, max_tokens, speak_turns -- see discuss.py
+    discussion: dict[str, Any] = field(default_factory=dict)
 
 
 def _find_config_file(explicit_path: str | None) -> str | None:
@@ -138,6 +142,8 @@ def load_config(
         terminal=bool(raw.get("tools", {}).get("terminal", True)),
         hooks=raw.get("hooks", {}) or {},
         lsp=raw.get("lsp", {}) or {},
+        agents=raw.get("agents", {}) or {},
+        discussion=raw.get("discussion", {}) or {},
     )
 
 

@@ -89,6 +89,32 @@ def _count_events(directory: str, session_id: str, kinds: tuple[str, ...]) -> di
     return counts
 
 
+def _agent_events(directory: str, session_id: str, start: datetime) -> list[dict[str, Any]]:
+    """agent-run and discussion-end records logged since `start`."""
+    path = os.path.join(directory, f"{session_id}.jsonl")
+    found: list[dict[str, Any]] = []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                if '"agent-run"' not in line and '"discussion-end"' not in line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                try:
+                    stamp = datetime.fromisoformat(str(event.get("ts")))
+                except ValueError:
+                    continue
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=timezone.utc)
+                if stamp >= start:
+                    found.append(event)
+    except OSError:
+        return found
+    return found
+
+
 def collect(
     config: Any,
     since: str = "30d",
@@ -107,6 +133,8 @@ def collect(
     budget_stops = 0
     unattributed = {"tokens": 0, "tasks": 0}
     feedback: dict[str, Any] = {"up": 0, "down": 0, "notes": []}
+    roles: dict[str, dict[str, Any]] = {}
+    discussions = {"count": 0, "turns": 0, "tokens": 0}
 
     for user, directory in session_owners():
         label = user or "(未歸戶)"
@@ -151,6 +179,19 @@ def collect(
             feedback["up"] += ratings["up"]
             feedback["down"] += ratings["down"]
             feedback["notes"].extend(ratings["notes"])
+            for event in _agent_events(directory, session_id, start):
+                if event.get("type") == "discussion-end":
+                    discussions["count"] += 1
+                    discussions["turns"] += int(event.get("turns") or 0)
+                    discussions["tokens"] += int(event.get("tokens") or 0)
+                    continue
+                key = str(event.get("role") or "") or f"（未指定角色的{AGENT_KINDS.get(str(event.get('kind')), '代理')}）"
+                slot = roles.setdefault(key, {"role": key, "runs": 0, "tokens": 0, "calls": 0, "failed": 0, "stopped": 0})
+                slot["runs"] += 1
+                slot["tokens"] += int(event.get("tokens") or 0)
+                slot["calls"] += int(event.get("calls") or 0)
+                slot["failed"] += 1 if event.get("status") == "failed" else 0
+                slot["stopped"] += 1 if event.get("status") == "stopped" else 0
         bucket["sessions"] = len(seen)
         if user is None:
             unattributed = {"tokens": bucket["tokens"], "tasks": bucket["tasks"]}
@@ -205,6 +246,12 @@ def collect(
             "unknown": hosting.get("unknown", {"tokens": 0, "sessions": 0}),
         },
         "machines": machines,
+        "agents": {
+            "runs": sum(item["runs"] for item in roles.values()),
+            "tokens": sum(item["tokens"] for item in roles.values()),
+            "by_role": sorted(roles.values(), key=lambda item: item["tokens"], reverse=True)[:TOP_N],
+            "discussions": discussions,
+        },
         "outbound": outbound,
         "health": {
             "errors": errors,
@@ -219,6 +266,9 @@ def collect(
             "governance": GOVERNANCE_RULE,
         },
     }
+
+
+AGENT_KINDS = {"subagent": "子代理", "workflow": "工作流程步驟", "discussion": "討論參與者"}
 
 
 def _outbound_posture(config: Any, users: UserStore | None) -> dict[str, Any]:
@@ -347,6 +397,18 @@ def _issues(
     return issues
 
 
+def _agent_lines(agents: dict[str, Any]) -> list[str]:
+    if not agents.get("runs") and not (agents.get("discussions") or {}).get("count"):
+        return []
+    talk = agents.get("discussions") or {}
+    lines = [f"      其中代理：{agents['runs']:,} 次執行、{agents['tokens']:,} tokens；"
+             f"討論 {talk.get('count', 0)} 場、{talk.get('turns', 0)} 次發言、{talk.get('tokens', 0):,} tokens"]
+    lines += [f"      {row['role']:<16} {row['runs']:>4} 次 {row['tokens']:>10,} tokens"
+              + (f"  失敗 {row['failed']}" if row["failed"] else "") + (f"  被停止 {row['stopped']}" if row["stopped"] else "")
+              for row in agents.get("by_role", [])[:5]]
+    return lines
+
+
 def format_report(report: dict[str, Any]) -> str:
     """Terminal rendering, same numbers as the Word version."""
     people, spend, hosting = report["people"], report["spend"], report["hosting"]
@@ -364,6 +426,7 @@ def format_report(report: dict[str, Any]) -> str:
         f"二、花多少：{spend['tokens']:,} tokens、{spend['calls']:,} 次模型呼叫、{spend['tool_calls']:,} 次工具呼叫",
         f"      {spend['cost']['assumption']}"
         + (f"，估算 {spend['cost']['estimate']:,}" if spend["cost"]["estimate"] else ""),
+        *_agent_lines(report.get("agents") or {}),
         "",
         f"三、自建 vs 外購：地端自建 {hosting['self_hosted']['tokens']:,} tokens／"
         f"外購 API {hosting['external']['tokens']:,} tokens"

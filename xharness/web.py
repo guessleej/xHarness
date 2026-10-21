@@ -245,6 +245,7 @@ class Conversation:
             "last_activity": self.last_activity,
             "elapsed": round(time.time() - self.started_at, 1) if self.running and self.started_at else None,
             "children": [{"name": name, "task": task[:120]} for name, task in self.children.items()],
+            "agents": self.harness.ctx.optional("agents").public() if self.harness.ctx.optional("agents") else [],
             "tool_calls": self.turns,
             "pending_approvals": pending,
             "pending_questions": asking,
@@ -334,6 +335,14 @@ class WebApp:
         user: User | None = None,
         provider: str | None = None,
     ) -> Conversation:
+        if resume:
+            # A session still open in a live conversation is that conversation: a second
+            # one would append to the same log and the two transcripts would interleave.
+            with self.lock:
+                live = next((c for c in self.conversations.values() if c.session_id == resume
+                             and c.user == principal_name(user)), None)
+            if live is not None:
+                return live
         harness = self.harness_factory(resume, user) if self._factory_takes_user else self.harness_factory(resume)
         session = harness.ctx.optional("session")
         session_id = session.id if session else "-"
@@ -423,6 +432,12 @@ class WebApp:
 
         harness.ctx.on("subagent/start", child_start)
         harness.ctx.on("subagent/end", child_end)
+        live = harness.ctx.optional("agents")
+        if live is not None:
+            harness.ctx.on("agents/changed", lambda _info: conv.push({"type": "agents", "items": live.public()}))
+        for state in ("start", "turn", "end"):
+            harness.ctx.on(f"discussion/{state}", lambda info, state=state: conv.push(
+                {"type": "discussion", "state": state, **{k: v for k, v in info.items() if k != "ts"}}))
         harness.ctx.on("jobs/changed", lambda job: conv.push({"type": "job", **job}))
         harness.ctx.on("workflow/start", lambda info: conv.push({"type": "workflow", "state": "start", "steps": info["steps"]}))
         harness.ctx.on("workflow/end", lambda info: conv.push({"type": "workflow", "state": "end", "ok": info["ok"]}))
@@ -602,6 +617,24 @@ class WebApp:
         return [{"name": s.name, "description": s.description, "source": s.source}
                 for s in store.discover(workspace.ensure(principal_name(user)) or os.getcwd())]
 
+    def roles(self, user: Any) -> list[dict[str, Any]]:
+        from .roles import RoleStore
+
+        store = RoleStore(getattr(self.config, "agents", None), providers=self.config.providers,
+                          allowed=tuple(getattr(user, "allowed_providers", ()) or ()))
+        return [r.public() for r in store.discover(workspace.ensure(principal_name(user)) or os.getcwd())]
+
+    def agents_action(self, conv: Conversation, body: dict[str, Any]) -> int:
+        """Stop one agent (stop: id), a discussion (room: id) or all of this conversation's agents."""
+        live = conv.harness.ctx.optional("agents")
+        if live is None:
+            return 0
+        if body.get("all"):
+            return live.stop_all()
+        if body.get("room"):
+            return live.stop_room(str(body["room"]))
+        return int(live.stop(str(body.get("stop") or "")))
+
     def approve(self, conv: Conversation, approval_id: str, allow: bool) -> bool:
         approval = conv.approvals.get(approval_id)
         if approval is None or approval.decision is not None:
@@ -627,6 +660,9 @@ class WebApp:
         if not conv.running:
             return False
         conv.agent.stop()
+        live = conv.harness.ctx.optional("agents")
+        if live is not None:
+            live.stop_all()     # children, workflow steps and discussion participants stop with it
         for approval in conv.approvals.values():
             if approval.decision is None:
                 approval.decision = False
@@ -996,6 +1032,9 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             if parts[1:] == ["skills"]:
                 self._json(200, app.skills(self.principal))
                 return
+            if parts[1:] == ["agents", "roles"]:
+                self._json(200, app.roles(self.principal))
+                return
             if parts[1:] == ["me"]:
                 principal = self.principal
                 payload: dict[str, Any] = {
@@ -1225,6 +1264,10 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     manager = conv.harness.ctx.optional("jobs")
                     job = manager.stop(str(body.get("stop") or "")) if manager else None
                     self._json(200 if job else 404, {"ok": bool(job), "job": job.public() if job else None})
+                    return
+                if parts[3] == "agents":
+                    count = app.agents_action(conv, body if isinstance(body, dict) else {})
+                    self._json(200 if count else 404, {"ok": bool(count), "stopped": count})
                     return
                 if parts[3] == "feedback":
                     rating = body.get("rating")
@@ -1706,6 +1749,26 @@ body.plan-on .composer{box-shadow:0 0 0 3px var(--warn-tint),var(--shadow)}
 .imgchip button svg.i{width:12px;height:12px}
 .m-user .att{font-size:12.5px;color:var(--ink-3);text-align:right;margin-top:4px}
 .job{background:var(--surface-2);border-radius:14px;padding:10px 12px;margin:10px 2px}
+:root{--sp-1:#2563eb;--sp-2:#059669;--sp-3:#7c3aed;--sp-4:#ea580c;--sp-5:#0891b2;--sp-6:#db2777}
+:root[data-theme="dark"]{--sp-1:#6b9cf5;--sp-2:#34c49a;--sp-3:#a78bfa;--sp-4:#f59a5c;--sp-5:#3fbfd9;--sp-6:#f06aa8}
+.disc{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-sm);margin:14px 0;overflow:hidden;animation:rise .35s var(--ease)}
+.disc-h{display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--surface-2)}
+.disc-h .ic{flex:none;width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:var(--tint);color:var(--brand)}
+.disc-h .tt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.disc-h .tt b{font-size:14.5px;line-height:1.4}
+.disc-h .m,.dn .m{font-size:12px;color:var(--ink-3)}
+.disc-body{padding:4px 14px 8px;max-height:560px;overflow:auto}
+.dturn{display:flex;gap:10px;padding:10px 0}
+.dturn+.dturn{border-top:1px solid var(--sep)}
+.dturn .av{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:13px;
+  color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent)}
+.dturn .db{flex:1;min-width:0}
+.dn{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13.5px}
+.dn .tag{font-size:12px;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--surface-2);color:var(--ink-2)}
+.dn .tag.warn{background:var(--warn-tint);color:var(--warn)}
+.dt.m-ai{margin:2px 0 0;font-size:14.5px;animation:none}
+.disc-end{padding:12px 14px 14px;background:var(--surface-2)}
+.disc-end .cl{font-size:12px;font-weight:700;color:var(--ink-3);letter-spacing:.04em;margin-bottom:2px}
 .job-h{display:flex;align-items:center;gap:8px}
 .job-h .c{flex:1;min-width:0;font:13px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .job .m{font-size:12px;color:var(--ink-3);margin-top:4px}
@@ -2033,6 +2096,7 @@ body:not(.view-admin) #admin{display:none}
         <button class="on" data-rv="changes">變更<span class="cnt" id="rv-changes-cnt"></span></button>
         <button data-rv="files">檔案</button>
         <button data-rv="jobs">背景與提醒<span class="cnt" id="rv-jobs-cnt"></span></button>
+        <button data-rv="agents">代理<span class="cnt" id="rv-agents-cnt"></span></button>
         <button data-rv="tools">工具</button>
         <button data-rv="memory">記憶</button>
       </div>
@@ -2040,6 +2104,7 @@ body:not(.view-admin) #admin{display:none}
         <div id="rv-changes"></div>
         <div id="rv-files" hidden></div>
         <div id="rv-jobs" hidden></div>
+        <div id="rv-agents" hidden></div>
         <div id="rv-tools" hidden></div>
         <div id="rv-memory" hidden></div>
       </div>
@@ -2127,7 +2192,7 @@ body:not(.view-admin) #admin{display:none}
   let conv=null,es=null,token=null,me=null,admin=false,gateOn=false,meta=null;
   let view='chat',convPreview='',convTitle='',convSession='',convState='idle',running=false;
   let commands=[],models={providers:[],switchable:false},pendingProvider='',searchHits=null,lastAiEl=null,knownRatings={};
-  let planOn=false,turnWasPlan=false,jobs={},pendingImages=[],reminders=[];
+  let planOn=false,turnWasPlan=false,jobs={},pendingImages=[],reminders=[],agents=[],roles=null,discs={};
   let assistantEl=null,assistantText='',stepsBox=null,composing=false;
   const rows={};          // call id -> step row
   let changes=[];         // change previews for the open conversation
@@ -2255,7 +2320,7 @@ body:not(.view-admin) #admin{display:none}
   const KIND={read:['eye','讀取'],write:['pen','寫入'],edit:['pen','修改'],glob:['folder','找檔案'],grep:['search','搜尋'],
     bash:['term','執行'],webfetch:['globe','開啟網頁'],browser_open:['globe','開啟網頁'],web_search:['globe','搜尋網路'],
     todo_write:['list','更新待辦清單'],security_scan:['shield','資安掃描'],ask_user:['help','問你一個問題'],
-    subagent:['users','交給子代理'],subagent_batch:['users','交給多個子代理'],
+    subagent:['users','交給子代理'],subagent_batch:['users','交給多個子代理'],discussion:['users','開討論'],
     terminal:['term','終端機'],job_start:['term','背景執行'],job_status:['list','查看背景工作'],job_wait:['list','等背景工作'],
     job_stop:['stop','停止背景工作'],goal_done:['check','回報目標'],skill:['layers','載入技能'],
     lsp:['search','查程式碼'],workflow:['users','工作流程'],schedule_add:['list','設提醒'],schedule_list:['list','查看提醒'],
@@ -2373,6 +2438,66 @@ body:not(.view-admin) #admin{display:none}
     list.slice().reverse().forEach(j=>{const c=h('div','job'),hd=h('div','job-h');hd.append(h('span','pill '+j.state,JOB_WORDS[j.state]||j.state),h('span','c',j.command));
       if(j.state==='running'){const st=h('button','linkbtn','停止');st.onclick=async()=>{try{await api('/api/conversations/'+conv+'/jobs',{method:'POST',body:{stop:j.id}});}catch(e){toast(e.message,true);}};hd.appendChild(st);}
       c.append(hd,h('div','m',j.id+'・'+j.runtime+' 秒'+(j.exit_code!=null?'・結束碼 '+j.exit_code:'')+'・記錄 '+j.log));box.appendChild(c);});
+  }
+
+  const AGENT_WORDS={running:'進行中',done:'完成',failed:'失敗',stopped:'已停止'};
+  const AGENT_PILL={running:'running',done:'idle',failed:'error',stopped:'skipped'};
+  const AGENT_KIND={subagent:'子代理',workflow:'工作流程步驟',discussion:'討論參與者'};
+  async function agentAction(body){
+    try{await api('/api/conversations/'+conv+'/agents',{method:'POST',body});}catch(e){toast(e.message,true);}}
+  async function loadRoles(){try{roles=await api('/api/agents/roles');}catch(e){roles=[];}if(rvTab==='agents')renderAgents();}
+  function renderAgents(){
+    const run=agents.filter(a=>a.status==='running');$('#rv-agents-cnt').textContent=run.length?String(run.length):'';
+    if(rvTab!=='agents')return;
+    const box=$('#rv-agents');box.textContent='';
+    if(agents.length){
+      const sub=h('div','sub','這段對話的代理（'+agents.length+'）');box.appendChild(sub);
+      if(run.length>1){const all=h('button','linkbtn','全部停止');all.style.marginLeft='8px';all.onclick=()=>agentAction({all:true});sub.appendChild(all);}
+      agents.slice().reverse().forEach(a=>{const c=h('div','job'),hd=h('div','job-h');
+        hd.append(h('span','pill '+(AGENT_PILL[a.status]||''),AGENT_WORDS[a.status]||a.status),h('span','c',a.name+(a.role?'・'+a.role:'')));
+        if(a.status==='running'){const st=h('button','linkbtn','停止');st.onclick=()=>agentAction({stop:a.id});hd.appendChild(st);}
+        c.append(hd,h('div','m',(AGENT_KIND[a.kind]||a.kind)+(a.room?'・討論 '+a.room:'')+'・'+(a.tokens||0).toLocaleString()+' token・'
+          +a.calls+' 次呼叫・'+a.seconds+' 秒'+(a.model?'・'+a.model:'')+(a.status==='running'&&a.activity?'・正在 '+a.activity:'')));
+        if(a.task)c.appendChild(h('div','m',a.task));box.appendChild(c);});
+    }
+    box.appendChild(h('div','sub','代理角色'));
+    if(roles===null){box.appendChild(h('div','m','讀取中…'));loadRoles();return;}
+    if(!roles.length){const e=h('div','empty');e.append(h('b',null,'還沒有代理角色'),document.createTextNode(
+      '在工作目錄的 .xharness/agents/ 放一個「名稱.md」：開頭寫 name、description，可加 tools（限用的工具）、model（設定檔裡的模型名稱）、max_turns、max_tokens，下面寫這個代理的工作說明。Claude Code 的 .claude/agents/ 也讀得到。'));
+      box.appendChild(e);return;}
+    roles.forEach(r=>{const c=h('div','job'),hd=h('div','job-h');hd.append(h('span','pill',r.source),h('span','c',r.name));
+      const lim=[r.tools?'工具：'+r.tools.join('、'):'工具：同呼叫者',r.model?'模型：'+r.model:'模型：同呼叫者'];
+      if(r.max_turns)lim.push('最多 '+r.max_turns+' 輪');if(r.max_tokens)lim.push('上限 '+r.max_tokens.toLocaleString()+' token');
+      c.append(hd,h('div','m',r.description||'（沒有說明）'),h('div','m',lim.join('・')));box.appendChild(c);});
+  }
+  const DISC_MODE={roundtable:'圓桌討論',debate:'辯論',review:'審查',free:'自由討論'};
+  const DISC_END={rounds:'輪數用完',converged:'整輪都沒有新意見',approved:'審查者全數通過',moderator:'主持人判斷已有結論',budget:'token 額度用完',stopped:'被停止'};
+  function discussionEvent(ev){
+    if(ev.state==='start'){
+      finishAssistant();closeSteps();
+      const box=h('div','disc'),hd=h('div','disc-h'),ic=h('span','ic'),tt=h('div','tt');ic.appendChild(icon('users'));
+      tt.append(h('b',null,(DISC_MODE[ev.mode]||ev.mode)+'：'+ev.topic),h('span','m',(ev.participants||[]).join('、')));
+      const st=h('button','linkbtn','停止討論');st.onclick=()=>agentAction({room:ev.room});
+      hd.append(ic,tt,st);const body=h('div','disc-body');box.append(hd,body);transcript.appendChild(box);
+      discs[ev.room]={box,body,stop:st,names:ev.participants||[]};toBottom();return;}
+    const d=discs[ev.room];if(!d)return;
+    if(ev.state==='turn'){
+      const idx=Math.max(0,d.names.indexOf(ev.speaker)),row=h('div','dturn'),av=h('span','av',String(ev.speaker||'?').slice(0,1));
+      av.style.setProperty('--c','var(--sp-'+(idx%6+1)+')');
+      const b=h('div','db'),nm=h('div','dn');nm.appendChild(h('b',null,ev.speaker));
+      if(ev.stance||ev.role)nm.appendChild(h('span','tag',ev.stance||ev.role));
+      if(ev.unverified&&ev.unverified.length){const w=h('span','tag warn','未查證：'+ev.unverified.join('、'));
+        w.title='這些數字在查到的資料裡找不到原文，可能是推算或捏造';nm.appendChild(w);}
+      if(ev.uncited&&ev.uncited.length){const w=h('span','tag warn','未查證出處：'+ev.uncited.join('、'));
+        w.title='引用的來源不是讀過的檔案、工具結果或提供的背景';nm.appendChild(w);}
+      nm.appendChild(h('span','m','第 '+ev.round+' 輪'+(ev.tools&&ev.tools.length?'・查了 '+ev.tools.join('、'):'・沒有查資料')
+        +(ev.rechecked?'・被要求先查證':'')));
+      const tx=h('div','dt m-ai');tx.appendChild(md(ev.text||''));b.append(nm,tx);row.append(av,b);d.body.appendChild(row);
+      d.body.scrollTop=d.body.scrollHeight;toBottom();return;}
+    if(ev.state==='end'){
+      d.stop.remove();const e=h('div','disc-end');
+      e.appendChild(h('div','cl','結論・'+(DISC_END[ev.reason]||ev.reason)+'・'+ev.turns+' 次發言・'+(ev.tokens||0).toLocaleString()+' token'));
+      const s=h('div','dt m-ai');s.appendChild(md(ev.summary||''));e.appendChild(s);d.box.appendChild(e);toBottom();}
   }
 
   function stepsHead(box){
@@ -2510,6 +2635,8 @@ body:not(.view-admin) #admin{display:none}
     else if(t==='job')jobEvent(ev);
     else if(t==='attached')addNote('已附加：'+ev.files.join('、'),'file');
     else if(t==='reminders'){reminders=ev.items||[];renderJobs();}
+    else if(t==='agents'){agents=ev.items||[];renderAgents();}
+    else if(t==='discussion')discussionEvent(ev);
     else if(t==='workflow'){if(ev.state==='start')addNote('工作流程開始：'+ev.steps.length+' 個步驟（'+ev.steps.join('、')+'），沒有相依的步驟會同時進行。','users');
       else addNote('工作流程結束：'+(ev.ok?'全部完成':'有步驟沒有完成，請看結果'),ev.ok?'check':'warn');}
     else if(t==='title'){convTitle=ev.title||'';showTitle();refreshTasks();}
@@ -2552,12 +2679,12 @@ body:not(.view-admin) #admin{display:none}
   }
   function resetThread(){
     transcript.textContent='';assistantEl=null;assistantText='';stepsBox=null;changes=[];lastAiEl=null;convTitle='';knownRatings={};
-    jobs={};reminders=[];renderJobs();$('#goalbar').hidden=true;setPlan(false);
+    jobs={};reminders=[];renderJobs();agents=[];discs={};renderAgents();$('#goalbar').hidden=true;setPlan(false);
     Object.keys(rows).forEach(k=>delete rows[k]);renderChanges();$('#conv-use').textContent='';
   }
   async function openConversation(c){
     conv=c.id;resetThread();convSession=c.session||'';convTitle=c.title||'';knownRatings=c.ratings||{};setTitle(c.preview||'');showLanding(false);setState(c.state||'idle');setUsage(c.usage);
-    setModelShown(c.provider,c.model);setPlan(c.plan_mode);(c.jobs||[]).forEach(j=>{jobs[j.id]=j;});reminders=c.reminders||[];renderJobs();
+    setModelShown(c.provider,c.model);setPlan(c.plan_mode);(c.jobs||[]).forEach(j=>{jobs[j.id]=j;});reminders=c.reminders||[];renderJobs();agents=c.agents||[];renderAgents();
     hint.textContent='';showView('chat');await connect(conv,0);closeDrawer();renderTasks();
   }
   async function newConversation(resume){
@@ -2791,7 +2918,8 @@ body:not(.view-admin) #admin{display:none}
   function rvShow(tab){
     rvTab=tab;document.querySelectorAll('[data-rv]').forEach(b=>b.classList.toggle('on',b.dataset.rv===tab));
     if(tab==='jobs')renderJobs();
-    ['changes','files','jobs','tools','memory'].forEach(k=>{$('#rv-'+k).hidden=k!==tab;});
+    if(tab==='agents'){roles=null;renderAgents();}
+    ['changes','files','jobs','agents','tools','memory'].forEach(k=>{$('#rv-'+k).hidden=k!==tab;});
     if(tab==='files')loadFiles();if(tab==='tools')loadTools();if(tab==='memory')loadMemory();
   }
   const STATUS={pending:'等你許可',applied:'已套用',skipped:'沒有套用',denied:'已拒絕'};
