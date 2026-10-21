@@ -2,6 +2,22 @@
 
 中文 | English below
 
+## 1.14.0 — 2026-10-21
+
+組對組討論：一個討論群跟另一個討論群討論。
+
+- **新形式 `teams`（組對組）**：2～4 組、每組 1 人以上（全部最多 8 人）。每一輪各組先在組內討論（其他組看不到），代表最後發言、把組內意見收斂；接著各組代表對所有人公開發言；下一輪的組內討論從聽到別組的公開發言開始。代表預設是組裡第一位，也可以指定；只有一人的組直接公開發言。結論逐組寫出最後立場，並說明有沒有因為哪一組的論點而改變。數字與出處查核、逐字紀錄、token 上限、停止都照舊。
+- 網頁上方列出對陣（例：教務組（正方、查資料員）對 學務組（反方、審查員）），每段發言標「某組・組內（其他組看不到）」或「某組・代表發言」，頭像依組別上色、組內發言縮排；匯出的逐字稿同樣標明。
+- 直接說就會用：「開一場組對組討論：教務組（正方、查資料員）對學務組（反方、審查員），題目：要不要開夜間班，兩輪」。實測 .70 gemma-4-31b-xvita：模型自己選對形式與分組，12 次發言、26,758 tokens、約 8 分鐘；組內發言不外流；一位成員提到資料裡沒有的「2024」被要求先查後改正。殘留：兩組都把 110 學年的「12 人次」說成「去年」，數字是真的但用錯年份，結論照抄——比對數字擋不住這類誤讀。
+- 修：出處寫成《檔名》時沒有去掉書名號，真的有讀的檔案被標成未查證出處。
+
+Team against team: one discussion group talking with another.
+
+- **A new `teams` mode**: 2-4 teams of one or more members (8 at most in all). Each round every team talks internally (the other teams cannot see it), its spokesperson speaking last to pull the team together; then each spokesperson speaks to everyone; the next round's internal talk starts from what the other teams said in public. The spokesperson is the first member unless named; a one-member team simply speaks in public. The summary gives each team's final position and whether another team's argument changed it. Figure and source checks, the verbatim record, token limits and Stop work as before.
+- The Web UI shows the line-up (e.g. 教務組（正方、查資料員）對 學務組（反方、審查員）), tags every utterance "team, internal (other teams cannot see)" or "team, spokesperson", colours avatars by team and indents internal talk; the export marks the same.
+- Ask in plain words: "開一場組對組討論：教務組（正方、查資料員）對學務組（反方、審查員），題目：要不要開夜間班，兩輪". Measured on .70 with gemma-4-31b-xvita: the model chose the mode and teams itself; 12 utterances, 26,758 tokens, about 8 minutes; no internal talk leaked; a member's unsourced "2024" was sent back and corrected. Residual: both teams called the 110 school year's "12 enquiries" "last year" -- a real figure in the wrong year, which the summary repeated; checking numbers cannot catch that kind of misreading.
+- Fix: a source cited as 《file name》 kept its title marks and a file that had been read was flagged as unverified.
+
 ## 1.13.5 — 2026-10-21
 
 - **升級後不會再看到舊畫面**：網頁本身原本沒有快取指示，部署新版後已開著的分頁照樣跑舊介面（1.13.4 修好的選單方向鍵，舊分頁裡還是壞的）。現在每次載入都向伺服器確認最新版；分頁開著時伺服器升級了，畫面上方會出現「xHarness 已更新到 x.y.z，重新整理才會用到新版」與「重新整理」按鈕。

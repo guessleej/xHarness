@@ -670,3 +670,73 @@ def test_the_page_revalidates_and_offers_a_reload_after_an_upgrade():
     assert "popIndex=0;}" in INDEX_HTML.split("function closePop()")[1][:120]
     src = open(os.path.join(os.path.dirname(__file__), "..", "xharness", "web.py"), encoding="utf-8").read()
     assert 'self.send_header("Cache-Control", "no-cache")' in src.split("def _html")[1][:900]
+
+
+# --- team against team ---------------------------------------------------------------------
+
+def team_room(tmp_path, rules, log, **args):
+    llm = Router(rules)
+    h = build(llm, tmp_path, ("discussion", discussion_plugin()), log=log)
+    out = h.ctx.get("tools").get("discussion").execute(args, tc(tmp_path))
+    return llm, out
+
+
+def test_teams_talk_inside_then_speak_for_the_team(tmp_path):
+    log = Log()
+    def says(private, public):
+        return lambda messages, tools: public if "public turn" in str(messages[-1]["content"]) else private
+    llm, out = team_room(tmp_path, [
+        ("You are 甲1,", says("甲組內：我們主張開班", "甲代表")), ("You are 甲2,", says("甲組內：先看師資", "甲組公開：支持開班")),
+        ("You are 乙1,", says("乙組內：我們反對", "乙組公開：反對")), ("You are 乙2,", says("乙組內：成本太高", "乙代表")),
+        ("closing summary", "各組最後的立場：甲組支持、乙組反對")], log,
+        topic="要不要開夜間班", rounds=2,
+        teams=[{"name": "甲組", "stance": "支持", "members": ["甲1", "甲2"], "spokesperson": "甲2"},
+               {"name": "乙組", "members": [{"name": "乙1"}, {"name": "乙2"}]}])
+    assert not out.is_error, out.output
+    turns = [(t["round"], t["team"], t["scope"], t["speaker"]) for t in log.of("discussion-turn")]
+    # Round 1: each team's members talk inside (spokesperson last), then each spokesperson speaks publicly.
+    assert turns[:6] == [(1, "甲組", "caucus", "甲1"), (1, "甲組", "caucus", "甲2"),
+                         (1, "乙組", "caucus", "乙2"), (1, "乙組", "caucus", "乙1"),
+                         (1, "甲組", "plenary", "甲2"), (1, "乙組", "plenary", "乙1")]
+    assert len(turns) == 12 and log.of("discussion-end")[0]["reason"] == "rounds"
+    # A team's internal talk never reaches the other team; public statements reach everyone.
+    for call in llm.asked("You are 乙"):
+        heard = " ".join(str(m.get("content")) for m in call["messages"][1:] if m["role"] == "user")
+        assert "甲組內" not in heard
+    second_round_b = [c for c in llm.asked("You are 乙1,")][-1]["messages"]
+    assert any("甲組公開：支持開班" in str(m.get("content")) for m in second_round_b if m["role"] == "user")
+    assert "You are your team's spokesperson" in llm.asked("You are 甲2,")[0]["system"]
+    assert "You are your team's spokesperson" not in llm.asked("You are 甲1,")[0]["system"]
+    assert "Your team's position: 支持" in llm.asked("You are 甲1,")[0]["system"]
+    assert "各組最後的立場" in llm.asked("closing summary")[0]["messages"][-1]["content"]
+    start = log.of("discussion-start")[0]
+    assert start["mode"] == "teams" and {p["team"] for p in start["participants"]} == {"甲組", "乙組"}
+
+
+def test_a_one_member_team_only_speaks_in_public(tmp_path):
+    log = Log()
+    team_room(tmp_path, [("You are", "說"), ("closing summary", "x")], log, topic="t", rounds=1,
+              teams=[{"name": "A", "members": ["a1", "a2"]}, {"name": "B", "members": "b1"}])
+    scopes = [(t["team"], t["scope"]) for t in log.of("discussion-turn")]
+    assert scopes == [("A", "caucus"), ("A", "caucus"), ("A", "plenary"), ("B", "plenary")]
+
+
+def test_bad_team_lists_are_refused_with_an_example(tmp_path):
+    h = build(Router([]), tmp_path, ("discussion", discussion_plugin()))
+    tool = h.ctx.get("tools").get("discussion")
+    for teams, why in [([{"name": "A", "members": ["x"]}], "at least two teams"),
+                       ([{"name": "A", "members": ["x"]}, {"name": "A", "members": ["y"]}], "repeated"),
+                       ([{"name": "A", "members": ["x"]}, {"name": "B", "members": ["x"]}], "two teams"),
+                       ([{"name": "A", "members": []}, {"name": "B", "members": ["y"]}], "no members"),
+                       ([{"name": "A", "members": ["x"], "spokesperson": "z"}, {"name": "B", "members": ["y"]}], "not a member")]:
+        out = tool.execute({"topic": "t", "mode": "teams", "teams": teams}, tc(tmp_path))
+        assert out.is_error and why in out.output and "Simplest valid team call" in out.output, (why, out.output)
+    out = tool.execute({"topic": "t", "teams": [{"name": "A", "members": ["x"]}, {"name": "B", "members": ["y"]}],
+                        "rounds": 1}, tc(tmp_path))
+    assert not out.is_error                       # teams given without a mode means teams mode
+
+
+def test_a_real_file_in_book_title_marks_is_not_flagged():
+    from xharness.discuss import uncited
+
+    assert uncited("（資料來源：《招生數據.csv》）", "資料來源：招生數據.csv", set()) == []

@@ -7,6 +7,10 @@ Four ways to run one:
   review      the first participant writes, the others review; it repeats
               until every reviewer approves or the rounds run out
   free        the moderator decides who speaks next, and when to stop
+  teams       team against team: each round every team first talks among
+              itself (the other teams cannot see it), then its spokesperson
+              speaks for the team to everyone; the next round's internal
+              talk starts from what the other teams said in public
 
 Each participant is an agent of its own -- own conversation, instructions (a
 role from roles.py, or a brief), tools and model -- so it can look things up
@@ -52,9 +56,11 @@ from .subagent import CHILD_TOOLS, find_role
 from .telemetry import BudgetExceeded
 from .tools import Tool, ToolContext, ToolResult, register_tools
 
-MODES = ("roundtable", "debate", "review", "free")
-MODE_NAMES = {"roundtable": "圓桌討論", "debate": "辯論", "review": "審查", "free": "自由討論"}
+MODES = ("roundtable", "debate", "review", "free", "teams")
+MODE_NAMES = {"roundtable": "圓桌討論", "debate": "辯論", "review": "審查", "free": "自由討論", "teams": "組對組"}
 MAX_PARTICIPANTS = 6
+MAX_TEAMS = 4
+MAX_TEAM_SEATS = 8            # members across all teams
 DEFAULT_ROUNDS = 3
 MAX_ROUNDS = 8
 DEFAULT_MAX_TOKENS = 80_000
@@ -91,7 +97,7 @@ def uncited(text: str, corpus: str, files: set[str]) -> list[str]:
     missing: list[str] = []
     for whole, quoted in CITE_RE.findall(text or ""):
         for part in ([quoted] if quoted else CITE_SPLIT.split(whole)):
-            name = part.strip().strip("「」『』\"'()（）。. ")
+            name = part.strip().strip("「」『』《》〈〉\"'()（）。. ")
             if len(name) < 2 or any(word in name for word in GENERIC_CITES):
                 continue
             if any(f and f in name for f in files):
@@ -126,7 +132,13 @@ MODE_RULES = {
     "debate": "Argue for your side. Answer the other side's strongest point directly; do not change sides.",
     "review": "",   # set per seat: the author revises, reviewers review
     "free": "If you have nothing new to add, reply with exactly 【無補充】 and nothing else.",
+    "teams": "",    # set per seat: see TEAM_RULE / SPOKESPERSON_RULE
 }
+TEAM_RULE = ("There are two kinds of turns. Internal turns are heard only by your own team: work with your "
+             "teammates on the team's position, what supports it, and how to answer the other teams. Public turns "
+             "are given by each team's spokesperson to everyone.")
+SPOKESPERSON_RULE = ("You are your team's spokesperson. In a public turn, speak for the team, not for yourself: state "
+                     "the position your team settled on and its reasons, and answer the other teams' strongest points.")
 AUTHOR_RULE = ("You are the author. In your first turn write the piece the topic asks for; afterwards revise it, "
                "address every reviewer comment (accept it and change, or explain why not), and give the full revised version.")
 REVIEWER_RULE = ("You are a reviewer. List concrete problems with the latest version, each with what to change. "
@@ -146,17 +158,29 @@ class Seat:
     tools_used: list[str] = field(default_factory=list)
     can_look: bool = False  # has any tool to check facts with
     harvested: int = 0      # messages already scanned for tool results
+    team: str = ""          # teams mode: the team this seat belongs to
+    spokesperson: bool = False
 
 
 def _seat_prompt(seat: Seat, seats: list[Seat], topic: str, mode: str, context: str, author: bool) -> str:
     others = "、".join(s.name + (f"（{s.stance}）" if s.stance else "") for s in seats if s is not seat)
     rule = (AUTHOR_RULE if author else REVIEWER_RULE) if mode == "review" else MODE_RULES[mode]
-    lines = [
-        f"You are {seat.name}, one participant in a {MODE_NAMES[mode]} ({mode}) with: {others}.",
-        f"Topic: {topic}",
-    ]
-    if seat.stance:
-        lines.append(f"Your side: {seat.stance}.")
+    if mode == "teams":
+        mates = "、".join(s.name for s in seats if s.team == seat.team and s is not seat) or "（只有你一人）"
+        rivals = "；".join(f"「{team}」：{'、'.join(s.name for s in seats if s.team == team)}"
+                          for team in dict.fromkeys(s.team for s in seats) if team != seat.team)
+        lines = [f"You are {seat.name}, a member of team 「{seat.team}」 in a team-against-team discussion.",
+                 f"Your teammates: {mates}. Other teams: {rivals}.", f"Topic: {topic}"]
+        if seat.stance:
+            lines.append(f"Your team's position: {seat.stance}.")
+        rule = TEAM_RULE + (" " + SPOKESPERSON_RULE if seat.spokesperson else "")
+    else:
+        lines = [
+            f"You are {seat.name}, one participant in a {MODE_NAMES[mode]} ({mode}) with: {others}.",
+            f"Topic: {topic}",
+        ]
+        if seat.stance:
+            lines.append(f"Your side: {seat.stance}.")
     if seat.role is not None and seat.role.prompt:
         lines += ["", f"Your role ({seat.role.name}):", seat.role.prompt]
     if seat.brief:
@@ -184,12 +208,21 @@ def _line(entry: dict[str, Any]) -> str:
     if entry.get("uncited"):
         flags.append(f"引用的「{'」「'.join(entry['uncited'])}」不在任何查到的資料裡")
     flag = f"（主持人註記：{'；'.join(flags)}）" if flags else ""
-    return f"[第 {entry['round']} 輪] {entry['speaker']}：{entry['text']}{flag}"
+    where = ""
+    if entry.get("team"):
+        where = f"・{entry['team']}{'組內' if entry.get('scope') == 'caucus' else '代表'}"
+    return f"[第 {entry['round']} 輪{where}] {entry['speaker']}：{entry['text']}{flag}"
+
+
+def _visible(entry: dict[str, Any], seat: Seat) -> bool:
+    """A team's internal talk is heard only by that team; everything else by everyone."""
+    return entry.get("scope") != "caucus" or entry.get("team") == seat.team
 
 
 class Room:
     def __init__(self, ctx: Context, tool_ctx: ToolContext, topic: str, mode: str, seats: list[Seat],
-                 rounds: int, max_tokens: int, context: str, speak_turns: int) -> None:
+                 rounds: int, max_tokens: int, context: str, speak_turns: int,
+                 teams: list[dict[str, str]] | None = None) -> None:
         self.ctx, self.tool_ctx = ctx, tool_ctx
         self.id = secrets.token_hex(3)
         self.topic, self.mode, self.seats = topic, mode, seats
@@ -206,6 +239,7 @@ class Room:
             self.sources |= _values(seat.brief) | _values(seat.role.prompt if seat.role else "")
         self.corpus = "\n".join([topic, context] + [s.brief for s in seats])
         self.files: set[str] = set()
+        self.teams = teams or []
 
     # -- bookkeeping -----------------------------------------------------------
     def tokens(self) -> int:
@@ -259,7 +293,7 @@ class Room:
                                                "discussion", self.topic, room=self.id)
 
     # -- one utterance ---------------------------------------------------------
-    def speak(self, seat: Seat, round_no: int) -> dict[str, Any] | None:
+    def speak(self, seat: Seat, round_no: int, scope: str = "") -> dict[str, Any] | None:
         if seat.agent is None or seat.left:
             return None
         if self._stop_wanted(seat):
@@ -268,12 +302,18 @@ class Room:
         if self.tokens() >= self.max_tokens:
             self.ended = self.ended or "budget"
             return None
-        news = self.transcript[seat.seen:]
+        news = [e for e in self.transcript[seat.seen:] if _visible(e, seat)]
         if seat.seen == 0:
             prompt = ("The discussion so far:\n" + "\n".join(_line(e) for e in news) if news else "You speak first.")
         else:
             prompt = ("Since you last spoke:\n" + "\n".join(_line(e) for e in news)) if news else "Nobody has spoken since your last turn."
-        prompt += f"\n\nIt is your turn (round {round_no})."
+        if scope == "caucus":
+            prompt += (f"\n\nIt is your turn in team 「{seat.team}」's internal discussion (round {round_no}); "
+                       "only your team hears this.")
+        elif scope == "plenary":
+            prompt += (f"\n\nIt is team 「{seat.team}」's public turn (round {round_no}): speak for your team to everyone.")
+        else:
+            prompt += f"\n\nIt is your turn (round {round_no})."
         seat.seen = len(self.transcript)
         seat.tools_used = []
         if self.live is not None:
@@ -304,6 +344,8 @@ class Room:
                  "stance": seat.stance, "text": text or "（沒有發言）", "tools": list(dict.fromkeys(seat.tools_used)),
                  "tokens": seat.agent.total_usage.prompt_tokens + seat.agent.total_usage.completion_tokens - before,
                  "unverified": missing, "uncited": refs, "rechecked": rechecked, "ts": time.time()}
+        if seat.team:
+            entry.update(team=seat.team, scope=scope)
         self.transcript.append(entry)
         seat.seen = len(self.transcript)
         self._log({"type": "discussion-turn", "room": self.id, **{k: v for k, v in entry.items() if k != "ts"}})
@@ -408,9 +450,13 @@ class Room:
         self._log({"type": "discussion-start", "room": self.id, "topic": self.topic, "mode": self.mode,
                    "rounds": self.rounds, "max_tokens": self.max_tokens,
                    "participants": [{"name": s.name, "role": s.role.name if s.role else "", "stance": s.stance,
-                                     "brief": s.brief[:300]} for s in self.seats]})
+                                     "brief": s.brief[:300], "team": s.team, "spokesperson": s.spokesperson}
+                                    for s in self.seats]})
         self.ctx.emit("discussion/start", {"room": self.id, "topic": self.topic, "mode": self.mode,
-                                           "participants": [s.name for s in self.seats]})
+                                           "participants": [s.name for s in self.seats],
+                                           "teams": [{"name": t["name"], "stance": t.get("stance", ""),
+                                                      "members": [s.name for s in self.seats if s.team == t["name"]]}
+                                                     for t in self.teams]})
         try:
             self._rounds()
         finally:
@@ -431,7 +477,32 @@ class Room:
         out = f"{head}\n\n## Summary\n{summary}\n\n## Transcript\n{lines}"
         return out[:MAX_OUTPUT] + ("\n[transcript truncated; the full one is in the session log]" if len(out) > MAX_OUTPUT else "")
 
+    def _team_rounds(self) -> None:
+        names = [t["name"] for t in self.teams]
+        for round_no in range(1, self.rounds + 1):
+            for team in names:     # internal talk first; the spokesperson speaks last, so it can sum up
+                members = [s for s in self.seats if s.team == team and not s.left]
+                if len(members) < 2:
+                    continue
+                for seat in sorted(members, key=lambda s: s.spokesperson):
+                    if self.ended:
+                        return
+                    self.speak(seat, round_no, "caucus")
+            for team in names:     # then each team speaks to everyone
+                members = [s for s in self.seats if s.team == team and not s.left]
+                voice = next((s for s in members if s.spokesperson), None) or (members[0] if members else None)
+                if voice is None:
+                    continue
+                if self.ended:
+                    return
+                self.speak(voice, round_no, "plenary")
+            if not self.active():
+                return
+
     def _rounds(self) -> None:
+        if self.mode == "teams":
+            self._team_rounds()
+            return
         if self.mode == "free":
             last = ""
             for _ in range(self.rounds * len(self.seats)):
@@ -472,6 +543,7 @@ class Room:
         extra = {
             "debate": "4. 裁決：依雙方實際提出的論點，判斷哪一方較有說服力、理由為何；若難分高下就直說。",
             "review": "4. 審查結果：是否全數通過、誰仍有意見、還沒處理的問題。",
+            "teams": "4. 各組最後的立場：逐組寫出（點名組名），並說明立場在討論中有沒有改變、因為哪一組的哪個論點。",
         }.get(self.mode, "")
         prompt = (f"主題：{self.topic}\n形式：{MODE_NAMES[self.mode]}\n結束原因：{END_REASONS.get(self.ended, self.ended)}\n\n"
                   "逐字紀錄：\n" + "\n".join(_line(e) for e in self.transcript)
@@ -495,6 +567,45 @@ class Room:
         return "（主持人沒有寫出結論，以下為每位參與者最後的發言）\n" + "\n".join(f"- {k}：{v[:300]}" for k, v in last.items())
 
 
+def parse_teams(ctx: Context, items: Any, cwd: str) -> tuple[list[Seat], list[dict[str, str]], str]:
+    """Teams mode: [{"name", "stance"?, "members": [...], "spokesperson"?}], 2-4 teams."""
+    if not isinstance(items, list) or len(items) < 2:
+        return [], [], "teams needs at least two teams, each with members"
+    if len(items) > MAX_TEAMS:
+        return [], [], f"at most {MAX_TEAMS} teams"
+    seats: list[Seat] = []
+    teams: list[dict[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            return [], [], "each team is an object with name and members"
+        name = str(item.get("name") or "").strip()
+        if not NAME_RE.match(name) or any(t["name"] == name for t in teams):
+            return [], [], f"team name {name!r} is empty, repeated, too long, or has brackets or line breaks"
+        members = item.get("members")
+        if isinstance(members, str):
+            members = [part.strip() for part in re.split(r"[,，、]", members) if part.strip()]
+        if not isinstance(members, list) or not members:
+            return [], [], f"team {name!r} has no members"
+        # The participant rules (names, roles) apply; a team may have a single member.
+        found, problem = parse_participants(ctx, members, "roundtable", cwd, limit=MAX_TEAM_SEATS, minimum=1)
+        if problem:
+            return [], [], f"team {name!r}: {problem}"
+        stance = str(item.get("stance") or "").strip()[:200]
+        wanted = str(item.get("spokesperson") or "").strip()
+        for index, seat in enumerate(found):
+            if any(s.name == seat.name for s in seats):
+                return [], [], f"{seat.name!r} is on two teams"
+            seat.team, seat.stance = name, stance or seat.stance
+            seat.spokesperson = (seat.name == wanted) if wanted else index == 0
+        if wanted and not any(s.spokesperson for s in found):
+            return [], [], f"spokesperson {wanted!r} is not a member of team {name!r}"
+        seats += found
+        teams.append({"name": name, "stance": stance})
+    if len(seats) > MAX_TEAM_SEATS:
+        return [], [], f"at most {MAX_TEAM_SEATS} members across all teams"
+    return seats, teams, ""
+
+
 END_REASONS = {"rounds": "輪數用完", "converged": "整輪都沒有新意見", "approved": "審查者全數通過",
                "moderator": "主持人判斷已有結論", "budget": "token 額度用完", "stopped": "被停止"}
 
@@ -504,15 +615,18 @@ END_REASONS = {"rounds": "輪數用完", "converged": "整輪都沒有新意見"
 #: broke the nested participant objects in one run out of three).
 EXAMPLE = ('Simplest valid call: {"topic": "要不要調降招生名額", "mode": "debate", '
            '"participants": ["正方", "反方"], "rounds": 2}')
+TEAM_EXAMPLE = ('Simplest valid team call: {"topic": "要不要開夜間班", "mode": "teams", "rounds": 2, "teams": '
+                '[{"name": "教務組", "members": ["正方", "查資料員"]}, {"name": "學務組", "members": ["反方", "審查員"]}]}')
 
 
-def parse_participants(ctx: Context, items: Any, mode: str, cwd: str) -> tuple[list[Seat], str]:
+def parse_participants(ctx: Context, items: Any, mode: str, cwd: str,
+                       limit: int = MAX_PARTICIPANTS, minimum: int = 2) -> tuple[list[Seat], str]:
     if isinstance(items, str):
         items = [part.strip() for part in re.split(r"[,，、]", items) if part.strip()]
-    if not isinstance(items, list) or len(items) < 2:
-        return [], "participants needs at least two entries"
-    if len(items) > MAX_PARTICIPANTS:
-        return [], f"at most {MAX_PARTICIPANTS} participants"
+    if not isinstance(items, list) or len(items) < minimum:
+        return [], "participants needs at least two entries" if minimum == 2 else "a team needs at least one member"
+    if len(items) > limit:
+        return [], f"at most {limit} participants"
     seats: list[Seat] = []
     roles = ctx.optional("roles")
     for item in items:
@@ -554,18 +668,24 @@ def discussion_plugin(config: dict[str, Any] | None = None) -> Plugin:
             topic = str(args.get("topic") or "").strip()
             if not topic:
                 return refuse("topic is required")
-            mode = str(args.get("mode") or "roundtable").strip().lower()
+            mode = str(args.get("mode") or ("teams" if args.get("teams") else "roundtable")).strip().lower()
             if mode not in MODES:
                 return refuse(f"mode must be one of {', '.join(MODES)}")
-            seats, problem = parse_participants(ctx, args.get("participants"), mode, tool_ctx.cwd)
-            if problem:
-                return refuse(problem)
+            teams: list[dict[str, str]] = []
+            if mode == "teams":
+                seats, teams, problem = parse_teams(ctx, args.get("teams"), tool_ctx.cwd)
+                if problem:
+                    return ToolResult(f"{problem}. {TEAM_EXAMPLE}", is_error=True)
+            else:
+                seats, problem = parse_participants(ctx, args.get("participants"), mode, tool_ctx.cwd)
+                if problem:
+                    return refuse(problem)
             try:
                 rounds = int(args.get("rounds") or DEFAULT_ROUNDS)
             except (TypeError, ValueError):
                 return refuse("rounds must be a number")
             room = Room(ctx, tool_ctx, topic[:500], mode, seats, max(1, min(rounds, max_rounds)),
-                        max_tokens, str(args.get("context") or "")[:6000], speak_turns)
+                        max_tokens, str(args.get("context") or "")[:6000], speak_turns, teams)
             return ToolResult(room.run())
 
         register_tools(ctx, [Tool(
@@ -574,7 +694,9 @@ def discussion_plugin(config: dict[str, Any] | None = None) -> Plugin:
                 "Have several agents discuss a topic with each other and return the transcript and a summary "
                 "that keeps their disagreements. Modes: roundtable (everyone in turn), debate (sides argue, then a "
                 "verdict), review (the first participant writes, the others review until they approve), free (a "
-                "moderator picks who speaks). Each participant is an agent with its own tools. Simplest form: "
+                "moderator picks who speaks), teams (team against team: each team talks internally, then its "
+                "spokesperson -- the first member unless named -- speaks for it to everyone; give `teams` instead "
+                "of `participants`). Each participant is an agent with its own tools. Simplest form: "
                 'participants = ["正方", "反方"] (agent role names or plain names); use objects with '
                 "name / agent / brief / stance only when a participant needs more. Use it when the person wants "
                 f"several viewpoints, an argument tested, or a draft reviewed. 2-{MAX_PARTICIPANTS} participants, "
@@ -591,9 +713,18 @@ def discussion_plugin(config: dict[str, Any] | None = None) -> Plugin:
                     "brief": {"type": "string", "description": "Viewpoint or expertise to argue from"},
                     "stance": {"type": "string", "description": "Debate side, e.g. 正方 / 反方"}},
                     "required": ["name"]}},
+                "teams": {"type": "array", "description": "teams mode only: 2-4 teams", "items": {
+                    "type": "object", "properties": {
+                        "name": {"type": "string"},
+                        "stance": {"type": "string", "description": "The team's position"},
+                        "members": {"type": "array", "description": 'e.g. ["正方", "查資料員"]', "items": {
+                            "type": "object", "properties": {"name": {"type": "string"}, "agent": {"type": "string"},
+                                                             "brief": {"type": "string"}}, "required": ["name"]}},
+                        "spokesperson": {"type": "string", "description": "Member who speaks for the team"}},
+                    "required": ["name", "members"]}},
                 "rounds": {"type": "integer", "description": f"1-{max_rounds}, default {DEFAULT_ROUNDS}"},
                 "context": {"type": "string", "description": "Background every participant gets"},
-            }, "required": ["topic", "participants"]},
+            }, "required": ["topic"]},
             execute=run,
             mutating=True,
         )])

@@ -271,13 +271,15 @@ def export_markdown(session_id: str, user: str | None) -> str | None:
         elif kind == "discussion-start":
             mode = DISCUSSION_MODES.get(str(event.get("mode")), str(event.get("mode")))
             people = "、".join(
-                str(p.get("name")) + (f"（{p.get('stance') or p.get('role')}）" if p.get("stance") or p.get("role") else "")
+                str(p.get("name")) + (f"（{p.get('team')}{'・代表' if p.get('spokesperson') else ''}）" if p.get("team")
+                                      else f"（{p.get('stance') or p.get('role')}）" if p.get("stance") or p.get("role") else "")
                 for p in event.get("participants") or [])
             lines += [f"## {mode}：{event.get('topic')}", "", f"- 討論編號：{event.get('room')}", f"- 參與者：{people}",
                       f"- 上限：{event.get('rounds')} 輪、{int(event.get('max_tokens') or 0):,} token", ""]
         elif kind == "discussion-turn":
             used = f"（查了 {'、'.join(event['tools'])}）" if event.get("tools") else ""
-            lines += [f"**第 {event.get('round')} 輪・{event.get('speaker')}**{used}　{_taipei(str(event.get('ts', '')))}",
+            where = (f"・{event.get('team')}{'組內' if event.get('scope') == 'caucus' else '代表發言'}" if event.get("team") else "")
+            lines += [f"**第 {event.get('round')} 輪{where}・{event.get('speaker')}**{used}　{_taipei(str(event.get('ts', '')))}",
                       "", str(event.get("text") or ""), ""]
             if event.get("unverified"):
                 lines += [f"> 未查證：{'、'.join(event['unverified'])} 在查到的資料裡找不到原文"
@@ -298,7 +300,7 @@ def export_markdown(session_id: str, user: str | None) -> str | None:
     return "\n".join(lines).rstrip() + "\n"
 
 
-DISCUSSION_MODES = {"roundtable": "圓桌討論", "debate": "辯論", "review": "審查", "free": "自由討論"}
+DISCUSSION_MODES = {"roundtable": "圓桌討論", "debate": "辯論", "review": "審查", "free": "自由討論", "teams": "組對組"}
 
 
 def session_plugin(

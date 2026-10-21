@@ -471,6 +471,9 @@ The `discussion` tool has several agents speak to one topic in turn, in four for
 | `debate` | sides argue in turn (for/against assigned when not given); the moderator gives a verdict | rounds run out |
 | `review` | the first participant writes, the others review, the author revises | every reviewer answers 【通過】 (approved), or rounds run out |
 | `free` | the moderator picks who speaks next | the moderator calls it (only after everyone spoke), or the turn budget runs out |
+| `teams` | each round, every team first talks internally (the other teams cannot see it), then its spokesperson speaks to everyone; the next internal round starts from what the other teams said in public | rounds run out |
+
+Team against team: 2-4 teams of one or more members (8 at most in all); the spokesperson is the first member unless named, and a one-member team simply speaks in public. The summary gives each team's final position and whether another team's argument changed it. For example "開一場組對組討論：教務組（正方、查資料員）對學務組（反方、審查員），題目：要不要開夜間班，兩輪".
 
 Ask in plain words, for example "have 正方 and 反方 debate whether to cut the intake, two rounds, check 招生數據.csv first". Each participant is an agent of its own, with its own conversation, role or brief, tools and model, and can look things up before it speaks; on each turn it is told only what was said since it last spoke.
 

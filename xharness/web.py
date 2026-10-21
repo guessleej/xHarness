@@ -1766,6 +1766,7 @@ body.plan-on .composer{box-shadow:0 0 0 3px var(--warn-tint),var(--shadow)}
 .disc-body{padding:4px 14px 8px;max-height:560px;overflow:auto}
 .dturn{display:flex;gap:10px;padding:10px 0}
 .dturn+.dturn{border-top:1px solid var(--sep)}
+.dturn.caucus{padding-left:14px;opacity:.86}
 .dturn .av{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:13px;
   color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent)}
 .dturn .db{flex:1;min-width:0}
@@ -2479,22 +2480,25 @@ body:not(.view-admin) #admin{display:none}
       if(r.max_turns)lim.push('最多 '+r.max_turns+' 輪');if(r.max_tokens)lim.push('上限 '+r.max_tokens.toLocaleString()+' token');
       c.append(hd,h('div','m',r.description||'（沒有說明）'),h('div','m',lim.join('・')));box.appendChild(c);});
   }
-  const DISC_MODE={roundtable:'圓桌討論',debate:'辯論',review:'審查',free:'自由討論'};
+  const DISC_MODE={roundtable:'圓桌討論',debate:'辯論',review:'審查',free:'自由討論',teams:'組對組'};
   const DISC_END={rounds:'輪數用完',converged:'整輪都沒有新意見',approved:'審查者全數通過',moderator:'主持人判斷已有結論',budget:'token 額度用完',stopped:'被停止'};
   function discussionEvent(ev){
     if(ev.state==='start'){
       finishAssistant();closeSteps();
       const box=h('div','disc'),hd=h('div','disc-h'),ic=h('span','ic'),tt=h('div','tt');ic.appendChild(icon('users'));
-      tt.append(h('b',null,(DISC_MODE[ev.mode]||ev.mode)+'：'+ev.topic),h('span','m',(ev.participants||[]).join('、')));
+      const teams=ev.teams||[],lineup=teams.length?teams.map(t=>t.name+'（'+t.members.join('、')+'）').join(' 對 '):(ev.participants||[]).join('、');
+      tt.append(h('b',null,(DISC_MODE[ev.mode]||ev.mode)+'：'+ev.topic),h('span','m',lineup));
       const st=h('button','linkbtn','停止討論');st.onclick=()=>agentAction({room:ev.room});
       hd.append(ic,tt,st);const body=h('div','disc-body');box.append(hd,body);transcript.appendChild(box);
-      discs[ev.room]={box,body,stop:st,names:ev.participants||[]};toBottom();return;}
+      discs[ev.room]={box,body,stop:st,names:ev.participants||[],teams:teams.map(t=>t.name)};toBottom();return;}
     const d=discs[ev.room];if(!d)return;
     if(ev.state==='turn'){
-      const idx=Math.max(0,d.names.indexOf(ev.speaker)),row=h('div','dturn'),av=h('span','av',String(ev.speaker||'?').slice(0,1));
+      // Teams mode: one colour per team, so who argues for whom is visible at a glance.
+      const idx=Math.max(0,ev.team?d.teams.indexOf(ev.team):d.names.indexOf(ev.speaker)),row=h('div','dturn'+(ev.scope==='caucus'?' caucus':'')),av=h('span','av',String(ev.speaker||'?').slice(0,1));
       av.style.setProperty('--c','var(--sp-'+(idx%6+1)+')');
       const b=h('div','db'),nm=h('div','dn');nm.appendChild(h('b',null,ev.speaker));
-      if(ev.stance||ev.role)nm.appendChild(h('span','tag',ev.stance||ev.role));
+      if(ev.team)nm.appendChild(h('span','tag',ev.team+(ev.scope==='caucus'?'・組內（其他組看不到）':'・代表發言')));
+      else if(ev.stance||ev.role)nm.appendChild(h('span','tag',ev.stance||ev.role));
       if(ev.unverified&&ev.unverified.length){const w=h('span','tag warn','未查證：'+ev.unverified.join('、'));
         w.title='這些數字在查到的資料裡找不到原文，可能是推算或捏造';nm.appendChild(w);}
       if(ev.uncited&&ev.uncited.length){const w=h('span','tag warn','未查證出處：'+ev.uncited.join('、'));
