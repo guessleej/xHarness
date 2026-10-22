@@ -93,7 +93,50 @@ RestartSec=3
 WantedBy=default.target
 ```
 
-### 二、接學校的目錄服務
+### 二、不只一個模型：自動路由
+
+機房有兩個以上的模型時，可以讓 xHarness 每個請求自己挑。最穩的用法是**先選定一個主要模型，另一個只當備援**：主要模型掛掉時自動換，畫面上每一步都標出用了哪個模型，使用報告也統計備援次數。這也是 .27 展示站的做法，整份可載入的範例在 [`examples/routing/school-demo.toml`](../examples/routing/school-demo.toml)：
+
+```toml
+[routing]
+enabled = true
+default = "granite"           # 主要模型：平手時先選它
+deny_origins = ["cn"]         # 學校與公部門：不得路由到中國來源的模型
+health_cooldown_seconds = 120
+
+[routing.models.granite]      # 名稱要對到 [providers.granite]
+where = "private"             # local 本機｜private 機房內網｜public 外部服務
+strength = 2
+cost = 0
+origin = "us"
+
+[routing.models.xvita]
+where = "private"
+strength = 2                  # 兩個標一樣：不會因為題目難就轉走，xvita 只在 granite 連不上時接手
+cost = 0
+origin = "tw"
+```
+
+幾件要知道的事：
+
+- **強度標一樣＝固定主要模型。** 想讓難題走比較強的模型，把它標 3、主要模型標 2；那麼困難的請求會轉到強的那個。學校展示通常不需要。
+- **路由開著時，模型選單最上面是「auto・自動路由」**，下面只列路由裡的模型；手動選某個模型是指定它，個資與本機檔案的規則仍然有效。沒放進路由的設定（例如同一顆模型的對照用設定）不會出現在選單。
+- **`deny_origins = ["cn"]` 不要拿掉。** 路由會直接排除中國來源的模型，機密防護檢查頁也會檢查。只有內部研究用、不交付的環境才可以清空。
+- **之後要加外部（雲端）模型**：在 `[routing.models.名稱]` 標 `where = "public"`。外部模型預設看不到個資、金鑰、內網位址，也看不到任何來自這台機器的內容（讀過的檔案、工具結果、附件、圖片）；學校要放行檔案內容才改 `external_sees = "all"`，個資規則仍然有效。細節見 README「自動路由」。
+
+驗收三步，都能當場做給對方看：
+
+```sh
+# 1. 不呼叫模型，直接看會選誰、備援是誰
+xharness route "請設計一個多租戶權限架構並說明取捨"
+#   難度：困難（規則判斷）／選擇：granite／備援順序：xvita
+
+# 2. 重啟服務後，網頁模型選單最上面是 auto，送一句話，畫面上有「這一步選用 granite」
+# 3. 備援：把主要模型的位址暫時改成連不上的埠、重啟，送一句話，畫面會寫「granite 連不上，改用 xvita」
+#    驗完改回來。
+```
+
+### 三、接學校的目錄服務
 
 不想另外管一套帳號時，改用學校既有的 AD 或 OpenLDAP。密碼不會留在這台機器上：
 
@@ -110,7 +153,7 @@ verify_certificate = true
 
 一律用 `ldaps://`。學校若是自建 CA，把根憑證裝進這台機器的系統信任區，不要去關 `verify_certificate` —— 關掉之後任何人都能冒充目錄伺服器收走全校的密碼。
 
-### 三、桌面版
+### 四、桌面版
 
 給不會用命令列的老師：
 
@@ -163,6 +206,7 @@ sandbox required but no working backend: bwrap (installed but probe failed, e.g.
 | 報告 | 管理頁「服務使用報告」，或 `xharness report` | 六塊都有數字，待處理事項有具體建議 |
 | 報表文件 | `python3 scripts/report/build_usage_report.py report.json -o 使用報告.docx` | 產出的 Word 打得開、目錄可點、圖表有資料 |
 | 模型來源 | `curl <模型端點>/v1/models` | 不是中國來源的模型 |
+| 自動路由（有開才檢查） | `xharness route "你好"`，管理頁「機密防護檢查」 | 選到預期的模型；檢查頁沒有「中國來源的模型可以被路由到」；有外部模型時，「外部模型只看得到你打的字」為通過 |
 | 對外連線 | 管理頁「對外串接」一節 | 除了模型端點之外，沒有預期外的對外連線 |
 
 最後一項是這套系統對學校最有說服力的地方：除了設定檔裡那個模型端點，xHarness 不會把任何資料送到任何地方，沒有匿名 ID、沒有用量回傳。這一點可以請對方自己用防火牆日誌驗證。

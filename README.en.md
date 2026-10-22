@@ -557,6 +557,8 @@ cost = 5
 origin = "us"
 ```
 
+**Example:** [`examples/routing/school-demo.toml`](examples/routing/school-demo.toml) (a main model with a stand-in, as the school demo site runs; loads as a whole), and the [school and public-sector deployment guide](docs/deployment-school.zh.md) (Chinese).
+
 **Seeing and checking it:** `xharness route "refactor this module, student A123456789"` calls no model and prints the rating, the choice, the fallbacks, and who was excluded and why; in a conversation `/route` shows the last decision and what is down, `/model name` pins and `/model auto` restores. Every decision is written to the session (`route`, `route-fallback`: categories only, never the text that matched); the usage report and the Word report count decisions per model, requests kept off public models because of personal data or local files, and fallbacks; the security check says what public models can see, whether `where` agrees with the address, and whether China-origin models are blocked.
 
 **Limits:** the difficulty rating is crude rules -- try your own requests with `xharness route` before trusting it, and the decider too (small models often rate "tidy this folder" as hard); pictures are always put into words by the `[vision]` describer unless every routed model can see; a role file's `model:` bypasses routing.

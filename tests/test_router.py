@@ -609,3 +609,19 @@ def test_equal_price_and_place_does_not_prefer_the_weaker_model():
     dear = config({"local": {"where": "local", "strength": 3, "cost": 1}, "private": {"where": "local", "strength": 2, "cost": 0}},
                   default="local")
     assert router(dear).explain("你好")["choice"] == "private"           # a real saving still wins
+
+
+def test_the_school_demo_example_loads_and_behaves_as_documented():
+    """The example in examples/routing/ is the one the guide points at: it must keep loading."""
+    from xharness.config import load_config
+
+    here = os.path.join(os.path.dirname(__file__), "..", "examples", "routing", "school-demo.toml")
+    cfg = load_config(here)
+    route = RouteConfig.from_config(cfg)
+    assert [m.name for m in route.models] == ["granite", "xvita"] and route.deny_origins == ("cn",)
+    r = Router(route)
+    for text in ("你好", "請設計一個多租戶權限架構並說明取捨", "整理一下這個資料夾"):
+        decision = r.explain(text)
+        assert decision["choice"] == "granite" and decision["ranking"] == ["granite", "xvita"], text     # fixed main model, any difficulty
+    assert cfg.providers["granite"]["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert providers_for(cfg)[0]["name"] == "auto"

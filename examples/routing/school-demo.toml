@@ -1,0 +1,42 @@
+# 學校展示站的自動路由範例（2026-10 起 .27 展示站就是這樣設）。
+# 整份檔案可以直接載入：xharness --config examples/routing/school-demo.toml route "你好"
+#
+# 做法：先選定一個主要模型（granite），另一個（xvita）只在主要模型連不上時接手。
+# 兩個模型的強度標成一樣，路由就不會因為「這題比較難」把請求轉走，行為和沒開路由時相同，
+# 差別只在主要模型掛掉時有備援、而且每一步都看得到用了哪個模型。
+# 位址是範例，換成你們機房 GPU 機的位址。
+
+default_provider = "granite"
+approval = "prompt"
+
+[providers.granite]
+base_url = "http://10.10.0.11:8093/v1"
+model = "granite-4.2-30b"
+context_tokens = 32768
+# granite 是 reasoning 模型：請求裡不關 thinking，答案會跑進 reasoning_content、content 留空
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
+
+[providers.xvita]
+base_url = "http://10.10.0.12:8091/v1"
+model = "gemma-4-31b-xvita-zhtw"
+context_tokens = 32768
+
+[routing]
+enabled = true
+default = "granite"           # 平手時先選它
+prefer = "cost"
+external_sees = "prompt"      # 這個站沒有外部模型，這行只是預設值；之後加外部模型就靠它把關
+deny_origins = ["cn"]         # 學校與公部門交付：不得路由到中國來源的模型（Qwen、DeepSeek、GLM、Kimi 等）
+health_cooldown_seconds = 120 # 連不上的模型先跳過這麼久，再試一次
+
+[routing.models.granite]
+where = "private"             # local 本機｜private 私有雲／機房內網｜public 外部服務
+strength = 2                  # 兩個都標 2：任何難度都先選預設的 granite
+cost = 0                      # 自己的機器填 0
+origin = "us"
+
+[routing.models.xvita]
+where = "private"
+strength = 2
+cost = 0
+origin = "tw"
