@@ -89,7 +89,7 @@
   <text x="300" y="546.0" font-size="25" fill="#bf181f" text-anchor="middle" font-weight="700">模型端點</text>
   <text x="300" y="666.0" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">OpenAI 相容</text>
   <text x="300" y="690.0" font-size="18" fill="#64748b" text-anchor="middle">llama.cpp / vLLM / Ollama</text>
-  <text x="300" y="711.0" font-size="18" fill="#64748b" text-anchor="middle">地端，資料不外流</text>
+  <text x="300" y="711.0" font-size="18" fill="#64748b" text-anchor="middle">自動路由，個資不外送</text>
   <path d="M366 600 H 660 V 460" stroke="#059669" stroke-width="2.6" fill="none" marker-end="url(#ar-green)"/>
   <text x="513" y="582" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">串流回覆、tool call</text>
   <g transform='translate(579.032,303.201) scale(0.32584)'>
@@ -120,7 +120,7 @@
   <text x="775" y="328" font-size="25" fill="#bf181f" text-anchor="start" font-weight="700">xHarness（本機或地端節點）</text>
   <text x="640" y="470" font-size="20" fill="#16202a" text-anchor="end" font-weight="700">agent 迴圈＋插件</text>
   <text x="640" y="495" font-size="18" fill="#64748b" text-anchor="end">工具、審批、沙箱、成本煞車</text>
-  <text x="640" y="518" font-size="18" fill="#64748b" text-anchor="end">記憶、session 稽核、子代理</text>
+  <text x="640" y="518" font-size="18" fill="#64748b" text-anchor="end">記憶、多代理討論、自動路由</text>
   <rect x="430" y="20" width="520" height="236" rx="10" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="10 6"/>
   <text x="936" y="242" font-size="25" fill="#bf181f" text-anchor="end" font-weight="700">操作者</text>
   <g transform='translate(301.300,-87.800) scale(2.00000)'>
@@ -252,7 +252,7 @@
   <text x="1160" y="644.0" font-size="25" fill="#bf181f" text-anchor="middle" font-weight="700">MCP / 其他節點</text>
   <text x="1160" y="748.0" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">外部工具、艦隊節點</text>
   <path d="M700 450 V 690 H 1122" stroke="#7c3aed" stroke-width="2.6" fill="none" marker-end="url(#ar-violet)"/>
-  <text x="900" y="672" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">7.MCP 工具呼叫、節點代理</text>
+  <text x="900" y="672" font-size="20" fill="#16202a" text-anchor="middle" font-weight="700">7.MCP 工具、節點代理、討論廳</text>
   <rect x="40" y="738" width="20" height="20" rx="5" fill="#059669"/>
   <text x="70" y="754" font-size="20" fill="#334155" text-anchor="start">資料進出</text>
   <rect x="190" y="738" width="20" height="20" rx="5" fill="#2563eb"/>

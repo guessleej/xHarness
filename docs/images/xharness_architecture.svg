@@ -1,0 +1,680 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1620 1320" width="1620" height="1320" font-family="Noto Sans TC, Microsoft JhengHei, PingFang TC, sans-serif">
+  <defs><marker id="ar-blue" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#2563eb"/></marker><marker id="ar-green" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#059669"/></marker></defs>
+  <rect width="1620" height="1320" fill="#ffffff"/>
+  <rect x="28" y="28" width="1564" height="334" rx="18" fill="#eef4ff"/>
+  <circle cx="70" cy="66" r="18" fill="#2563eb"/>
+  <text x="70" y="73" font-size="19" font-weight="700" fill="#fff" text-anchor="middle">1</text>
+  <text x="100" y="74" font-size="27" font-weight="700" fill="#1d4ed8">入口</text>
+  <text x="164" y="74" font-size="17" font-style="italic" fill="#4b6ea8">五種進來的方式，同一個核心</text>
+  <rect x="1408" y="52" width="160" height="30" rx="15" fill="#2563eb"/>
+  <text x="1488" y="73" font-size="16" fill="#fff" text-anchor="middle" font-weight="600">同一套審批與稽核</text>
+  <line x1="52" y1="94" x2="1568" y2="94" stroke="#dbeafe" stroke-width="2"/>
+  <rect x="52" y="114" width="287" height="226" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2.4"/>
+  <rect x="52" y="114" width="287" height="8" rx="4" fill="#2563eb"/>
+  <text x="76" y="154" font-size="21" font-weight="700" fill="#1d4ed8">Web UI 與艦隊</text>
+  <text x="76" y="178" font-size="16" font-style="italic" fill="#64748b">xharness web</text>
+  <circle cx='299' cy='154' r='22' fill='#2563eb' opacity='0.13'/><circle cx='299' cy='154' r='22' fill='none' stroke='#2563eb' stroke-width='1.6' opacity='0.35'/><g transform='translate(267.873,130.142) scale(0.07638)'>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+	<g id="Laptop">
+	</g>
+	<g id="Load_balancer">
+	</g>
+	<g id="Lock_x2C__protected">
+	</g>
+</g>
+<g id="symbols">
+</g>
+<g id="slices">
+</g>
+<g id="User">
+</g>
+<g id="Video">
+</g>
+<g id="Virtual_machine_2">
+</g>
+<g id="Web">
+	<path fill="#2563eb" d="M407.4,144.5c-93.7,0-169.3,75.6-169.3,169.3s75.6,169.3,169.3,169.3s169.3-75.6,169.3-169.3
+		S501.1,144.5,407.4,144.5z M552.3,302h-33.1c-1.6-26-7.1-50.4-16.5-71.7c5.5-3.2,11-6.3,15.8-10.2C537.4,242.1,550,270.5,552.3,302
+		z M505.1,205.9c-3.2,2.4-7.1,4.7-11,7.1c-6.3-11-14.2-21.3-22.1-29.9C483.8,189.4,494.8,196.4,505.1,205.9z M419.2,175.2
+		c22.8,4.7,43.3,21.3,57.5,45.7c-17.3,7.1-37,11.8-57.5,13.4V175.2z M419.2,253.9c23.6-1.6,46.5-6.3,66.2-15.8
+		c7.9,18.9,12.6,40.2,14.2,63h-80.3L419.2,253.9L419.2,253.9z M499.6,325.6c-1.6,23.6-6.3,45.7-15,63.8c-19.7-8.7-41.7-15-65.4-16.5
+		v-48h80.3V325.6z M315.3,325.6h80.3v48c-23.6,1.6-46.5,6.3-66.2,15.8C321.6,370.5,316.8,348.5,315.3,325.6z M315.3,302
+		c1.6-23.6,6.3-45.7,15-63.8c19.7,8.7,41.7,15,65.4,16.5v48h-80.3V302z M395.6,175.2v59.1c-20.5-1.6-39.4-6.3-56.7-14.2
+		C353.1,196.4,373.5,179.9,395.6,175.2z M342.8,183.1c-7.9,7.9-15,17.3-21.3,28.4c-3.9-2.4-7.1-4.7-10.2-7.1
+		C320.8,196.4,331.8,188.6,342.8,183.1z M297.1,218.5c4.7,3.9,10.2,7.1,15,10.2c-9.5,21.3-15.8,46.5-17.3,73.3h-33.1
+		C264.8,270.5,277.4,241.3,297.1,218.5z M295.6,325.6c1.6,26,7.1,50.4,16.5,71.7c-5.5,3.2-11,6.3-15.8,10.2
+		c-18.9-22.8-31.5-51.2-33.9-81.9H295.6z M309.7,421.7c3.2-2.4,7.1-4.7,11-7.1c6.3,11,14.2,21.3,22.1,29.9
+		C331,438.3,320,430.4,309.7,421.7z M338.1,406c17.3-7.1,37-11.8,57.5-13.4v59.1C372.7,447.7,353.1,431.2,338.1,406z M419.2,452.4
+		v-59.1c20.5,1.6,39.4,6.3,56.7,14.2C461.8,431.2,441.3,447.7,419.2,452.4z M493.3,416.2c3.9,2.4,7.1,4.7,10.2,7.1
+		C494,432,483,439,472,444.6C479.9,436.7,487,426.4,493.3,416.2z M517.7,409.1c-4.7-3.9-10.2-7.1-15-10.2
+		c9.5-21.3,15.8-46.5,17.3-73.3h33.9C550,357.1,537.4,386.3,517.7,409.1z"/>
+</g>
+</g>
+  <rect x="72" y="200" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="88" y="222" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">串流逐字稿、審批卡</text>
+  <rect x="72" y="244" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="88" y="266" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">代理分頁、討論廳</text>
+  <rect x="72" y="288" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="88" y="310" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">多節點合併呈現</text>
+  <rect x="359" y="114" width="287" height="226" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2.4"/>
+  <rect x="359" y="114" width="287" height="8" rx="4" fill="#2563eb"/>
+  <text x="383" y="154" font-size="21" font-weight="700" fill="#1d4ed8">CLI 與 REPL</text>
+  <text x="383" y="178" font-size="16" font-style="italic" fill="#64748b">xharness</text>
+  <circle cx='606' cy='154' r='22' fill='#2563eb' opacity='0.13'/><circle cx='606' cy='154' r='22' fill='none' stroke='#2563eb' stroke-width='1.6' opacity='0.35'/><g transform='translate(580.040,133.940) scale(0.06556)'>
+<g id="File_x2C__general">
+	
+</g>
+<g id="Management_console">
+	<g>
+		<path fill="#2563eb" d="M198.7,172.9v266.1h394.8V172.9H198.7z M576.4,421.8H215.9V232.9h360.5V421.8z"/>
+		<polygon fill="#2563eb" points="258.8,396 318.9,396 318.9,335.9 258.8,335.9 		"/>
+		<path fill="#2563eb" d="M323.2,323.1h-68.7v-68.7h68.7V323.1z M263.1,314.5h51.5V263h-51.5V314.5z"/>
+		<path fill="#2563eb" d="M426.2,400.3h-68.7v-68.7h68.7V400.3z M366.1,391.7h51.5v-51.5h-51.5V391.7z"/>
+		<polygon fill="#2563eb" points="361.8,318.8 421.9,318.8 421.9,258.7 361.8,258.7 		"/>
+		<polygon fill="#2563eb" points="464.8,396 524.9,396 524.9,335.9 464.8,335.9 		"/>
+		<path fill="#2563eb" d="M529.2,323.1h-68.7v-68.7h68.7V323.1z M469.1,314.5h51.5V263h-51.5V314.5z"/>
+	</g>
+</g>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+	<g id="Laptop">
+	</g>
+	<g id="Load_balancer">
+	</g>
+	<g id="Lock_x2C__protected">
+	</g>
+</g>
+<g id="symbols">
+</g>
+<g id="slices">
+</g>
+</g>
+  <rect x="379" y="200" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="395" y="222" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">一次性任務（headless）</text>
+  <rect x="379" y="244" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="395" y="266" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">互動 REPL、斜線指令</text>
+  <rect x="379" y="288" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="395" y="310" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">xharness route 試算</text>
+  <rect x="666" y="114" width="287" height="226" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2.4"/>
+  <rect x="666" y="114" width="287" height="8" rx="4" fill="#2563eb"/>
+  <text x="690" y="154" font-size="21" font-weight="700" fill="#1d4ed8">桌面版</text>
+  <text x="690" y="178" font-size="16" font-style="italic" fill="#64748b">xharness desktop</text>
+  <circle cx='913' cy='154' r='22' fill='#2563eb' opacity='0.13'/><circle cx='913' cy='154' r='22' fill='none' stroke='#2563eb' stroke-width='1.6' opacity='0.35'/><g transform='translate(890.094,131.062) scale(0.64342)'>
+<g id="Layer_1">
+	<g id="File_x2C__general">
+		
+	</g>
+	<g id="Message">
+	</g>
+	<g id="Monitor">
+		<g id="shape952-1942_1_" transform="translate(43.917,-3621.38)">
+			<path fill="#2563eb" d="M9.3,3638.5h-35.4c-1.2,0-2.2,1.1-2.2,2.3v24.8c0,1.2,1,2,2.2,2H-14c1.3,4.6-0.5,5.6-8.1,5.6v2.4h9.8h7.1
+				H5.7v-2.4c-7.7,0-10.1-1-8.8-5.6H9.3c1.2,0,2.4-0.8,2.4-2v-24.8C11.7,3639.6,10.5,3638.5,9.3,3638.5z M8.7,3641.5v23h-34v-23H8.7
+				L8.7,3641.5z"/>
+		</g>
+	</g>
+</g>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+	<g id="Laptop">
+	</g>
+	<g id="Load_balancer">
+	</g>
+	<g id="Lock_x2C__protected">
+	</g>
+</g>
+<g id="symbols">
+</g>
+<g id="slices">
+</g>
+</g>
+  <rect x="686" y="200" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="702" y="222" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">原生視窗，不佔分頁</text>
+  <rect x="686" y="244" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="702" y="266" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">loopback 隨機埠</text>
+  <rect x="686" y="288" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="702" y="310" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">關窗即停</text>
+  <rect x="973" y="114" width="287" height="226" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2.4"/>
+  <rect x="973" y="114" width="287" height="8" rx="4" fill="#2563eb"/>
+  <text x="997" y="154" font-size="21" font-weight="700" fill="#1d4ed8">Telegram</text>
+  <text x="997" y="178" font-size="16" font-style="italic" fill="#64748b">手機下任務</text>
+  <circle cx='1220' cy='154' r='22' fill='#2563eb' opacity='0.13'/><circle cx='1220' cy='154' r='22' fill='none' stroke='#2563eb' stroke-width='1.6' opacity='0.35'/><g transform='translate(1198.246,131.398) scale(0.61107)'>
+<g id="Layer_1">
+	<g id="File_x2C__general">
+		
+	</g>
+	<g id="Message">
+	</g>
+	<g id="Monitor">
+	</g>
+	<g id="Monitor_running_apps">
+	</g>
+	<g id="Mouse">
+	</g>
+	<g id="Network_card">
+	</g>
+	<g id="Not_allowed">
+	</g>
+	<g id="Performance">
+	</g>
+	<g id="Phone">
+		<g id="shape1152-2254_1_" transform="translate(47.226,-3690.94)">
+			<path fill="#2563eb" d="M-0.3,3706.8h-22.6c-1.5,0-2.7,1.3-2.7,2.9v36.3c0,1.6,1.2,2.9,2.7,2.9h22.6c1.5,0,2.7-1.3,2.7-2.9v-36.3
+				C2.4,3708.1,1.2,3706.8-0.3,3706.8z M-15.8,3708.7h8.5c0.7,0,1.2,0.1,1.2,0.6c0,0.6-0.5,0.6-1.2,0.6h-8.5c-0.7,0-1.2,0-1.2-0.6
+				C-17,3708.8-16.4,3708.7-15.8,3708.7z M-9.1,3745.8h-4.8c-0.5,0-0.9-0.4-0.9-1c0-0.5,0.4-1,0.9-1h4.8c0.5,0,0.9,0.5,0.9,1
+				C-8.2,3745.3-8.6,3745.8-9.1,3745.8z M-0.6,3741.8h-22v-30h22V3741.8z"/>
+		</g>
+	</g>
+</g>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+	<g id="Laptop">
+	</g>
+	<g id="Load_balancer">
+	</g>
+	<g id="Lock_x2C__protected">
+	</g>
+</g>
+<g id="symbols">
+</g>
+<g id="slices">
+</g>
+</g>
+  <rect x="993" y="200" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="1009" y="222" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">每個聊天是一段對話</text>
+  <rect x="993" y="244" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="1009" y="266" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">允許／拒絕按鈕</text>
+  <rect x="993" y="288" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="1009" y="310" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">只服務白名單聊天</text>
+  <rect x="1280" y="114" width="287" height="226" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2.4"/>
+  <rect x="1280" y="114" width="287" height="8" rx="4" fill="#2563eb"/>
+  <text x="1304" y="154" font-size="21" font-weight="700" fill="#1d4ed8">編輯器</text>
+  <text x="1304" y="178" font-size="16" font-style="italic" fill="#64748b">xharness acp</text>
+  <circle cx='1527' cy='154' r='22' fill='#2563eb' opacity='0.13'/><circle cx='1527' cy='154' r='22' fill='none' stroke='#2563eb' stroke-width='1.6' opacity='0.35'/><g transform='translate(1503.752,136.036) scale(0.05871)'>
+<g id="Layer_1_1_">
+	<g id="File_x2C__general">
+		
+	</g>
+</g>
+<g id="Access_control">
+</g>
+<g id="Azure_active_directory">
+</g>
+<g id="Generic_code">
+</g>
+<g id="Laptop">
+	<path fill="#2563eb" d="M579.7,383.7c0-189.7,0-189.7,0-189.7c0-9.4-8.6-24.9-18.9-24.9c-23.2,0-328.7,0-328.7,0
+		c-10.3,0-20.6,15.5-20.6,24.9c0,189.7,0,189.7,0,189.7c-36.9,39.5-35.2,39.5-35.2,39.5c0,11.2,10.3,19.7,23.2,19.7
+		c394,0,394,0,394,0c12.9,0,23.2-9.4,23.2-19.7L579.7,383.7L579.7,383.7L579.7,383.7z M426.9,426.6c-68.7,0-68.7,0-68.7,0
+		c-3.4,0-6.9-1.7-6.9-3.4c7.7-12.9,7.7-12.9,7.7-12.9c0-1.7,2.6-2.6,6-2.6c54.9,0,54.9,0,54.9,0c2.6,0,5.2,0.9,5.2,2.6
+		c8.6,12.9,8.6,12.9,8.6,12.9C433.8,425.7,430.3,426.6,426.9,426.6L426.9,426.6z M563.4,382.8c-338.2,0-335.6,0-335.6,0
+		c0-187.1,0-187.1,0-187.1c0-4.3,4.3-10.3,9.4-10.3c319.3,0,317.6,0,317.6,0c5.2,0,8.6,6,8.6,10.3V382.8L563.4,382.8L563.4,382.8
+		L563.4,382.8z"/>
+</g>
+<g id="symbols">
+</g>
+<g id="slices">
+</g>
+</g>
+  <rect x="1300" y="200" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="1316" y="222" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">Zed 等 ACP 編輯器</text>
+  <rect x="1300" y="244" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="1316" y="266" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">diff 與許可請求</text>
+  <rect x="1300" y="288" width="247" height="34" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="1316" y="310" font-size="15" fill="#1d4ed8" text-anchor="start" font-weight="600">讀 Claude Code hooks</text>
+  <rect x="28" y="418" width="1564" height="380" rx="18" fill="#f0fbf6"/>
+  <circle cx="70" cy="456" r="18" fill="#059669"/>
+  <text x="70" y="463" font-size="19" font-weight="700" fill="#fff" text-anchor="middle">2</text>
+  <text x="100" y="464" font-size="27" font-weight="700" fill="#047857">核心</text>
+  <text x="164" y="464" font-size="17" font-style="italic" fill="#3f8a75">一切皆插件，約 40 個內建工具</text>
+  <rect x="1440" y="442" width="128" height="30" rx="15" fill="#059669"/>
+  <text x="1504" y="463" font-size="16" fill="#fff" text-anchor="middle" font-weight="600">零執行期相依</text>
+  <line x1="52" y1="484" x2="1568" y2="484" stroke="#d1fae5" stroke-width="2"/>
+  <rect x="52" y="504" width="364" height="272" rx="14" fill="#ffffff" stroke="#64748b" stroke-width="2.4"/>
+  <rect x="52" y="504" width="364" height="8" rx="4" fill="#64748b"/>
+  <text x="76" y="544" font-size="21" font-weight="700" fill="#334155">Context 核心</text>
+  <text x="76" y="568" font-size="16" font-style="italic" fill="#64748b">約 150 行，沒有特權</text>
+  <circle cx='376' cy='544' r='22' fill='#64748b' opacity='0.13'/><circle cx='376' cy='544' r='22' fill='none' stroke='#64748b' stroke-width='1.6' opacity='0.35'/><g transform='translate(349.263,517.263) scale(0.63850)'>
+<g id="Layer_1">
+	<g id="File_x2C__general">
+		
+	</g>
+	<g id="Message">
+	</g>
+	<g id="Monitor">
+	</g>
+	<g id="Monitor_running_apps">
+	</g>
+	<g id="Mouse">
+	</g>
+	<g id="Network_card">
+	</g>
+	<g id="Not_allowed">
+	</g>
+	<g id="Performance">
+	</g>
+	<g id="Phone">
+	</g>
+	<g id="Plug_and_play">
+	</g>
+	<g id="Powershell_script_file">
+	</g>
+	<g id="Protocol_stack">
+	</g>
+	<g id="Queue_x2C__general">
+	</g>
+	<g id="RMS_connector">
+	</g>
+	<g id="Router">
+	</g>
+	<g id="Script_file">
+	</g>
+	<g id="Secure_virtual_machine">
+	</g>
+	<g id="Server_farm">
+	</g>
+	<g id="Server_rack">
+	</g>
+	<g id="Server_x2F_blade">
+	</g>
+	<g id="Settings">
+		<path fill="#64748b" d="M61,46.3l-3.3-1.4c-0.5-0.2-1-0.5-0.9-0.6c0-0.1,0.1-0.7,0.1-1.3l0-2.7c0-0.6-0.1-1.2-0.1-1.3
+			c0-0.1,0.4-0.4,0.9-0.6l3.3-1.3c0.5-0.2,0.8-0.8,0.6-1.4L60,31.8c-0.2-0.5-0.8-0.8-1.4-0.6l-3.3,1.3c-0.5,0.2-1,0.3-1.1,0.2
+			c-0.1-0.1-0.4-0.5-0.8-1L51.5,30c-0.4-0.4-0.9-0.7-1-0.8c-0.1-0.1,0-0.6,0.2-1.1l1.4-3.3c0.2-0.5,0-1.2-0.6-1.4l-3.9-1.6
+			c-0.5-0.2-1.2,0-1.4,0.6l-1.4,3.3c-0.2,0.5-0.5,1-0.6,0.9c-0.1,0-0.7-0.1-1.3-0.2c0,0-0.6-0.1-1.4-0.1c-0.8,0-1.3,0.1-1.3,0.1
+			c-0.6,0.1-1.1,0.1-1.3,0.2c-0.1,0-0.4-0.4-0.6-0.9l-1.3-3.3c-0.2-0.5-0.8-0.8-1.4-0.6l-3.9,1.6c-0.5,0.2-0.8,0.8-0.6,1.4l1.3,3.3
+			c0.2,0.5,0.3,1,0.2,1.1c-0.1,0.1-0.5,0.4-1,0.8L30,31.9c-0.4,0.4-0.7,0.9-0.8,1c-0.1,0.1-0.6,0-1.1-0.2l-3.3-1.4
+			c-0.5-0.2-1.2,0-1.4,0.6l-1.6,3.9c-0.2,0.5,0,1.2,0.6,1.4l3.3,1.4c0.5,0.2,1,0.5,0.9,0.6c0,0.1-0.1,0.7-0.1,1.3l0,2.7
+			c0,0.6,0.1,1.1,0.1,1.3c0,0.1-0.4,0.4-0.9,0.6l-3.3,1.3c-0.5,0.2-0.8,0.8-0.6,1.4l1.6,3.9c0.2,0.5,0.8,0.8,1.4,0.6l3.3-1.3
+			c0.5-0.2,1-0.3,1.1-0.2c0.1,0.1,0.4,0.5,0.8,1l1.9,1.9c0.4,0.4,0.9,0.7,1,0.8c0.1,0.1,0,0.6-0.2,1.1l-1.4,3.3
+			c-0.2,0.5,0,1.2,0.6,1.4l3.9,1.6c0.5,0.2,1.2,0,1.4-0.6l1.4-3.3c0.2-0.5,0.5-1,0.6-0.9c0.1,0,0.7,0.1,1.3,0.2c0,0,0.6,0.1,1.4,0.1
+			c0.8,0,1.3-0.1,1.3-0.1c0.6-0.1,1.1-0.1,1.3-0.2c0.1,0,0.4,0.4,0.6,0.9l1.3,3.3c0.2,0.5,0.8,0.8,1.4,0.6l3.9-1.6
+			c0.5-0.2,0.8-0.8,0.6-1.4l-1.3-3.3c-0.2-0.5-0.3-1-0.2-1.1c0.1-0.1,0.5-0.4,1-0.8l1.9-1.9c0.4-0.4,0.7-0.9,0.8-1
+			c0.1-0.1,0.6,0,1.1,0.2l3.3,1.4c0.5,0.2,1.2,0,1.4-0.6l1.6-3.9C61.8,47.1,61.6,46.5,61,46.3z M41.7,52.3
+			c-5.9,0-10.6-4.8-10.6-10.6c0-5.9,4.7-10.6,10.6-10.6s10.6,4.7,10.6,10.6C52.3,47.6,47.5,52.3,41.7,52.3z"/>
+	</g>
+</g>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+	<g id="Laptop">
+	</g>
+	<g id="Load_balancer">
+	</g>
+	<g id="Lock_x2C__protected">
+	</g>
+</g>
+<g id="symbols">
+</g>
+<g id="slices">
+</g>
+</g>
+  <rect x="72" y="590" width="324" height="34" rx="9" fill="#e2e8f0" stroke="#64748b" stroke-width="2"/>
+  <text x="88" y="612" font-size="15" fill="#334155" text-anchor="start" font-weight="600">服務 provide / get</text>
+  <rect x="72" y="634" width="324" height="34" rx="9" fill="#e2e8f0" stroke="#64748b" stroke-width="2"/>
+  <text x="88" y="656" font-size="15" fill="#334155" text-anchor="start" font-weight="600">事件 on / emit</text>
+  <rect x="72" y="678" width="324" height="34" rx="9" fill="#e2e8f0" stroke="#64748b" stroke-width="2"/>
+  <text x="88" y="700" font-size="15" fill="#334155" text-anchor="start" font-weight="600">中介層 intercept / invoke</text>
+  <rect x="72" y="722" width="324" height="34" rx="9" fill="#e2e8f0" stroke="#64748b" stroke-width="2"/>
+  <text x="88" y="744" font-size="15" fill="#334155" text-anchor="start" font-weight="600">unload 反序回捲</text>
+  <rect x="436" y="504" width="364" height="272" rx="14" fill="#ffffff" stroke="#059669" stroke-width="2.4"/>
+  <rect x="436" y="504" width="364" height="8" rx="4" fill="#059669"/>
+  <text x="460" y="544" font-size="21" font-weight="700" fill="#047857">Agent 迴圈</text>
+  <text x="460" y="568" font-size="16" font-style="italic" fill="#64748b">模型 → 工具 → 模型</text>
+  <circle cx='760' cy='544' r='22' fill='#059669' opacity='0.13'/><circle cx='760' cy='544' r='22' fill='none' stroke='#059669' stroke-width='1.6' opacity='0.35'/><g transform='translate(708.293,492.718) scale(0.47286)'>
+<g>
+	
+	
+		
+	<g id="group28-1" transform="translate(0.177083,-0.177083)">
+		
+		<g id="shape29-2" transform="translate(4.38826,29.6587) scale(1,-1)">
+			
+			<path fill="#059669" d="M129.9-64.2l-1.7-7.1l-1.7-7.1l-5.3,5l-5.3,5l3.2,0.9c-3.1,4.8-8.5,8-14.5,8c-3.8,0-7.2-1.1-10.1-3.2v0.1
+				l1.6,7.1l-7-2.2l-1.7-0.6c4.6,4.2,10.5,6.7,17.1,6.7c9.7,0,18.3-5.6,22.4-13.7L129.9-64.2z"/>
+		</g>
+		<g id="shape30-4" transform="translate(7.13093,40.5074) scale(1,-1)">
+			
+			<path fill="#059669" d="M127.2-65.8c0-13.9-11.3-25.3-25.3-25.3c-0.3,0-0.6,0-0.9,0l-1-3.8l-4.3,4.5l-0.7,0.8l-5,5.3l7.1,1.7
+				l0.3,0.1l6.8,1.7l-0.7-2.3c8.8,0.8,15.8,8.2,15.8,17.3c0,0.2,0,0.5,0,0.7l5.3-5l1.7,7.1l0.6,2.2C127.1-62.5,127.2-64,127.2-65.8z
+				"/>
+		</g>
+		<g id="shape31-6" transform="translate(1.35891E-013,32.7061) scale(1,-1)">
+			
+			<path fill="#059669" d="M101.8-89.7l-7.1-1.7l5-5.3l0.6-0.6c-9.7,3.5-16.7,12.9-16.7,23.8c0,4.7,1.3,9.2,3.5,12.9l-2.4,2.2
+				l5.1,1.6l1.8,0.6l7,2.2l-1.5-6.7l-0.1-0.3l-1.6-7.1L93.3-66c-1-2.3-1.7-4.8-1.7-7.4c0-7.2,4.4-13.4,10.7-16L101.8-89.7z"/>
+		</g>
+	</g>
+</g>
+</g>
+  <rect x="456" y="590" width="324" height="34" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="472" y="612" font-size="15" fill="#047857" text-anchor="start" font-weight="600">計畫模式、目標模式</text>
+  <rect x="456" y="634" width="324" height="34" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="472" y="656" font-size="15" fill="#047857" text-anchor="start" font-weight="600">自動壓縮、斷路器</text>
+  <rect x="456" y="678" width="324" height="34" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="472" y="700" font-size="15" fill="#047857" text-anchor="start" font-weight="600">子代理、背景子代理</text>
+  <rect x="456" y="722" width="324" height="34" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="472" y="744" font-size="15" fill="#047857" text-anchor="start" font-weight="600">工作流程、ralph 分輪</text>
+  <rect x="820" y="504" width="364" height="272" rx="14" fill="#ffffff" stroke="#db2777" stroke-width="2.4"/>
+  <rect x="820" y="504" width="364" height="8" rx="4" fill="#db2777"/>
+  <text x="844" y="544" font-size="21" font-weight="700" fill="#be185d">工具</text>
+  <text x="844" y="568" font-size="16" font-style="italic" fill="#64748b">每個都是插件</text>
+  <circle cx='1144' cy='544' r='22' fill='#db2777' opacity='0.13'/><circle cx='1144' cy='544' r='22' fill='none' stroke='#db2777' stroke-width='1.6' opacity='0.35'/><g transform='translate(1120.037,520.037) scale(0.57465)'>
+<g id="Layer_1">
+	<g id="File_x2C__general">
+		
+	</g>
+	<g id="Message">
+	</g>
+	<g id="Monitor">
+	</g>
+	<g id="Monitor_running_apps">
+	</g>
+	<g id="Mouse">
+	</g>
+	<g id="Network_card">
+	</g>
+	<g id="Not_allowed">
+	</g>
+	<g id="Performance">
+	</g>
+	<g id="Phone">
+	</g>
+	<g id="Plug_and_play">
+	</g>
+	<g id="Powershell_script_file">
+	</g>
+	<g id="Protocol_stack">
+	</g>
+	<g id="Queue_x2C__general">
+	</g>
+	<g id="RMS_connector">
+	</g>
+	<g id="Router">
+	</g>
+	<g id="Script_file">
+	</g>
+	<g id="Secure_virtual_machine">
+	</g>
+	<g id="Server_farm">
+	</g>
+	<g id="Server_rack">
+	</g>
+	<g id="Server_x2F_blade">
+	</g>
+	<g id="Settings">
+	</g>
+	<g id="Shared_folder">
+	</g>
+	<g id="Smart_card">
+	</g>
+	<g id="Storage">
+	</g>
+	<g id="Table_2">
+	</g>
+	<g id="Tablet">
+	</g>
+	<g id="Tool">
+		<path fill-rule="evenodd" clip-rule="evenodd" fill="#db2777" d="M41.4,44.5l2.5,2.4l2.8-2.7c-0.2-1.3,0.3-2.7,1.3-3.7
+			c1-1,2.5-1.5,3.8-1.3l12.3-11.9l-6.9-6.6L45,32.6c0.1,1.3-0.3,2.7-1.3,3.7c-1,1-2.5,1.4-3.8,1.3L37,40.3l2.5,2.4L27.4,54.4
+			L26.9,54l-2.3,1.8l-3.9,6l1,1l6.2-3.8l1.9-2.3l-0.4-0.4L41.4,44.5z M48.4,43.4c-0.1,0.4-0.1,0.8-0.1,1.2l0.1,0.5L48,45.4l-2.8,2.7
+			l-1,1l-2.5-2.4L40.4,48l13.7,13.3c0.9,0.9,2,1.3,3.2,1.3c1.2,0,2.3-0.4,3.2-1.3c1.8-1.7,1.8-4.5,0-6.2L48.4,43.4z M31.8,39.8
+			L31.8,39.8l4.1,4l1.3-1.3l-1.7-1.7l-0.8-0.7L39,36l0.5,0.1c0.1,0,0.3,0,0.4,0c0.3,0,0.5,0,0.8-0.1l-2.5-2.4L38,33.5
+			c0.9-3.1,0.1-6.6-2.4-9c-2.5-2.4-6.1-3.2-9.3-2.4l5.4,5.2l-1.4,5.2L25,33.8l-5.4-5.3c-0.9,3.1,0,6.5,2.5,9
+			C24.7,40.1,28.5,40.8,31.8,39.8z"/>
+	</g>
+</g>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+	<g id="Laptop">
+	</g>
+	<g id="Load_balancer">
+	</g>
+	<g id="Lock_x2C__protected">
+	</g>
+</g>
+<g id="symbols">
+</g>
+<g id="slices">
+</g>
+</g>
+  <rect x="840" y="590" width="324" height="34" rx="9" fill="#fce7f3" stroke="#db2777" stroke-width="2"/>
+  <text x="856" y="612" font-size="15" fill="#be185d" text-anchor="start" font-weight="600">檔案與指令：read bash terminal</text>
+  <rect x="840" y="634" width="324" height="34" rx="9" fill="#fce7f3" stroke="#db2777" stroke-width="2"/>
+  <text x="856" y="656" font-size="15" fill="#be185d" text-anchor="start" font-weight="600">代理：subagent discussion</text>
+  <rect x="840" y="678" width="324" height="34" rx="9" fill="#fce7f3" stroke="#db2777" stroke-width="2"/>
+  <text x="856" y="700" font-size="15" fill="#be185d" text-anchor="start" font-weight="600">記憶與對話：memory session_search</text>
+  <rect x="840" y="722" width="324" height="34" rx="9" fill="#fce7f3" stroke="#db2777" stroke-width="2"/>
+  <text x="856" y="744" font-size="15" fill="#be185d" text-anchor="start" font-weight="600">外部：MCP web_search powershell</text>
+  <rect x="1204" y="504" width="364" height="272" rx="14" fill="#ffffff" stroke="#059669" stroke-width="2.4"/>
+  <rect x="1204" y="504" width="364" height="8" rx="4" fill="#059669"/>
+  <text x="1228" y="544" font-size="21" font-weight="700" fill="#047857">模型</text>
+  <text x="1228" y="568" font-size="16" font-style="italic" fill="#64748b">任何 OpenAI 相容端點</text>
+  <circle cx='1528' cy='544' r='22' fill='#059669' opacity='0.13'/><circle cx='1528' cy='544' r='22' fill='none' stroke='#059669' stroke-width='1.6' opacity='0.35'/><g transform='translate(1499.968,519.240) scale(0.62777)'>
+<g id="Layer_1">
+	<g id="File_x2C__general">
+		
+	</g>
+	<g id="Message">
+	</g>
+	<g id="Monitor">
+	</g>
+	<g id="Monitor_running_apps">
+	</g>
+	<g id="Mouse">
+	</g>
+	<g id="Network_card">
+	</g>
+	<g id="Not_allowed">
+	</g>
+	<g id="Performance">
+	</g>
+	<g id="Phone">
+	</g>
+	<g id="Plug_and_play">
+	</g>
+	<g id="Powershell_script_file">
+	</g>
+	<g id="Protocol_stack">
+	</g>
+	<g id="Queue_x2C__general">
+	</g>
+	<g id="RMS_connector">
+	</g>
+	<g id="Router">
+	</g>
+	<g id="Script_file">
+	</g>
+	<g id="Secure_virtual_machine">
+	</g>
+</g>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+	<g id="Laptop">
+	</g>
+	<g id="Load_balancer">
+	</g>
+	<g id="Lock_x2C__protected">
+	</g>
+</g>
+<g id="symbols">
+	<g>
+		<path fill="#059669" d="M52.6,19.1h-16c-1.1,0-2,0.9-2,2v39h20v-39C54.6,20,53.7,19.1,52.6,19.1z M51.6,56.1h-14v-2h14V56.1z
+			 M51.6,52.1h-14v-2h14V52.1z M51.6,27.1h-14v-2h14V27.1z"/>
+	</g>
+</g>
+<g id="slices">
+</g>
+</g>
+  <rect x="1224" y="590" width="324" height="34" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="1240" y="612" font-size="15" fill="#047857" text-anchor="start" font-weight="600">llama.cpp vLLM Ollama</text>
+  <rect x="1224" y="634" width="324" height="34" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="1240" y="656" font-size="15" fill="#047857" text-anchor="start" font-weight="600">自動路由：成本、能力、備援</text>
+  <rect x="1224" y="678" width="324" height="34" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="1240" y="700" font-size="15" fill="#047857" text-anchor="start" font-weight="600">硬規則：個資不送外部</text>
+  <rect x="1224" y="722" width="324" height="34" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="1240" y="744" font-size="15" fill="#047857" text-anchor="start" font-weight="600">排除指定來源國的模型</text>
+  <rect x="28" y="854" width="1564" height="380" rx="18" fill="#fff7ed"/>
+  <circle cx="70" cy="892" r="18" fill="#ea580c"/>
+  <text x="70" y="899" font-size="19" font-weight="700" fill="#fff" text-anchor="middle">3</text>
+  <text x="100" y="900" font-size="27" font-weight="700" fill="#c2410c">治理與稽核</text>
+  <text x="245" y="900" font-size="17" font-style="italic" fill="#a15b34">每一步都攔得下來、查得到</text>
+  <rect x="1408" y="878" width="160" height="30" rx="15" fill="#ea580c"/>
+  <text x="1488" y="899" font-size="16" fill="#fff" text-anchor="middle" font-weight="600">預設不對外傳資料</text>
+  <line x1="52" y1="920" x2="1568" y2="920" stroke="#ffedd5" stroke-width="2"/>
+  <rect x="52" y="940" width="492" height="272" rx="14" fill="#ffffff" stroke="#ea580c" stroke-width="2.4"/>
+  <rect x="52" y="940" width="492" height="8" rx="4" fill="#ea580c"/>
+  <text x="76" y="980" font-size="21" font-weight="700" fill="#c2410c">審批與沙箱</text>
+  <text x="76" y="1004" font-size="16" font-style="italic" fill="#64748b">有副作用先問人</text>
+  <circle cx='504' cy='980' r='22' fill='#ea580c' opacity='0.13'/><circle cx='504' cy='980' r='22' fill='none' stroke='#ea580c' stroke-width='1.6' opacity='0.35'/><g transform='translate(474.208,957.074) scale(0.07492)'>
+<g id="Layer_1_1_">
+	<g id="File_x2C__general">
+		
+	</g>
+</g>
+<g id="Access_control">
+</g>
+<g id="Azure_active_directory">
+</g>
+<g id="Firewall">
+	<g>
+		<polygon fill="#ea580c" points="310.3,224.4 224.5,224.4 224.5,155.7 310.3,155.7 		"/>
+		<polygon fill="#ea580c" points="472.5,224.4 319.8,224.4 319.8,155.7 472.5,155.7 		"/>
+		<polygon fill="#ea580c" points="567.8,224.4 482,224.4 482,155.7 567.8,155.7 		"/>
+		<polygon fill="#ea580c" points="386.7,301.6 224.5,301.6 224.5,232.9 386.7,232.9 		"/>
+		<polygon fill="#ea580c" points="567.8,301.6 396.1,301.6 396.1,232.9 567.8,232.9 		"/>
+		<polygon fill="#ea580c" points="310.3,378.9 224.5,378.9 224.5,310.2 310.3,310.2 		"/>
+		<polygon fill="#ea580c" points="472.5,378.9 319.8,378.9 319.8,310.2 472.5,310.2 		"/>
+		<polygon fill="#ea580c" points="567.8,378.9 482,378.9 482,310.2 567.8,310.2 		"/>
+		<polygon fill="#ea580c" points="386.7,456.1 224.5,456.1 224.5,387.4 386.7,387.4 		"/>
+		<polygon fill="#ea580c" points="567.8,456.1 396.1,456.1 396.1,387.4 567.8,387.4 		"/>
+	</g>
+</g>
+<g id="symbols">
+</g>
+</g>
+  <rect x="72" y="1026" width="452" height="34" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="88" y="1048" font-size="15" fill="#c2410c" text-anchor="start" font-weight="600">Seatbelt / bwrap 圈住 bash</text>
+  <rect x="72" y="1070" width="452" height="34" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="88" y="1092" font-size="15" fill="#c2410c" text-anchor="start" font-weight="600">token 與呼叫數煞車</text>
+  <rect x="72" y="1114" width="452" height="34" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="88" y="1136" font-size="15" fill="#c2410c" text-anchor="start" font-weight="600">每人每日每月配額</text>
+  <rect x="72" y="1158" width="452" height="34" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="88" y="1180" font-size="15" fill="#c2410c" text-anchor="start" font-weight="600">登入鎖定、hook 攔截</text>
+  <rect x="564" y="940" width="492" height="272" rx="14" fill="#ffffff" stroke="#7c3aed" stroke-width="2.4"/>
+  <rect x="564" y="940" width="492" height="8" rx="4" fill="#7c3aed"/>
+  <text x="588" y="980" font-size="21" font-weight="700" fill="#6d28d9">只增不改的記錄</text>
+  <text x="588" y="1004" font-size="16" font-style="italic" fill="#64748b">每一步都落地</text>
+  <circle cx='1016' cy='980' r='22' fill='#7c3aed' opacity='0.13'/><circle cx='1016' cy='980' r='22' fill='none' stroke='#7c3aed' stroke-width='1.6' opacity='0.35'/><g transform='translate(976.476,948.441) scale(0.09981)'>
+<g id="Database_x2C__generic_2">
+</g>
+<g>
+	<g id="shape1033-2094_2_" transform="translate(1972.87,-1602.08)">
+		
+		<path fill="#7c3aed" d="M-1576.7,1828.1c-49.7,0-90.8-12-90.8-27.4c0-15.4,40.2-27.4,90.8-27.4c49.7,0,89.9,12,89.9,27.4
+			C-1486.8,1816.1-1526.2,1828.1-1576.7,1828.1z M-1703.4,1985.6v49.7c0,23.1,46.2,48.8,107,53.1h40.2c60.8-4.3,107-24.8,107-48.8
+			v-233.7c0-25.7-57.4-50.5-127.6-50.5c-70.2,0-126.7,23.1-126.7,49.7v104.4L-1703.4,1985.6L-1703.4,1985.6z"/>
+	</g>
+	<g id="paths">
+		<g id="Access_control">
+		</g>
+		<g id="Azure_active_directory">
+		</g>
+	</g>
+	<g id="symbols">
+	</g>
+</g>
+</g>
+  <rect x="584" y="1026" width="452" height="34" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="600" y="1048" font-size="15" fill="#6d28d9" text-anchor="start" font-weight="600">session JSONL 逐事件</text>
+  <rect x="584" y="1070" width="452" height="34" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="600" y="1092" font-size="15" fill="#6d28d9" text-anchor="start" font-weight="600">記憶 Markdown 與主題頁</text>
+  <rect x="584" y="1114" width="452" height="34" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="600" y="1136" font-size="15" fill="#6d28d9" text-anchor="start" font-weight="600">audit.jsonl 稽核</text>
+  <rect x="584" y="1158" width="452" height="34" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="600" y="1180" font-size="15" fill="#6d28d9" text-anchor="start" font-weight="600">路由與代理訊息事件</text>
+  <rect x="1076" y="940" width="492" height="272" rx="14" fill="#ffffff" stroke="#0891b2" stroke-width="2.4"/>
+  <rect x="1076" y="940" width="492" height="8" rx="4" fill="#0891b2"/>
+  <text x="1100" y="980" font-size="21" font-weight="700" fill="#0e7490">給人看的產出</text>
+  <text x="1100" y="1004" font-size="16" font-style="italic" fill="#64748b">數字由程式算</text>
+  <circle cx='1528' cy='980' r='22' fill='#0891b2' opacity='0.13'/><circle cx='1528' cy='980' r='22' fill='none' stroke='#0891b2' stroke-width='1.6' opacity='0.35'/><g transform='translate(1344.753,795.989) scale(0.56558)'>
+<g id="Layer_1">
+</g>
+<g id="Completed_Icons">
+	<path fill="#FFFFFF" d="M340.5,346.3h-32.9v-2.6H305v-4.3h2.6v-2.2H305v-4.3h2.6v-2.2H305v-4.3h2.6v-2.2H305v-4.3h2.6v-2.2H305
+		v-4.3h2.6v-2.2H305v-4.3h2.6v-2.6h32.9v1.3h3.9v38.2h-3.9V346.3z"/>
+	<g id="spiral_binding_2_">
+		<g>
+			<path fill="#0891b2" d="M318.2,320h14.3v-7.8h-14.3V320z M310.4,334.4h-3.9v1.3h3.9V334.4z M310.4,327.9h-3.9v1.3h3.9V327.9z
+				 M310.4,308.3h-3.9v1.3h3.9V308.3z M310.4,314.8h-3.9v1.3h3.9V314.8z M310.4,321.3h-3.9v1.3h3.9V321.3z M340.3,307v7.8h2.6V307
+				H340.3z M340.3,333.1h2.6v-6.5h-2.6V333.1z M340.3,323.9h2.6v-6.5h-2.6V323.9z M340.3,342.2h2.6v-6.5h-2.6V342.2z M309.1,307.7h2
+				v2.6h-2v3.9h2v2.6h-2v3.9h2v2.6h-2v3.9h2v2.6h-2v3.9h2v2.6h-2v3.9h2v2.6h-2v2H339v-39.1h-29.9V307.7z M316.9,310.9h16.9v10.4
+				h-16.9V310.9z M310.4,340.9h-3.9v1.3h3.9V340.9z"/>
+		</g>
+	</g>
+</g>
+</g>
+  <rect x="1096" y="1026" width="452" height="34" rx="9" fill="#cffafe" stroke="#0891b2" stroke-width="2"/>
+  <text x="1112" y="1048" font-size="15" fill="#0e7490" text-anchor="start" font-weight="600">服務使用報告 Word / PDF</text>
+  <rect x="1096" y="1070" width="452" height="34" rx="9" fill="#cffafe" stroke="#0891b2" stroke-width="2"/>
+  <text x="1112" y="1092" font-size="15" fill="#0e7490" text-anchor="start" font-weight="600">機密防護檢查頁</text>
+  <rect x="1096" y="1114" width="452" height="34" rx="9" fill="#cffafe" stroke="#0891b2" stroke-width="2"/>
+  <text x="1112" y="1136" font-size="15" fill="#0e7490" text-anchor="start" font-weight="600">eval 評測通過率</text>
+  <rect x="1096" y="1158" width="452" height="34" rx="9" fill="#cffafe" stroke="#0891b2" stroke-width="2"/>
+  <text x="1112" y="1180" font-size="15" fill="#0e7490" text-anchor="start" font-weight="600">艦隊用量趨勢</text>
+  <path d="M800 364 L800 416" stroke="#2563eb" stroke-width="2.6" fill="none" marker-end="url(#ar-blue)"/>
+  <rect x="812" y="377.0" width="99.0" height="26" rx="13" fill="#2563eb"/>
+  <text x="862" y="396.0" font-size="15" fill="#fff" text-anchor="middle" font-weight="600">任務、審批</text>
+  <path d="M800 800 L800 852" stroke="#059669" stroke-width="2.6" fill="none" marker-end="url(#ar-green)"/>
+  <rect x="812" y="813.0" width="159.0" height="26" rx="13" fill="#059669"/>
+  <text x="892" y="832.0" font-size="15" fill="#fff" text-anchor="middle" font-weight="600">每步寫記錄、過閘門</text>
+  <rect x="52" y="1262" width="16" height="16" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+  <text x="78" y="1275" font-size="15" fill="#334155">入口</text>
+  <rect x="134" y="1262" width="16" height="16" rx="4" fill="#e2e8f0" stroke="#64748b" stroke-width="1.8"/>
+  <text x="160" y="1275" font-size="15" fill="#334155">核心</text>
+  <rect x="216" y="1262" width="16" height="16" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1.8"/>
+  <text x="242" y="1275" font-size="15" fill="#334155">模型與迴圈</text>
+  <rect x="343" y="1262" width="16" height="16" rx="4" fill="#fce7f3" stroke="#db2777" stroke-width="1.8"/>
+  <text x="369" y="1275" font-size="15" fill="#334155">工具</text>
+  <rect x="425" y="1262" width="16" height="16" rx="4" fill="#ffedd5" stroke="#ea580c" stroke-width="1.8"/>
+  <text x="451" y="1275" font-size="15" fill="#334155">閘門</text>
+  <rect x="507" y="1262" width="16" height="16" rx="4" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.8"/>
+  <text x="533" y="1275" font-size="15" fill="#334155">記錄</text>
+  <rect x="589" y="1262" width="16" height="16" rx="4" fill="#cffafe" stroke="#0891b2" stroke-width="1.8"/>
+  <text x="615" y="1275" font-size="15" fill="#334155">產出</text>
+</svg>

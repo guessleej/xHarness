@@ -12,25 +12,32 @@ xHarness 是云碩科技（xCloudinfo）開發的插件式 AI agent harness：�
 
 ![xHarness 使用者操作流程圖](docs/images/xharness_user_flow.png)
 
-由左到右：工作區與模型端點把資料送進 xHarness，操作者在 Web UI／CLI 下任務並回答審批（1–3），管理者從艦隊 hub 看多台機器並就地審批或停止（4–5），平台把稽核記錄、用量趨勢輸出到看板，並經 MCP 呼叫外部工具或代理其他節點（6–7）。
+由左到右：工作區與模型端點（可由自動路由在多個模型間挑選）把資料送進 xHarness，操作者在 Web UI／CLI 下任務並回答審批（1–3），管理者從艦隊 hub 看多台機器並就地審批或停止（4–5），平台把稽核記錄、用量趨勢輸出到看板，並經 MCP 呼叫外部工具或代理其他節點（6–7）。
+
+## 架構
+
+![xHarness 架構圖](docs/images/xharness_architecture.png)
+
+三段由上到下：**入口**（Web UI 與艦隊、CLI、桌面版、Telegram、編輯器）共用同一個核心與同一套審批、稽核；**核心**是約 150 行的 `Context`（服務、事件、中介層、可回捲的插件），其上 Agent 迴圈、約 40 個內建工具與模型 adapter 全都是插件，模型端點可以是任何 OpenAI 相容服務、由自動路由挑選；**治理與稽核**包住每一步：有副作用先問人、沙箱圈住 bash、token 與配額煞車，所有事件寫進只增不改的記錄，再由程式算出使用報告、機密防護檢查與評測。設計說明見 [docs/architecture.zh.md](docs/architecture.zh.md)。
 
 ## 為什麼做這個
 
-多數 agent harness 綁死單一廠商 API，還拖著龐大的相依樹。xHarness 保留架構核心——工具、模型 adapter、session 記錄、agent 迴圈的組裝全部都是掛在共享 context 上的插件——但把規模控制在一個開發者審計得完：約 13,800 行 Python（套件程式碼，不含 6,020 行測試）、**零執行期相依**（純標準函式庫，含 SSE 串流client、TOML 設定讀取與 MCP client），411 個測試約 33 秒跑完（多數時間花在關閉測試用的 HTTP 伺服器，不是在算）。
+多數 agent harness 綁死單一廠商 API，還拖著龐大的相依樹。xHarness 保留架構核心——工具、模型 adapter、session 記錄、agent 迴圈的組裝全部都是掛在共享 context 上的插件——但把規模控制在一個開發者審計得完：約 17,500 行 Python（套件程式碼，不含 7,900 行測試）、**零執行期相依**（純標準函式庫，含 SSE 串流client、TOML 設定讀取與 MCP client），519 個測試約 43 秒跑完（多數時間花在關閉測試用的 HTTP 伺服器，不是在算）。
 
 ## 特色
 
 - **一切皆插件。** 服務、事件、工具註冊都掛在共享 `Context` 上；卸載插件時自動回捲它註冊的一切。
 - **任何 OpenAI 相容供應端。** SSE 串流含 tool calls、憑證每次請求時才從環境變數解析、可設定 temperature 與 token 上限。
-- **內建工具。** `bash`、`read`、`write`、`edit`、`glob`、`grep`、`todo_write`，另有選配的 `webfetch`。
+- **內建工具。** 約 40 個：檔案與指令（`bash`、`terminal`、`read`、`write`、`edit`、`glob`、`grep`，主機有 `pwsh` 時另有 `powershell`）、代理協作（`subagent`、`discussion`、`ralph`、`send_message`）、記憶與過去的對話（`memory_*`、`session_search`），以及設定後才有的 `webfetch`、`web_search`、`browser_open`、MCP 工具。完整清單見下方「內建工具」。
 - **沙箱隔離。** `bash` 自動用作業系統現成機制圈住：macOS 走 `sandbox-exec`（Seatbelt）、Linux 走 `bwrap`（bubblewrap）——寫入限制在工作目錄與暫存目錄，`allow_network = false` 可一併斷網；`mode = "require"` 沒有後端就拒絕啟動。
 - **MCP client。** `[mcp.servers.*]` 設定 stdio MCP server，其工具以 `mcp__{server}__{tool}` 名稱進工具清單；沒有標 `readOnlyHint` 的一律視為有副作用、走審批策略。
 - **審批策略。** 有副作用的工具（`bash`、`write`、`edit`、`webfetch`、MCP 工具）在互動模式會先詢問；`--yes` 或 `approval = "auto"` 可關閉。
 - **專案指示檔。** 工作目錄的 `AGENTS.md`（或 `CLAUDE.md`）會自動讀入 system prompt，agent 進到哪個 repo 就遵守哪個 repo 的慣例；`--no-instructions` 或 `project_instructions = false` 可關閉。
 - **成本煞車（telemetry）。** `llm/stream` 中介層統計每次模型呼叫的 token、工具呼叫數與延遲；設定 `max_total_tokens` / `max_llm_calls` 超額即硬停整個任務，用量摘要同步寫入 session 記錄，REPL 用 `/usage` 查。
 - **Eval 子系統。** `xharness eval <目錄>` 對任何模型跑評測套件：每個案例在乾淨的暫存工作區執行任務，用確定性檢查（檔案內容、回答、指令結果、有沒有真的呼叫工具）加可選的 LLM 評審計分，輸出通過率、每案 token 與耗時，可寫 JSONL。內建 `evals/basic` 六個案例，直接量化「這顆模型會不會用工具、守不守規矩」。
-- **子代理（subagent）。** `subagent` 把一個有界的子任務交給全新的子代理、`subagent_batch` 平行分派多個獨立任務；子代理共用工具與模型、不能再生子代理，每個有副作用的動作都回流父代理的審批策略。
-- **代理角色、管理與討論。** 角色檔（與 Claude Code 的 subagent 同格式）定義代理的工作說明、可用工具、模型與上限，只能縮小權限；網頁「代理」分頁看每個代理在做什麼、花多少並可個別停止；`discussion` 讓代理之間以圓桌、辯論、審查或自由形式互相對話，逐字紀錄、數字逐一對照出處、結論保留分歧。
+- **子代理（subagent）。** `subagent` 把一個有界的子任務交給全新的子代理、`subagent_batch` 平行分派多個獨立任務；`background: true` 讓子代理在背景唯讀地做事，回報與答案以訊息送回；`ralph` 把長工作分輪交給一個個全新的子代理。子代理共用工具與模型、不能再生子代理，每個有副作用的動作都回流父代理的審批策略。
+- **代理角色、管理與討論。** 角色檔（與 Claude Code 的 subagent 同格式）定義代理的工作說明、可用工具、模型與上限，只能縮小權限；網頁「代理」分頁看每個代理在做什麼、花多少並可個別停止；`discussion` 讓代理之間以圓桌、辯論、審查、自由形式或「組對組」互相對話（組對組可跨對話、跨機器開討論廳），逐字紀錄、數字逐一對照出處、結論保留分歧；代理之間另有 `list_agents`、`send_message`、`report` 可以互通訊息。
+- **自動路由。** 設定檔列了好幾個模型時，每個請求自己挑一個：硬規則由程式決定（個資、金鑰、本機檔案不送外部模型，可排除指定來源國的模型）、再依能力與成本挑、連不上就換備援。預設關閉，見下方「自動路由」。
 - **桌面版。** `xharness desktop` 把同一套 Web UI 開在作業系統原生視窗（macOS WebKit／Windows WebView2／Linux WebKitGTK），不佔瀏覽器分頁；伺服器綁在只有這個程序知道的 loopback 埠，關窗即停。`packaging/desktop/build.py` 用 PyInstaller 打成 `xHarness.app`＋`.dmg`（macOS）或 `xHarness.exe`（Windows），給不裝 Python 的人。唯一的選配相依是 pywebview（`pip install "xharness[desktop]"`）。
 - **Web UI 與艦隊視圖。** `xharness web` 起本機介面：串流逐字稿、工具卡片、審批按鈕、對話與歷史 session 清單、記憶清單、用量晶片、開燈關燈；「艦隊」視圖一頁看完所有對話與子代理的狀態、用量、等待中的許可，可就地審批或**停止**任何一個 agent。預設只綁 127.0.0.1，對外綁定必須帶 `--token`。
 - **真瀏覽器搜尋與開頁。** `[tools] browser = "http://127.0.0.1:9377"` 接上地端 camofox（真 Firefox）後多兩個工具：`web_search` 在瀏覽器裡開 DuckDuckGo 結果頁、回傳標題／網址／摘要（不用任何搜尋 API 金鑰）；`browser_open` 回傳渲染後的可見文字，JavaScript 才長出來的頁面也讀得到。兩者預設走審批，`browser_approval = false` 可放行。

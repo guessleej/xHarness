@@ -28,7 +28,7 @@ def dashed_box(x, y, w, h, label):
 # 左：資料進出 → 平台
 node(300, 400, "Folder", GREENC, "工作區", "專案目錄", lines=("程式碼、AGENTS.md", "xharness.toml 設定"))
 arrow("M366 400 H 648", GREENC, "讀寫檔案（沙箱內）", 507, 382)
-node(300, 600, "Server (generic)", GREENC, "模型端點", "OpenAI 相容", lines=("llama.cpp / vLLM / Ollama", "地端，資料不外流"))
+node(300, 600, "Server (generic)", GREENC, "模型端點", "OpenAI 相容", lines=("llama.cpp / vLLM / Ollama", "自動路由，個資不外送"))
 arrow("M366 600 H 660 V 460", GREENC, "串流回覆、tool call", 513, 582)
 
 # 中：平台
@@ -36,7 +36,7 @@ node(700, 400, "Application server", VIOC, "", "", size=100)
 d.text(775, 328, "xHarness（本機或地端節點）", size=T, fill=RED, bold=True)
 d.text(640, 470, "agent 迴圈＋插件", size=N, fill=INK, bold=True, anchor="end")
 d.text(640, 495, "工具、審批、沙箱、成本煞車", size=S, fill=GR, anchor="end")
-d.text(640, 518, "記憶、session 稽核、子代理", size=S, fill=GR, anchor="end")
+d.text(640, 518, "記憶、多代理討論、自動路由", size=S, fill=GR, anchor="end")
 
 # 上：操作者
 dashed_box(430, 20, 520, 236, "操作者")
@@ -55,7 +55,7 @@ arrow("M1320 172 V 420 H 758", ORC, "5.就地審批、停止 agent", 1010, 406)
 node(1300, 600, "Dashboard", CYAN.main, "稽核與趨勢", "session · 記憶 · 用量", size=72)
 arrow("M754 450 V 600 H 1258", VIOC, "6.稽核記錄、用量趨勢、eval 報表", 1010, 582)
 node(1160, 690, "Connectors", CYAN.main, "MCP / 其他節點", "外部工具、艦隊節點", size=64)
-arrow("M700 450 V 690 H 1122", VIOC, "7.MCP 工具呼叫、節點代理", 900, 672)
+arrow("M700 450 V 690 H 1122", VIOC, "7.MCP 工具、節點代理、討論廳", 900, 672)
 
 # 圖例
 lx = 40

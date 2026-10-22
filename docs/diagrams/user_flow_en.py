@@ -28,7 +28,7 @@ def dashed_box(x, y, w, h, label):
 # 左：資料進出 → 平台
 node(300, 400, "Folder", GREENC, "Workspace", "Project directory", lines=("code, AGENTS.md", "xharness.toml config"))
 arrow("M366 400 H 648", GREENC, "read / write files (sandboxed)", 507, 382)
-node(300, 600, "Server (generic)", GREENC, "Model endpoint", "OpenAI-compatible", lines=("llama.cpp / vLLM / Ollama", "on-prem, nothing leaves"))
+node(300, 600, "Server (generic)", GREENC, "Model endpoint", "OpenAI-compatible", lines=("llama.cpp / vLLM / Ollama", "routing keeps personal data in"))
 arrow("M366 600 H 660 V 460", GREENC, "streamed reply, tool calls", 513, 582)
 
 # 中：平台
@@ -36,7 +36,7 @@ node(700, 400, "Application server", VIOC, "", "", size=100)
 d.text(775, 328, "xHarness (local or on-prem node)", size=T, fill=RED, bold=True)
 d.text(640, 470, "agent loop + plugins", size=N, fill=INK, bold=True, anchor="end")
 d.text(640, 495, "tools · approval · sandbox", size=S, fill=GR, anchor="end")
-d.text(640, 518, "brakes · memory · subagents", size=S, fill=GR, anchor="end")
+d.text(640, 518, "memory · agent talks · routing", size=S, fill=GR, anchor="end")
 
 # 上：操作者
 dashed_box(430, 20, 520, 236, "Operator")
@@ -55,7 +55,7 @@ arrow("M1320 172 V 420 H 758", ORC, "5. approve in place, stop an agent", 1010, 
 node(1300, 600, "Dashboard", CYAN.main, "Audit and trends", "sessions · memory", size=72)
 arrow("M754 450 V 600 H 1258", VIOC, "6. audit logs, usage trend, eval reports", 1010, 582)
 node(1160, 690, "Connectors", CYAN.main, "MCP / nodes", "external tools, fleet nodes", size=64)
-arrow("M700 450 V 690 H 1122", VIOC, "7. MCP tool calls, node proxying", 900, 672)
+arrow("M700 450 V 690 H 1122", VIOC, "7. MCP tools, node proxy, halls", 900, 672)
 
 # 圖例
 lx = 40

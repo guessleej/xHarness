@@ -4,6 +4,10 @@ English | [中文](architecture.zh.md)
 
 Notes for contributors. The README covers usage; this file covers design.
 
+![xHarness architecture](images/xharness_architecture_en.png)
+
+The three tiers in the picture match the sections below: the entrances share one core; the core is `Context` plus every plugin hung on it; governance and audit wraps each step.
+
 ## The kernel: Context, Plugin, Harness
 
 `xharness/context.py` is the whole kernel, about 150 lines:
@@ -45,7 +49,7 @@ For scale, here is xHarness next to a large plugin-based harness (DeepSeek's dsh
 | | dsh | xHarness |
 |---|---|---|
 | Language | TypeScript | Python (3.11+, stdlib only) |
-| Size | ~565k lines, 227 packages | ~8,090 lines, 1 package |
+| Size | ~565k lines, 227 packages | ~17,500 lines (7,900 more of tests), 1 package |
 | Plugin runtime | Cordis (services, typed events, HMR, fibers) | `Context` (services, events, middleware, scoped disposal) |
 | Composition | profiles, bundles, layered YAML patches | one preset function + a TOML plugin list |
 | Providers | adapter registry, catalogs, model discovery | one OpenAI-compatible adapter |
@@ -57,6 +61,6 @@ The claim is not parity. The claim is that the architectural core — plugins ov
 ## Known limitations
 
 - The `bash` sandbox needs a backend (`sandbox-exec` on macOS, `bwrap` on Linux); in `auto` mode without one, approval policy is the only guard. Use `mode = "require"` for a hard guarantee, and do not run untrusted tasks with `--approve auto` on an unsandboxed host.
-- One provider per run; no mid-session model switching.
-- Sync, single-threaded: one model call and one tool at a time.
+- A model can be switched mid-conversation (`/model`), or routing can pick one per request; but a request goes to one model, never to several at once.
+- Each agent is synchronous and single-threaded: one model call and one tool at a time; several agents (subagents, background subagents, discussion participants) each run on their own thread.
 - `resume` replays what the log holds; nothing more granular than whole messages.

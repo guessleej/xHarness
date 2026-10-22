@@ -4,6 +4,10 @@
 
 給貢獻者的設計說明。用法見 README；本文講設計。
 
+![xHarness 架構圖](images/xharness_architecture.png)
+
+圖的三段對應下面的章節：入口共用同一個核心；核心是 `Context` 加上掛在它上面的一切插件；治理與稽核包住每一步。
+
 ## 核心：Context、Plugin、Harness
 
 `xharness/context.py` 就是整個核心，約 150 行：
@@ -45,7 +49,7 @@
 | | dsh | xHarness |
 |---|---|---|
 | 語言 | TypeScript | Python（3.11+，純標準函式庫） |
-| 規模 | 約 56.5 萬行、227 個套件 | 約 8,090 行、1 個套件 |
+| 規模 | 約 56.5 萬行、227 個套件 | 約 17,500 行（不含 7,900 行測試）、1 個套件 |
 | 插件執行期 | Cordis（服務、型別化事件、HMR、fiber） | `Context`（服務、事件、中介層、scope 回捲） |
 | 組合方式 | profile、bundle、分層 YAML patch | 一個 preset 函式 + TOML 插件清單 |
 | 供應端 | adapter 註冊表、型錄、模型探索 | 一個 OpenAI 相容 adapter |
@@ -57,6 +61,6 @@
 ## 已知限制
 
 - `bash` 沙箱需要後端（macOS `sandbox-exec`、Linux `bwrap`）；`auto` 模式下沒有後端時，審批策略是唯一防線。要硬保證就設 `mode = "require"`，且不要在無沙箱的主機上用 `--approve auto` 跑不受信任的任務。
-- 一次執行一個供應端；不支援 session 中途換模型。
-- 同步單執行緒：一次一個模型呼叫、一個工具。
+- 模型可以在對話中途切換（`/model`），也可以開自動路由讓每個請求自己挑；但一個請求只會送給一個模型，不會把同一題同時問多個。
+- 每個代理是同步單執行緒：一次一個模型呼叫、一個工具；多個代理（子代理、背景子代理、討論參與者）各用自己的執行緒平行跑。
 - `resume` 只重放記錄裡的內容；粒度就是整則訊息。
