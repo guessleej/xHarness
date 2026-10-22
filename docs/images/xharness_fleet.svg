@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 378" width="1400" height="378" font-family="Noto Sans TC, Microsoft JhengHei, PingFang TC, sans-serif">
+  <defs><marker id="ar-blue" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#2563eb"/></marker><marker id="ar-orange" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#ea580c"/></marker><marker id="ar-violet" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#7c3aed"/></marker><marker id="ar-green" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#059669"/></marker></defs>
+  <rect width="1400" height="378" fill="#ffffff"/>
+  <rect x="28" y="28" width="1344" height="322" rx="18" fill="#fbf4ff"/>
+  <circle cx="70" cy="66" r="18" fill="#7c3aed"/>
+  <text x="70" y="73" font-size="26" font-weight="700" fill="#fff" text-anchor="middle">1</text>
+  <text x="100" y="74" font-size="36" font-weight="700" fill="#6d28d9">多節點艦隊</text>
+  <text x="290" y="74" font-size="23" font-style="italic" fill="#7c62b8">一頁看完所有機器</text>
+  <rect x="1162" y="47" width="186" height="40" rx="20" fill="#7c3aed"/>
+  <text x="1255" y="75" font-size="22" fill="#fff" text-anchor="middle" font-weight="600">token 只在 hub</text>
+  <line x1="52" y1="94" x2="1348" y2="94" stroke="#ede9fe" stroke-width="2"/>
+  <rect x="52" y="114" width="224" height="214" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2.4"/>
+  <rect x="52" y="114" width="224" height="8" rx="4" fill="#2563eb"/>
+  <text x="76" y="154" font-size="28" font-weight="700" fill="#1d4ed8">手機</text>
+  <text x="76" y="178" font-size="22" font-style="italic" fill="#64748b">Telegram</text>
+  <rect x="68" y="214" width="192" height="40" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="164" y="239" font-size="20" fill="#1d4ed8" text-anchor="middle" font-weight="600">下任務</text>
+  <rect x="68" y="264" width="192" height="40" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="164" y="289" font-size="20" fill="#1d4ed8" text-anchor="middle" font-weight="600">允許／拒絕</text>
+  <path d="M280 158 L316 158" stroke="#2563eb" stroke-width="2.6" fill="none" marker-end="url(#ar-blue)"/>
+  <rect x="320" y="114" width="224" height="214" rx="14" fill="#ffffff" stroke="#ea580c" stroke-width="2.4"/>
+  <rect x="320" y="114" width="224" height="8" rx="4" fill="#ea580c"/>
+  <text x="344" y="154" font-size="28" font-weight="700" fill="#c2410c">管理者</text>
+  <text x="344" y="178" font-size="22" font-style="italic" fill="#64748b">瀏覽器</text>
+  <rect x="336" y="214" width="192" height="40" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="432" y="239" font-size="20" fill="#c2410c" text-anchor="middle" font-weight="600">狀態與用量</text>
+  <rect x="336" y="264" width="192" height="40" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="432" y="289" font-size="20" fill="#c2410c" text-anchor="middle" font-weight="600">就地審批</text>
+  <path d="M548 158 L584 158" stroke="#ea580c" stroke-width="2.6" fill="none" marker-end="url(#ar-orange)"/>
+  <rect x="588" y="114" width="224" height="214" rx="14" fill="#ffffff" stroke="#7c3aed" stroke-width="2.4"/>
+  <rect x="588" y="114" width="224" height="8" rx="4" fill="#7c3aed"/>
+  <text x="612" y="154" font-size="28" font-weight="700" fill="#6d28d9">Hub</text>
+  <text x="612" y="178" font-size="22" font-style="italic" fill="#64748b">任一節點都能當</text>
+  <rect x="604" y="214" width="192" height="40" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="700" y="239" font-size="20" fill="#6d28d9" text-anchor="middle" font-weight="600">合併呈現</text>
+  <rect x="604" y="264" width="192" height="40" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="700" y="289" font-size="20" fill="#6d28d9" text-anchor="middle" font-weight="600">代理審批與停止</text>
+  <path d="M816 158 L852 158" stroke="#7c3aed" stroke-width="2.6" fill="none" marker-end="url(#ar-violet)"/>
+  <rect x="856" y="114" width="224" height="214" rx="14" fill="#ffffff" stroke="#059669" stroke-width="2.4"/>
+  <rect x="856" y="114" width="224" height="8" rx="4" fill="#059669"/>
+  <text x="880" y="154" font-size="28" font-weight="700" fill="#047857">節點 A</text>
+  <text x="880" y="178" font-size="22" font-style="italic" fill="#64748b">自己的模型與資料</text>
+  <rect x="872" y="214" width="192" height="40" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="968" y="239" font-size="20" fill="#047857" text-anchor="middle" font-weight="600">xharness web</text>
+  <path d="M1084 158 L1120 158" stroke="#059669" stroke-width="2.6" fill="none" marker-end="url(#ar-green)"/>
+  <rect x="1124" y="114" width="224" height="214" rx="14" fill="#ffffff" stroke="#059669" stroke-width="2.4"/>
+  <rect x="1124" y="114" width="224" height="8" rx="4" fill="#059669"/>
+  <text x="1148" y="154" font-size="28" font-weight="700" fill="#047857">節點 B</text>
+  <text x="1148" y="178" font-size="22" font-style="italic" fill="#64748b">自己的模型與資料</text>
+  <rect x="1140" y="214" width="192" height="40" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="1236" y="239" font-size="20" fill="#047857" text-anchor="middle" font-weight="600">xharness web</text>
+</svg>

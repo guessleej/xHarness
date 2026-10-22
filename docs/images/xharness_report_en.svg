@@ -1,0 +1,267 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 724" width="1400" height="724" font-family="Noto Sans TC, Microsoft JhengHei, PingFang TC, sans-serif">
+  <defs></defs>
+  <rect width="1400" height="724" fill="#ffffff"/>
+  <rect x="28" y="28" width="1344" height="322" rx="18" fill="#ecfeff"/>
+  <circle cx="70" cy="66" r="18" fill="#0891b2"/>
+  <text x="70" y="73" font-size="26" font-weight="700" fill="#fff" text-anchor="middle">1</text>
+  <text x="100" y="74" font-size="36" font-weight="700" fill="#0e7490">Service usage report</text>
+  <text x="488" y="74" font-size="23" font-style="italic" fill="#3f8a95">for decision makers, numbers by code</text>
+  <rect x="1023" y="47" width="325" height="40" rx="20" fill="#0891b2"/>
+  <text x="1186" y="75" font-size="22" fill="#fff" text-anchor="middle" font-weight="600">one command, one Word file</text>
+  <line x1="52" y1="94" x2="1348" y2="94" stroke="#cffafe" stroke-width="2"/>
+  <rect x="52" y="114" width="402" height="214" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2.4"/>
+  <rect x="52" y="114" width="402" height="8" rx="4" fill="#2563eb"/>
+  <text x="76" y="154" font-size="28" font-weight="700" fill="#1d4ed8">Who uses it</text>
+  <text x="76" y="178" font-size="22" font-style="italic" fill="#64748b">people, frequency</text>
+  <circle cx='416' cy='158' r='20' fill='#2563eb' opacity='0.13'/><circle cx='416' cy='158' r='20' fill='none' stroke='#2563eb' stroke-width='1.6' opacity='0.35'/><g transform='translate(292.357,34.357) scale(0.38003)'>
+<g id="Layer_1">
+</g>
+<g id="Completed_Icons">
+	<path fill="#FFFFFF" d="M315.4,348.1h39.3l-0.1-2.1c-0.2-3-0.9-9.2-1.5-12c-0.6-3-1.4-5.6-4.7-7.2c-2.6-1.3-3.9-1.8-5.1-1.8
+		c-0.7,0-1.3,0.2-1.8,0.4v-0.5c2.6-2.2,4.3-5.6,4.3-9.5c0-6.5-4.8-11.9-10.8-11.9c-5.9,0-10.8,5.3-10.8,11.9c0,2.3,0.6,4.5,1.7,6.4
+		c-1.9-0.9-3.1-1.3-4-1.3c-0.5,0-0.9,0.1-1.3,0.2v-0.4c2-1.9,3.2-4.6,3.2-7.6c0-5.6-4.3-10.2-9.7-10.2c-5.3,0-9.7,4.6-9.7,10.2
+		c0,3.1,1.3,5.9,3.4,7.8v0.3c-0.4-0.2-0.9-0.3-1.4-0.3c-1.1,0-2.4,0.4-4.9,1.7c-3.1,1.6-3.9,4.2-4.5,6.9c-0.6,2.7-1.2,8.6-1.4,11.4
+		l-0.1,2.1h20.2c-0.1,1.3-0.2,2.5-0.3,3.4L315.4,348.1z"/>
+	<g>
+		<path fill="#2563eb" d="M317.6,346.1c0.2-2.9,0.9-9,1.4-11.7c0.7-3.1,1.4-4.7,3.6-5.9c2.2-1.1,3.4-1.5,4.2-1.5
+			c0.7,0,1.1,0.3,1.6,0.8c0.1,0.1,0.1,0.1,0.2,0.2c2.2,1.9,4.3,2.3,6.4,2.3c2.2,0,4.3-0.4,6.4-2.3c0.1-0.1,0.1-0.1,0.2-0.2
+			c0.5-0.4,0.9-0.8,1.6-0.8c0.8,0,2,0.4,4.2,1.5c2.3,1.1,3,2.8,3.6,5.9c0.6,2.7,1.3,8.8,1.4,11.7H317.6L317.6,346.1z M335.1,325.2
+			c-4.8,0-8.8-4.4-8.8-9.9c0-5.4,3.9-9.9,8.8-9.9c4.8,0,8.8,4.4,8.8,9.9C343.9,320.8,339.9,325.2,335.1,325.2L335.1,325.2z"/>
+		<g>
+			<path fill="#2563eb" d="M321.7,326.5c2.6-1.3,4-1.8,5.2-1.8c0.1,0,0.2,0,0.3,0c-0.4-0.3-0.8-0.6-1.3-0.8c-2.1-1.1-3.2-1.5-4-1.5
+				c-0.7,0-1,0.3-1.5,0.7c-0.1,0.1-0.1,0.1-0.2,0.2c-2,1.8-4,2.1-6,2.1c-2,0-4-0.3-6-2.1c-0.1-0.1-0.1-0.1-0.2-0.2
+				c-0.5-0.4-0.8-0.7-1.5-0.7c-0.7,0-1.9,0.4-4,1.5c-2.1,1.1-2.8,2.6-3.4,5.5c-0.6,2.6-1.2,8.3-1.4,11.1h18c0.3-2.5,0.6-5.1,1-6.7
+				C317.5,331,318.3,328.2,321.7,326.5z"/>
+			<path fill="#2563eb" d="M314.3,320.9c4.2,0,7.7-3.7,7.7-8.2c0-4.5-3.4-8.2-7.7-8.2c-4.2,0-7.7,3.7-7.7,8.2
+				C306.6,317.2,310,320.9,314.3,320.9z"/>
+		</g>
+	</g>
+</g>
+</g>
+  <rect x="68" y="214" width="370" height="40" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="253" y="239" font-size="20" fill="#1d4ed8" text-anchor="middle" font-weight="600">daily trend</text>
+  <rect x="68" y="264" width="370" height="40" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="253" y="289" font-size="20" fill="#1d4ed8" text-anchor="middle" font-weight="600">usage per person</text>
+  <rect x="498" y="114" width="402" height="214" rx="14" fill="#ffffff" stroke="#d97706" stroke-width="2.4"/>
+  <rect x="498" y="114" width="402" height="8" rx="4" fill="#d97706"/>
+  <text x="522" y="154" font-size="28" font-weight="700" fill="#b45309">What it costs</text>
+  <text x="522" y="178" font-size="22" font-style="italic" fill="#64748b">tokens, cost</text>
+  <circle cx='862' cy='158' r='20' fill='#d97706' opacity='0.13'/><circle cx='862' cy='158' r='20' fill='none' stroke='#d97706' stroke-width='1.6' opacity='0.35'/><g transform='translate(842.084,138.056) scale(0.55943)'>
+<g id="Layer_1">
+	<g id="File_x2C__general">
+		
+	</g>
+	<g id="Message">
+	</g>
+	<g id="Monitor">
+	</g>
+	<g id="Monitor_running_apps">
+	</g>
+	<g id="Mouse">
+	</g>
+	<g id="Network_card">
+	</g>
+	<g id="Not_allowed">
+	</g>
+	<g id="Performance">
+		<g>
+			<path fill="#d97706" d="M35.6,21.4c-7.8,0-14.2,6.4-14.2,14.2c0,7.8,6.4,14.2,14.2,14.2c7.8,0,14.2-6.4,14.2-14.2
+				C49.8,27.8,43.5,21.4,35.6,21.4z M40.2,35.2c0,2.5-2,4.6-4.6,4.6s-4.6-2-4.6-4.6c0-2.5,2-4.6,4.6-4.6c1.4,0,2.6,0.6,3.4,1.6
+				c0,0,0,0,0,0l8.7-3.4l0.6,1.4l-8.3,4.6C40.2,35,40.2,35.1,40.2,35.2z"/>
+			<path fill="#d97706" d="M35.6,14.6c-11.6,0-21,9.4-21,21c0,11.6,9.4,21,21,21c11.6,0,21-9.4,21-21C56.6,24,47.2,14.6,35.6,14.6z
+				 M35.6,53c-9.6,0-17.3-7.8-17.3-17.3c0-9.6,7.8-17.3,17.3-17.3c9.6,0,17.3,7.8,17.3,17.3C53,45.2,45.2,53,35.6,53z"/>
+		</g>
+	</g>
+</g>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+	<g id="Laptop">
+	</g>
+	<g id="Load_balancer">
+	</g>
+	<g id="Lock_x2C__protected">
+	</g>
+</g>
+<g id="symbols">
+</g>
+<g id="slices">
+</g>
+</g>
+  <rect x="514" y="214" width="370" height="40" rx="9" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+  <text x="699" y="239" font-size="20" fill="#b45309" text-anchor="middle" font-weight="600">estimates carry assumptions</text>
+  <rect x="514" y="264" width="370" height="40" rx="9" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+  <text x="699" y="289" font-size="20" fill="#b45309" text-anchor="middle" font-weight="600">split by model</text>
+  <rect x="944" y="114" width="402" height="214" rx="14" fill="#ffffff" stroke="#059669" stroke-width="2.4"/>
+  <rect x="944" y="114" width="402" height="8" rx="4" fill="#059669"/>
+  <text x="968" y="154" font-size="28" font-weight="700" fill="#047857">Own vs bought</text>
+  <text x="968" y="178" font-size="22" font-style="italic" fill="#64748b">where data stays</text>
+  <circle cx='1308' cy='158' r='20' fill='#059669' opacity='0.13'/><circle cx='1308' cy='158' r='20' fill='none' stroke='#059669' stroke-width='1.6' opacity='0.35'/><g transform='translate(1282.516,135.491) scale(0.57070)'>
+<g id="Layer_1">
+	<g id="File_x2C__general">
+		
+	</g>
+	<g id="Message">
+	</g>
+	<g id="Monitor">
+	</g>
+	<g id="Monitor_running_apps">
+	</g>
+	<g id="Mouse">
+	</g>
+	<g id="Network_card">
+	</g>
+	<g id="Not_allowed">
+	</g>
+	<g id="Performance">
+	</g>
+	<g id="Phone">
+	</g>
+	<g id="Plug_and_play">
+	</g>
+	<g id="Powershell_script_file">
+	</g>
+	<g id="Protocol_stack">
+	</g>
+	<g id="Queue_x2C__general">
+	</g>
+	<g id="RMS_connector">
+	</g>
+	<g id="Router">
+	</g>
+	<g id="Script_file">
+	</g>
+	<g id="Secure_virtual_machine">
+	</g>
+</g>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+	<g id="Laptop">
+	</g>
+	<g id="Load_balancer">
+	</g>
+	<g id="Lock_x2C__protected">
+	</g>
+</g>
+<g id="symbols">
+	<g>
+		<path fill="#059669" d="M52.6,19.1h-16c-1.1,0-2,0.9-2,2v39h20v-39C54.6,20,53.7,19.1,52.6,19.1z M51.6,56.1h-14v-2h14V56.1z
+			 M51.6,52.1h-14v-2h14V52.1z M51.6,27.1h-14v-2h14V27.1z"/>
+	</g>
+</g>
+<g id="slices">
+</g>
+</g>
+  <rect x="960" y="214" width="370" height="40" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="1145" y="239" font-size="20" fill="#047857" text-anchor="middle" font-weight="600">calls per model</text>
+  <rect x="960" y="264" width="370" height="40" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="1145" y="289" font-size="20" fill="#047857" text-anchor="middle" font-weight="600">requests kept in-house</text>
+  <rect x="28" y="374" width="1344" height="322" rx="18" fill="#fbf4ff"/>
+  <circle cx="70" cy="412" r="18" fill="#7c3aed"/>
+  <text x="70" y="419" font-size="26" font-weight="700" fill="#fff" text-anchor="middle">2</text>
+  <text x="100" y="420" font-size="36" font-weight="700" fill="#6d28d9">Hardware, safety</text>
+  <text x="418" y="420" font-size="23" font-style="italic" fill="#7c62b8">the report lists its own problems</text>
+  <rect x="1127" y="393" width="221" height="40" rx="20" fill="#7c3aed"/>
+  <text x="1237" y="421" font-size="22" fill="#fff" text-anchor="middle" font-weight="600">never shows a key</text>
+  <line x1="52" y1="440" x2="1348" y2="440" stroke="#ede9fe" stroke-width="2"/>
+  <rect x="52" y="460" width="402" height="214" rx="14" fill="#ffffff" stroke="#7c3aed" stroke-width="2.4"/>
+  <rect x="52" y="460" width="402" height="8" rx="4" fill="#7c3aed"/>
+  <text x="76" y="500" font-size="28" font-weight="700" fill="#6d28d9">Hardware used</text>
+  <text x="76" y="524" font-size="22" font-style="italic" fill="#64748b">compute utilisation</text>
+  <circle cx='416' cy='504' r='20' fill='#7c3aed' opacity='0.13'/><circle cx='416' cy='504' r='20' fill='none' stroke='#7c3aed' stroke-width='1.6' opacity='0.35'/><g transform='translate(310.674,398.674) scale(0.32373)'>
+<g id="Layer_1">
+</g>
+<g id="Completed_Icons">
+	<g>
+		<path fill="#FFFFFF" d="M354.4,347h-58.5c-2.8,0-5-2.2-5-5v-34.1c0-2.8,2.2-5,5-5h58.5c2.8,0,5,2.2,5,5V342
+			C359.4,344.7,357.1,347,354.4,347z"/>
+	</g>
+	<g>
+		<path fill="#7c3aed" d="M354.4,304.4h-58.5c-1.9,0-3.5,1.6-3.5,3.5V342c0,1.9,1.6,3.5,3.5,3.5h58.5c1.9,0,3.5-1.6,3.5-3.5v-34.1
+			C357.9,306,356.3,304.4,354.4,304.4z M327.1,343.7h-3.9V342h3.9V343.7z M353.5,341.1h-56.8v-32.3h56.8V341.1z"/>
+		<path fill="#7c3aed" d="M328.5,338.2C328.5,338.2,328.4,338.2,328.5,338.2c-0.8,0-1.5-0.5-1.8-1.2l-8.3-18.3l-5.5,12.4
+			c-0.3,0.7-1,1.2-1.8,1.2h-11v-4h9.7l6.7-15.3c0.3-0.7,1-1.2,1.8-1.2h0c0.8,0,1.5,0.5,1.8,1.2l8.5,18.8l6-11c0.4-0.6,1-1,1.8-1
+			h14.1v4h-12.9l-7.4,13.5C329.9,337.8,329.2,338.2,328.5,338.2z"/>
+	</g>
+</g>
+</g>
+  <rect x="68" y="560" width="370" height="40" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="253" y="585" font-size="20" fill="#6d28d9" text-anchor="middle" font-weight="600">node status</text>
+  <rect x="68" y="610" width="370" height="40" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="253" y="635" font-size="20" fill="#6d28d9" text-anchor="middle" font-weight="600">GPU utilisation</text>
+  <rect x="498" y="460" width="402" height="214" rx="14" fill="#ffffff" stroke="#ea580c" stroke-width="2.4"/>
+  <rect x="498" y="460" width="402" height="8" rx="4" fill="#ea580c"/>
+  <text x="522" y="500" font-size="28" font-weight="700" fill="#c2410c">Safe to connect</text>
+  <text x="522" y="524" font-size="22" font-style="italic" fill="#64748b">secret protection check</text>
+  <circle cx='862' cy='504' r='20' fill='#ea580c' opacity='0.13'/><circle cx='862' cy='504' r='20' fill='none' stroke='#ea580c' stroke-width='1.6' opacity='0.35'/><g transform='translate(824.737,475.206) scale(0.09410)'>
+<g id="Layer_1_1_">
+	<g id="File_x2C__general">
+		
+	</g>
+</g>
+<g id="Access_control">
+</g>
+<g id="Azure_active_directory">
+</g>
+<g id="Generic_code">
+</g>
+<g id="Laptop">
+</g>
+<g id="Load_balancer">
+</g>
+<path fill="#ea580c" d="M504.2,272.1h-16.3v-30c0-63.5-40.3-96.1-87.6-96.1h-7.7c-48.1,0-87.6,31.8-87.6,96.1v30h-16.3
+	c-6.9,0-16.3,9.4-16.3,16.3v161.4c0,6.9,9.4,16.3,16.3,16.3h215.4c6.9,0,16.3-9.4,16.3-16.3V288.4
+	C519.6,281.5,510.2,272.1,504.2,272.1z M408,367.4v67h-24v-67c-9.4-4.3-16.3-13.7-16.3-24.9c0-15.5,12.9-28.3,28.3-28.3
+	c15.5,0,28.3,12.9,28.3,28.3C424.3,352.8,417.5,362.2,408,367.4z M457.8,272.1H335.1v-30c0-40.3,21.5-67.8,57.5-67.8h7.7
+	c36.9,0,57.5,27.5,57.5,67.8L457.8,272.1L457.8,272.1z"/>
+<g id="symbols">
+</g>
+<g id="slices">
+</g>
+</g>
+  <rect x="514" y="560" width="370" height="40" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="699" y="585" font-size="20" fill="#c2410c" text-anchor="middle" font-weight="600">where secrets live</text>
+  <rect x="514" y="610" width="370" height="40" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="699" y="635" font-size="20" fill="#c2410c" text-anchor="middle" font-weight="600">who can read them</text>
+  <rect x="944" y="460" width="402" height="214" rx="14" fill="#ffffff" stroke="#db2777" stroke-width="2.4"/>
+  <rect x="944" y="460" width="402" height="8" rx="4" fill="#db2777"/>
+  <text x="968" y="500" font-size="28" font-weight="700" fill="#be185d">System health</text>
+  <text x="968" y="524" font-size="22" font-style="italic" fill="#64748b">its own problems too</text>
+  <circle cx='1308' cy='504' r='20' fill='#db2777' opacity='0.13'/><circle cx='1308' cy='504' r='20' fill='none' stroke='#db2777' stroke-width='1.6' opacity='0.35'/><g transform='translate(1275.818,479.236) scale(0.08127)'>
+<g id="Layer_1_1_">
+	<g id="File_x2C__general">
+		
+	</g>
+</g>
+<g id="paths">
+	<g id="Access_control">
+	</g>
+	<g id="Azure_active_directory">
+	</g>
+	<g id="Generic_code">
+	</g>
+</g>
+<g id="symbols">
+</g>
+<g id="Health_monitoring">
+	<path fill="#db2777" d="M518.9,201.3c-29.2-30.9-88.5-18-122.9,30.9c-43.8-52.4-95.4-61.9-124.6-30.9
+		c-29.2,32.7-21.5,70.5-3.4,101.4l30.1-0.9h15.5l29.2-61c0.9-3.4,13.7-9.5,17.2-8.6c11.2,0,11.2,14.6,12,18.9l0.9,90.2l10.3-30.1
+		c0.9-3.4,3.4-8.6,6.9-8.6l91.9-0.9c4.3,0,5.2,0.9,5.2,5.2c0,4.3,6,19.8,1.7,19.8h-82.5l-25.8,52.4c-2.6,4.3-13.7,5.2-16.3,5.2l0,0
+		c-13.7-1.7-14.6-18.9-15.5-23.2l-0.9-73L335,322.4c-0.9,2.6-4.3,3.4-6.9,4.3h-21.5h-24.1c39.5,52.4,88.5,93.7,111.7,101.4l0,0l0,0
+		l0,0l0,0C428.7,414.4,599.7,288.9,518.9,201.3z"/>
+</g>
+</g>
+  <rect x="960" y="560" width="370" height="40" rx="9" fill="#fce7f3" stroke="#db2777" stroke-width="2"/>
+  <text x="1145" y="585" font-size="20" fill="#be185d" text-anchor="middle" font-weight="600">refusals, fallbacks</text>
+  <rect x="960" y="610" width="370" height="40" rx="9" fill="#fce7f3" stroke="#db2777" stroke-width="2"/>
+  <text x="1145" y="635" font-size="20" fill="#be185d" text-anchor="middle" font-weight="600">budget brake hits</text>
+</svg>

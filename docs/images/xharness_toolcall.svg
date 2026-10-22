@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 428" width="1400" height="428" font-family="Noto Sans TC, Microsoft JhengHei, PingFang TC, sans-serif">
+  <defs><marker id="ar-green" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#059669"/></marker><marker id="ar-grey" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#64748b"/></marker><marker id="ar-orange" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#ea580c"/></marker><marker id="ar-pink" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 1 L11 6 L0 11 z" fill="#db2777"/></marker></defs>
+  <rect width="1400" height="428" fill="#ffffff"/>
+  <rect x="28" y="28" width="1344" height="372" rx="18" fill="#fff7ed"/>
+  <circle cx="70" cy="66" r="18" fill="#ea580c"/>
+  <text x="70" y="73" font-size="26" font-weight="700" fill="#fff" text-anchor="middle">1</text>
+  <text x="100" y="74" font-size="36" font-weight="700" fill="#c2410c">一次工具呼叫的路</text>
+  <text x="398" y="74" font-size="23" font-style="italic" fill="#a15b34">每一步都攔得下來</text>
+  <rect x="1162" y="47" width="186" height="40" rx="20" fill="#ea580c"/>
+  <text x="1255" y="75" font-size="22" fill="#fff" text-anchor="middle" font-weight="600">有副作用先問人</text>
+  <line x1="52" y1="94" x2="1348" y2="94" stroke="#ffedd5" stroke-width="2"/>
+  <rect x="52" y="114" width="179" height="264" rx="14" fill="#ffffff" stroke="#059669" stroke-width="2.4"/>
+  <rect x="52" y="114" width="179" height="8" rx="4" fill="#059669"/>
+  <text x="76" y="154" font-size="28" font-weight="700" fill="#047857">提出</text>
+  <text x="76" y="178" font-size="22" font-style="italic" fill="#64748b">模型要用工具</text>
+  <rect x="68" y="214" width="147" height="40" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="142" y="239" font-size="20" fill="#047857" text-anchor="middle" font-weight="600">tool call</text>
+  <rect x="68" y="264" width="147" height="40" rx="9" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="142" y="289" font-size="20" fill="#047857" text-anchor="middle" font-weight="600">參數驗證</text>
+  <path d="M235 158 L271 158" stroke="#059669" stroke-width="2.6" fill="none" marker-end="url(#ar-green)"/>
+  <rect x="275" y="114" width="179" height="264" rx="14" fill="#ffffff" stroke="#64748b" stroke-width="2.4"/>
+  <rect x="275" y="114" width="179" height="8" rx="4" fill="#64748b"/>
+  <text x="299" y="154" font-size="28" font-weight="700" fill="#334155">過濾</text>
+  <text x="299" y="178" font-size="22" font-style="italic" fill="#64748b">收起不該看的</text>
+  <rect x="291" y="214" width="147" height="40" rx="9" fill="#e2e8f0" stroke="#64748b" stroke-width="2"/>
+  <text x="364" y="239" font-size="20" fill="#334155" text-anchor="middle" font-weight="600">計畫模式</text>
+  <rect x="291" y="264" width="147" height="40" rx="9" fill="#e2e8f0" stroke="#64748b" stroke-width="2"/>
+  <text x="364" y="289" font-size="20" fill="#334155" text-anchor="middle" font-weight="600">角色工具限制</text>
+  <rect x="291" y="314" width="147" height="40" rx="9" fill="#e2e8f0" stroke="#64748b" stroke-width="2"/>
+  <text x="364" y="339" font-size="20" fill="#334155" text-anchor="middle" font-weight="600">斷路器</text>
+  <path d="M458 158 L494 158" stroke="#64748b" stroke-width="2.6" fill="none" marker-end="url(#ar-grey)"/>
+  <rect x="498" y="114" width="179" height="264" rx="14" fill="#ffffff" stroke="#ea580c" stroke-width="2.4"/>
+  <rect x="498" y="114" width="179" height="8" rx="4" fill="#ea580c"/>
+  <text x="522" y="154" font-size="28" font-weight="700" fill="#c2410c">審批</text>
+  <text x="522" y="178" font-size="22" font-style="italic" fill="#64748b">有副作用才問</text>
+  <rect x="514" y="214" width="147" height="40" rx="9" fill="#ea580c"/>
+  <text x="588" y="239" font-size="20" fill="#ffffff" text-anchor="middle" font-weight="600">自動通過</text>
+  <rect x="514" y="264" width="147" height="40" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="588" y="289" font-size="20" fill="#c2410c" text-anchor="middle" font-weight="600">問人</text>
+  <rect x="514" y="314" width="147" height="40" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="588" y="339" font-size="20" fill="#c2410c" text-anchor="middle" font-weight="600">拒絕</text>
+  <path d="M681 158 L717 158" stroke="#ea580c" stroke-width="2.6" fill="none" marker-end="url(#ar-orange)"/>
+  <rect x="721" y="114" width="179" height="264" rx="14" fill="#ffffff" stroke="#ea580c" stroke-width="2.4"/>
+  <rect x="721" y="114" width="179" height="8" rx="4" fill="#ea580c"/>
+  <text x="745" y="154" font-size="28" font-weight="700" fill="#c2410c">沙箱</text>
+  <text x="745" y="178" font-size="22" font-style="italic" fill="#64748b">圈住 bash</text>
+  <rect x="737" y="214" width="147" height="40" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="810" y="239" font-size="20" fill="#c2410c" text-anchor="middle" font-weight="600">Seatbelt</text>
+  <rect x="737" y="264" width="147" height="40" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="810" y="289" font-size="20" fill="#c2410c" text-anchor="middle" font-weight="600">bwrap</text>
+  <rect x="737" y="314" width="147" height="40" rx="9" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="810" y="339" font-size="20" fill="#c2410c" text-anchor="middle" font-weight="600">可斷網</text>
+  <path d="M904 158 L940 158" stroke="#ea580c" stroke-width="2.6" fill="none" marker-end="url(#ar-orange)"/>
+  <rect x="944" y="114" width="179" height="264" rx="14" fill="#ffffff" stroke="#db2777" stroke-width="2.4"/>
+  <rect x="944" y="114" width="179" height="8" rx="4" fill="#db2777"/>
+  <text x="968" y="154" font-size="28" font-weight="700" fill="#be185d">執行</text>
+  <text x="968" y="178" font-size="22" font-style="italic" fill="#64748b">有上限與逾時</text>
+  <rect x="960" y="214" width="147" height="40" rx="9" fill="#fce7f3" stroke="#db2777" stroke-width="2"/>
+  <text x="1034" y="239" font-size="20" fill="#be185d" text-anchor="middle" font-weight="600">輸出上限</text>
+  <rect x="960" y="264" width="147" height="40" rx="9" fill="#fce7f3" stroke="#db2777" stroke-width="2"/>
+  <text x="1034" y="289" font-size="20" fill="#be185d" text-anchor="middle" font-weight="600">逾時重開</text>
+  <path d="M1127 158 L1163 158" stroke="#db2777" stroke-width="2.6" fill="none" marker-end="url(#ar-pink)"/>
+  <rect x="1167" y="114" width="179" height="264" rx="14" fill="#ffffff" stroke="#7c3aed" stroke-width="2.4"/>
+  <rect x="1167" y="114" width="179" height="8" rx="4" fill="#7c3aed"/>
+  <text x="1191" y="154" font-size="28" font-weight="700" fill="#6d28d9">記錄</text>
+  <text x="1191" y="178" font-size="22" font-style="italic" fill="#64748b">只增不改</text>
+  <rect x="1183" y="214" width="147" height="40" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1256" y="239" font-size="20" fill="#6d28d9" text-anchor="middle" font-weight="600">session JSONL</text>
+  <rect x="1183" y="264" width="147" height="40" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1256" y="289" font-size="20" fill="#6d28d9" text-anchor="middle" font-weight="600">稽核</text>
+</svg>

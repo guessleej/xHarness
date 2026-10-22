@@ -2,7 +2,7 @@
 
 English | [中文](architecture.zh.md)
 
-Notes for contributors. The README covers usage; this file covers design.
+Notes for contributors. The [reference](reference.md) covers usage; this file covers design.
 
 ![xHarness architecture](images/xharness_architecture_en.png)
 
