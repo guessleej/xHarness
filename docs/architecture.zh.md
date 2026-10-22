@@ -2,7 +2,7 @@
 
 [English](architecture.md) | 中文
 
-給貢獻者的設計說明。用法見[使用說明](reference.zh.md)；本文講設計。
+給貢獻者的設計說明。設定選項見[設定範例](../xharness.example.zh.toml)；本文講設計。
 
 ![xHarness 架構圖](images/xharness_architecture.png)
 

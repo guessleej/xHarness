@@ -2,7 +2,7 @@
 
 English | [中文](architecture.zh.md)
 
-Notes for contributors. The [reference](reference.md) covers usage; this file covers design.
+Notes for contributors. Every setting is in the [config example](../xharness.example.toml); this file covers design.
 
 ![xHarness architecture](images/xharness_architecture_en.png)
 

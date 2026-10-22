@@ -61,4 +61,4 @@ Five entrances share one core and one approval path; the core is a roughly 150-l
 
 ## More
 
-[Reference (every feature and setting)](docs/reference.md) · [Architecture notes](docs/architecture.md) · [SSDLC](docs/ssdlc.md) · [Security policy](SECURITY.md) · [Changelog](CHANGELOG.md) · MIT licence
+[Config example (every option, commented)](xharness.example.toml) · [Architecture notes](docs/architecture.md) · [SSDLC](docs/ssdlc.md) · [Security policy](SECURITY.md) · [Changelog](CHANGELOG.md) · MIT licence
