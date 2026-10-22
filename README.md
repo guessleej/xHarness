@@ -112,6 +112,11 @@ xharness --resume 2026-08-22-ab12cd34   # 接續 session
 | `goal_done` | 否 | 只在目標模式出現：回報目標完成或卡住 |
 | `lsp` | 否 | 問語言伺服器：定義在哪、所有引用、型別說明、錯誤與警告、檔案大綱 |
 | `workflow` | 是 | 有先後順序的多步驟計畫：用子代理照相依關係執行，沒相依的同時跑 |
+| `list_agents` `send_message` `interrupt_agent` | 否／停止走審批 | 看這段對話有哪些代理在做什麼；傳訊息給另一個代理（下一步開始時讀到）；停掉自己啟動的代理 |
+| `report` | 否 | 只有被別的代理啟動的代理才有：把中途發現回報給啟動它的代理 |
+| `ralph` | 是 | 同一個目標分成幾輪，每輪由全新子代理接手，只看到目標與上一輪交接；進度記在工作目錄的檔案裡 |
+| `session_search` `session_read` | 否 | 搜尋、閱讀這個人自己過去的對話（不是別人的） |
+| `powershell` | 是 | 一次性的 PowerShell 指令；主機上找得到 `pwsh` 才會出現。要保留狀態改用 `terminal` 的 `shell: "powershell"` |
 | `schedule_add` `schedule_list` `schedule_cancel` | 否 | 對話內的提醒：時間到時以新請求交給模型（網頁介面） |
 | `web_search` | 依設定 | 在真瀏覽器開 DuckDuckGo 結果頁，回傳最多 10 筆標題／網址／摘要；`[tools] browser` 設了才有 |
 | `browser_open` | 依設定 | 真瀏覽器開頁、回傳渲染後可見文字（40k 字截斷）；`[tools] browser` 設了才有 |
@@ -406,6 +411,14 @@ max_turns = 20    # 每個子代理的回合上限
 
 子代理與父代理共用工具、模型、telemetry 與 session 記錄（事件標記 `agent` 名稱，`--resume` 只重建主線）；子代理看不到 `subagent` 工具，所以不會無限遞迴；它的每個有副作用動作都經父代理的審批策略——父代理是 `prompt` 模式就仍會問你。
 
+### 背景子代理與代理之間的訊息
+
+`subagent` 加 `background: true` 就不等它：子代理在背景做事（只能讀，不能改任何東西，因為沒有人守在審批畫面前），父代理繼續工作，子代理的中途回報（`report`）與最後答案會以「來自代理 X」的訊息出現在父代理接下來的步驟開頭。同時最多 4 個。`list_agents` 看誰在做什麼，`send_message` 傳話，`interrupt_agent` 停掉自己啟動的代理。訊息單則上限 4,000 字元、每個代理最多排 20 則，內容標示來源是代理而不是使用者。
+
+### ralph：分輪接力
+
+長而可檢查的工作（讓測試全過、把一批檔案改完）交給 `ralph`：每一輪都是全新子代理，只看到不變的目標、第幾輪、以及上一輪的交接；前面做了什麼不靠對話記憶，靠工作目錄裡的檔案、測試與 git。每個子代理最後要寫 `STATUS: complete | continue | blocked` 和 `HANDOFF:`。輪數預設 5、最多 10（`[subagent] ralph_rounds`），結果是 `complete`、`blocked` 或 `budget-limited`。
+
 ## 代理角色、代理管理與討論
 
 ### 代理角色
@@ -487,7 +500,7 @@ dirs = []                 # 其他放角色檔的目錄
 [discussion]
 enabled = true
 max_rounds = 8
-max_tokens = 80000        # 每場討論（含主持人）的 token 上限
+max_tokens = 200000       # 每場討論（含主持人）的 token 上限
 speak_turns = 6           # 每次發言最多幾次模型呼叫（含查資料）
 ```
 

@@ -129,22 +129,36 @@ class Terminals:
         self.shells: dict[str, Shell] = {}
         self._lock = threading.Lock()
 
-    def get(self, agent: str, cwd: str) -> Shell:
+    def get(self, agent: str, cwd: str, kind: str = "bash") -> Any:
         with self._lock:
-            shell = self.shells.get(agent)
+            key = agent if kind == "bash" else f"{agent}:{kind}"
+            shell = self.shells.get(key)
             if shell is None:
-                shell = self.shells[agent] = Shell(cwd, self.sandbox)
+                if kind == "powershell":
+                    from .powershell import PwshShell, find_pwsh
+
+                    exe = find_pwsh()
+                    if exe is None:
+                        raise OSError("PowerShell (pwsh) is not installed here")
+                    shell = PwshShell(exe, cwd, self.sandbox)
+                else:
+                    shell = Shell(cwd, self.sandbox)
+                self.shells[key] = shell
             return shell
 
     def reset(self, agent: str) -> None:
+        """Close every shell this agent has open (bash and PowerShell)."""
         with self._lock:
-            shell = self.shells.pop(agent, None)
-        if shell:
+            keys = [k for k in self.shells if k == agent or k.startswith(agent + ":")]
+            doomed = [self.shells.pop(k) for k in keys]
+        for shell in doomed:
             shell.close()
 
     def shutdown(self) -> None:
-        for name in list(self.shells):
-            self.reset(name)
+        with self._lock:
+            doomed, self.shells = list(self.shells.values()), {}
+        for shell in doomed:
+            shell.close()
 
 
 def terminal_plugin() -> Plugin:
@@ -162,11 +176,16 @@ def terminal_plugin() -> Plugin:
             command = str(args.get("command") or "").strip()
             if not command:
                 return ToolResult("command is required", is_error=True)
-            if not tool_ctx.approve(f"terminal: {command}"):
+            kind = str(args.get("shell") or "bash").lower()
+            if kind in ("pwsh", "ps"):
+                kind = "powershell"
+            if kind not in ("bash", "powershell"):
+                return ToolResult("shell must be \"bash\" or \"powershell\"", is_error=True)
+            if not tool_ctx.approve(f"terminal ({kind}): {command}"):
                 return ToolResult("denied by approval policy", is_error=True)
             timeout = min(float(args.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS), MAX_TIMEOUT_SECONDS)
-            shell = terminals.get(agent, tool_ctx.cwd)
             try:
+                shell = terminals.get(agent, tool_ctx.cwd, kind)
                 output, status, timed_out = shell.run(command, timeout)
             except OSError as error:
                 return ToolResult(f"cannot start the terminal: {error}", is_error=True)
@@ -178,6 +197,10 @@ def terminal_plugin() -> Plugin:
                 return ToolResult(f"{output}\n[exit code {status}] {where}".strip(), is_error=True)
             return ToolResult(f"{output}\n{where}".strip() if output else f"(no output) {where}")
 
+        from .powershell import find_pwsh
+
+        has_pwsh = find_pwsh() is not None      # offered only where it can run
+        powershell_hint = ' shell "powershell" opens a PowerShell instead of bash.' if has_pwsh else ""
         sandboxed = ctx.optional("sandbox")
         confinement = f" It runs under {sandboxed.name}." if sandboxed else ""
         register_tools(ctx, [Tool(
@@ -185,11 +208,13 @@ def terminal_plugin() -> Plugin:
             description=("Run a command in a shell that stays open for this conversation: the directory, "
                          "exported variables and activated environments (cd, export, source .venv/bin/activate) "
                          "carry over to the next call. Commands cannot read keyboard input. Use reset to start "
-                         f"over.{confinement}"),
+                         f"over.{powershell_hint}{confinement}"),
             parameters={"type": "object", "properties": {
                 "command": {"type": "string"},
                 "timeout_seconds": {"type": "number", "description": f"default {DEFAULT_TIMEOUT_SECONDS}, max {MAX_TIMEOUT_SECONDS}"},
                 "reset": {"type": "boolean", "description": "Close the shell first and start a fresh one"},
+                **({"shell": {"type": "string", "enum": ["bash", "powershell"], "description": "bash (default) or powershell"}}
+                   if has_pwsh else {}),
             }},
             execute=run,
             mutating=True,

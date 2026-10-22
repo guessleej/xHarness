@@ -53,7 +53,7 @@ BUILTIN_ROLES = {
 #: What a restricted role (a student, a guest) should not be handed. Tools are
 #: removed from the registry rather than refused at call time, so the model is
 #: never even told they exist.
-SUGGESTED_RESTRICTED_TOOLS = ("bash", "write", "edit", "security_scan", "subagent", "subagent_batch")
+SUGGESTED_RESTRICTED_TOOLS = ("bash", "write", "edit", "security_scan", "subagent", "subagent_batch", "ralph", "powershell")
 
 
 def users_file() -> str:

@@ -18,6 +18,7 @@ max_turns = 40
 # [subagent]
 # max_workers = 4   # parallelism for subagent_batch
 # max_turns = 20    # per-child turn limit
+# ralph_rounds = 5  # ralph: rounds per run (at most 10)
 
 # [memory]
 # enabled = true
@@ -233,7 +234,7 @@ model = "your-model-id"
 # [discussion]
 # enabled = true
 # max_rounds = 8
-# max_tokens = 80000           # per discussion, moderator included
+# max_tokens = 200000          # per discussion, moderator included
 # speak_turns = 6              # model calls per utterance, lookups included
 # join_minutes = 10            # team against team across conversations: how long to wait for joins
 # turn_minutes = 15            # how long to wait for a remote spokesperson

@@ -208,11 +208,14 @@ class LiveAgent:
     #: Set by stop(). Agent.run() clears its own stop flag when it starts, so a
     #: caller that runs the same agent again (a discussion's next turn) checks this.
     stop_wanted: bool = False
+    #: Name of the agent that started this one (a subagent's caller); empty for the rest.
+    parent: str = ""
 
     def public(self) -> dict[str, Any]:
         usage = getattr(self.agent, "total_usage", None)
         tokens = (usage.prompt_tokens + usage.completion_tokens) if usage else 0
-        return {"id": self.id, "name": self.name, "role": self.role, "kind": self.kind, "task": self.task[:200],
+        return {"id": self.id, "name": self.name, "role": self.role, "kind": self.kind, "parent": self.parent,
+                "task": self.task[:200],
                 "room": self.room, "status": self.status, "activity": self.activity[:160],
                 "tokens": tokens, "calls": int(getattr(self.agent, "llm_calls", 0)),
                 "model": getattr(getattr(self.agent, "llm", None), "model", "") or "",
@@ -227,8 +230,9 @@ class LiveAgents:
         self._items: dict[str, LiveAgent] = {}
         self._lock = threading.Lock()
 
-    def start(self, agent: Any, name: str, role: str = "", kind: str = "subagent", task: str = "", room: str = "") -> str:
-        live = LiveAgent(secrets.token_hex(4), name, role, kind, task, agent, room, time.time())
+    def start(self, agent: Any, name: str, role: str = "", kind: str = "subagent", task: str = "", room: str = "",
+              parent: str = "") -> str:
+        live = LiveAgent(secrets.token_hex(4), name, role, kind, task, agent, room, time.time(), parent=parent)
         with self._lock:
             self._items[live.id] = live
             finished = [k for k, v in self._items.items() if v.status != "running"]
@@ -268,6 +272,26 @@ class LiveAgents:
         live.activity = "stopping"
         self._changed()
         return True
+
+    def find(self, who: str) -> LiveAgent | None:
+        """A running agent by name or id (the newest one when a name was reused)."""
+        with self._lock:
+            matches = [v for v in self._items.values() if who in (v.id, v.name)]
+        running = [v for v in matches if v.status == "running"]
+        return (running or matches or [None])[-1]
+
+    def is_descendant(self, name: str, ancestor: str) -> bool:
+        """True when `name` was started by `ancestor`, directly or through other agents."""
+        seen: set[str] = set()
+        while name and name not in seen:
+            seen.add(name)
+            live = self.find(name)
+            if live is None:
+                return False
+            if live.parent == ancestor:
+                return True
+            name = live.parent
+        return False
 
     def stopping(self, live_id: str) -> bool:
         live = self._items.get(live_id)

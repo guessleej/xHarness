@@ -31,7 +31,9 @@ MAX_CHILD_OUTPUT = 20_000
 #: person: a parallel batch would bury them in questions. A child that is missing
 #: something says so in its answer, and the parent can ask.
 CHILD_TOOLS = {"subagent", "subagent_batch", "ask_user", "goal_done", "workflow", "discussion", "discussion_join",
-               "schedule_add", "schedule_list", "schedule_cancel"}
+               "schedule_add", "schedule_list", "schedule_cancel", "ralph", "interrupt_agent"}
+#: Background children running at once, per conversation.
+MAX_BACKGROUND = 4
 
 
 def child_system_prompt(cwd: str, name: str, context: str, model: str | None = None, role: Any = None) -> str:
@@ -72,6 +74,7 @@ def run_child(
     approve_lock: threading.Lock | None = None,
     role: str | None = None,
     kind: str = "subagent",
+    read_only: bool = False,
 ) -> ToolResult:
     found, problem = find_role(ctx, role, tool_ctx.cwd)
     if problem:
@@ -99,7 +102,8 @@ def run_child(
             max_turns=max_turns,
             approval_mode="prompt",
             prompt=approve,
-            exclude_tools=exclusions(ctx.get("tools"), found, CHILD_TOOLS),
+            exclude_tools=exclusions(ctx.get("tools"), found, CHILD_TOOLS | (
+                {t.name for t in ctx.get("tools").list() if t.mutating} if read_only else set())),
             project_instructions=False,
             llm=llm,
             max_tokens=found.max_tokens if found is not None else None,
@@ -107,7 +111,7 @@ def run_child(
         ),
     )
     if live is not None:
-        holder["id"] = live.start(agent, name, found.name if found else "", kind, task)
+        holder["id"] = live.start(agent, name, found.name if found else "", kind, task, parent=tool_ctx.agent)
     ctx.emit("subagent/start", {"name": name, "task": task, "parent": tool_ctx.agent, "role": found.name if found else ""})
     try:
         answer = agent.run(task)
@@ -140,11 +144,50 @@ def subagent_plugin(config: dict[str, Any] | None = None) -> Plugin:
                 counter["n"] += 1
                 return prefix or f"child-{counter['n']}"
 
+        background = {"running": 0}
+
+        def start_background(tool_ctx: ToolContext, task: str, name: str, context: str, max_turns: int,
+                             role: str | None) -> ToolResult:
+            """The child works while the parent carries on; its reports and final answer arrive as messages.
+
+            Read-only: nobody is waiting at an approval prompt for a child the parent has already left."""
+            mail = ctx.optional("agentmail")
+            parent = mail.get(tool_ctx.agent) if mail is not None else None
+            if parent is None:
+                return ToolResult("background is not available here", is_error=True)
+            found, problem = find_role(ctx, role, tool_ctx.cwd)
+            if problem:
+                return ToolResult(problem, is_error=True)
+            with counter_lock:
+                if background["running"] >= MAX_BACKGROUND:
+                    return ToolResult(f"{MAX_BACKGROUND} background agents are already running; wait for one to finish "
+                                      "or stop one with interrupt_agent", is_error=True)
+                background["running"] += 1
+
+            def work() -> None:
+                try:
+                    result = run_child(ctx, tool_ctx, task, name, context, max_turns, None, role, read_only=True)
+                finally:
+                    with counter_lock:
+                        background["running"] -= 1
+                head = "Final answer" if not result.is_error else "Failed"
+                parent.deliver(name, f"{head} of background agent {name} (task: {task[:120]}):\n{result.output}")
+
+            threading.Thread(target=work, name=f"xh-bg-{name}", daemon=True).start()
+            return ToolResult(f"started {name} in the background (read-only). Its reports and final answer arrive as "
+                              "messages from it at the start of your later steps; carry on with other work meanwhile. "
+                              "Do not start it again: if list_agents shows it gone, it has finished and its answer is "
+                              "already on the way. interrupt_agent stops one that is still running.")
+
         def run_one(args: dict[str, Any], tool_ctx: ToolContext) -> ToolResult:
             task = str(args.get("task") or "").strip()
             if not task:
                 return ToolResult("task is required", is_error=True)
             name = next_name(str(args.get("name") or "") or None)
+            if args.get("background"):
+                return start_background(tool_ctx, task, name, str(args.get("context") or ""),
+                                        min(int(args.get("max_turns") or child_max_turns), child_max_turns),
+                                        str(args.get("agent") or "") or None)
             return run_child(
                 ctx,
                 tool_ctx,
@@ -205,6 +248,9 @@ def subagent_plugin(config: dict[str, Any] | None = None) -> Plugin:
                             "name": {"type": "string", "description": "Short label for logs"},
                             "agent": {"type": "string", "description": "Optional agent role to run as (see Agent roles)"},
                             "max_turns": {"type": "number"},
+                            "background": {"type": "boolean", "description": (
+                                "Start it and carry on without waiting. It can only read, not change anything; its "
+                                "reports and final answer reach you as messages. At most 4 at a time.")},
                         },
                         "required": ["task"],
                     },

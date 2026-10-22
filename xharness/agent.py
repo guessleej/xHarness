@@ -37,6 +37,8 @@ REPEAT_WARNINGS = (3, 5, 8)
 #: a hook, granite called it 37 times until the turn limit, ignoring the notes.
 MAX_REFUSALS = 3
 MAX_IDENTICAL_CALLS = 12
+#: Messages from other agents waiting for one agent; a full inbox refuses more.
+MAX_INBOX = 20
 REFUSED_PREFIXES = ("blocked by a hook", "denied by approval policy")
 #: Tool results kept verbatim when the conversation no longer fits the model.
 KEEP_RECENT_TOOL_RESULTS = 2
@@ -311,6 +313,12 @@ class Agent:
         self._refusals: dict[str, int] = {}
         #: Plan mode (see PLAN_CONTEXT): the change tools are hidden until it is switched off.
         self.plan_mode = False
+        #: Messages other agents sent this one (agentcomm.py); read at the start of each turn.
+        self._inbox: list[tuple[str, str]] = []
+        self._inbox_lock = threading.Lock()
+        mail = ctx.optional("agentmail")
+        if mail is not None:
+            mail.add(self)
         if self.options.initial_messages:
             self.messages.extend(self.options.initial_messages)
         if not any(message.get("role") == "system" for message in self.messages):
@@ -401,6 +409,24 @@ class Agent:
         self._system_logged = False
         self._repeat = ("", 0)
 
+    def deliver(self, sender: str, text: str) -> bool:
+        """Queue a message from another agent; False when the inbox is full."""
+        with self._inbox_lock:
+            if len(self._inbox) >= MAX_INBOX:
+                return False
+            self._inbox.append((sender, text))
+        return True
+
+    def _drain_inbox(self, session: SessionLog | None) -> None:
+        with self._inbox_lock:
+            waiting, self._inbox = self._inbox, []
+        for sender, text in waiting:
+            note = f"[Message from agent {sender}]\n{text}"
+            self.messages.append({"role": "user", "content": note, "internal": True})
+            if session:
+                session.append({"type": "message", "role": "user", "content": note, "source": "agent", "internal": True,
+                                **self._tag()})
+
     def stop(self) -> None:
         """Ask a running task to stop before its next model call or tool.
 
@@ -434,6 +460,8 @@ class Agent:
         goal = self.ctx.optional("goal")
         if goal is None or not goal.active:
             hidden.add("goal_done")
+        if self.options.name == "main":
+            hidden.add("report")    # only an agent that someone started has anyone to report to
         return hidden
 
     def _image_context(self, task: str, images: list[str], llm: Any) -> str | None:
@@ -540,6 +568,7 @@ class Agent:
                                     "limit": self.options.max_tokens, **self._tag()})
                 self.ctx.emit("agent/task-end", {"turns": turn, "usage": self.total_usage, "stopped": True})
                 return f"[stopped: this agent used its {self.options.max_tokens:,}-token allowance]"
+            self._drain_inbox(session)
             hidden = self.hidden_tools(registry)
             schemas = [
                 {"name": tool.name, "description": tool.description, "parameters": tool.parameters}

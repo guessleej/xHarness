@@ -26,6 +26,10 @@ from .router import router_plugin
 from .tools.jobs import jobs_plugin
 from .tools.terminal import terminal_plugin
 from .subagent import subagent_plugin
+from .agentcomm import agentcomm_plugin
+from .ralph import ralph_plugin
+from .tools.powershell import powershell_plugin
+from .tools.sessions import sessions_plugin
 from .telemetry import telemetry_plugin
 from .tools import tools_plugin
 from .tools.bash import bash_tool_plugin
@@ -65,6 +69,7 @@ def build_harness(
     harness.use("tool-fs", fs_tools_plugin)
     harness.use("tool-search", search_tools_plugin)
     harness.use("tool-bash", bash_tool_plugin)
+    harness.use("tool-powershell", powershell_plugin())
     if getattr(config, "terminal", True):
         harness.use("terminal", terminal_plugin())
     harness.use("jobs", jobs_plugin(getattr(config, "jobs", None)))
@@ -80,8 +85,11 @@ def build_harness(
         getattr(config, "agents", None), providers=config.providers,
         allowed=tuple(getattr(user, "allowed_providers", ()) or ()),
         describer=str((getattr(config, "vision", None) or {}).get("provider") or "")))
+    harness.use("agentcomm", agentcomm_plugin())
     harness.use("subagent", subagent_plugin(config.subagent))
     harness.use("workflow", workflow_plugin(config.subagent))
+    harness.use("ralph", ralph_plugin(config.subagent))
+    harness.use("tool-sessions", sessions_plugin())
     if (getattr(config, "discussion", None) or {}).get("enabled", True):
         harness.use("discussion", discussion_plugin(config.discussion))
     harness.use("schedule", schedule_plugin())

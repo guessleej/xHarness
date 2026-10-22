@@ -112,6 +112,11 @@ xharness --resume 2026-08-22-ab12cd34   # continue a session
 | `goal_done` | no | Only in goal mode: report the goal done or blocked |
 | `lsp` | no | Ask a language server: definition, references, hover, diagnostics, file outline |
 | `workflow` | yes | A multi-step plan with dependencies, run by subagents in order, independent steps in parallel |
+| `list_agents` `send_message` `interrupt_agent` | no / stop asks approval | See which agents are working in this conversation; send another agent a message (read at the start of its next step); stop an agent you started |
+| `report` | no | Only for an agent that another agent started: send a finding to the agent that started it |
+| `ralph` | yes | One objective in rounds, each by a fresh child that sees only the objective and the last round's handoff; progress lives in files in the working directory |
+| `session_search` `session_read` | no | Search and read the person's own earlier conversations (never anyone else's) |
+| `powershell` | yes | A one-off PowerShell command; present only where `pwsh` is installed. For state that carries over use `terminal` with `shell: "powershell"` |
 | `schedule_add` `schedule_list` `schedule_cancel` | no | Reminders within a conversation, delivered as a new request when due (Web UI) |
 | `web_search` | configurable | Opens the DuckDuckGo results page in a real browser and returns up to 10 results as title / URL / snippet; present only when `[tools] browser` is set |
 | `browser_open` | configurable | Opens a page in a real browser and returns the rendered visible text (truncated at 40k); present only when `[tools] browser` is set |
@@ -431,6 +436,14 @@ max_turns = 20    # per-child turn limit
 
 Children share tools, model, telemetry, and the session log (events tagged with the `agent` name; `--resume` rebuilds only the main line). Children cannot see the `subagent` tools, so there is no unbounded recursion, and every side effect goes through the parent's approval policy — a `prompt`-mode parent still asks you.
 
+### Background subagents and messages between agents
+
+`subagent` with `background: true` does not wait: the child works in the background (read-only -- it cannot change anything, since nobody sits at an approval prompt for it), the parent carries on, and the child's reports (`report`) and final answer arrive as messages "from agent X" at the start of the parent's later steps. At most 4 at a time. `list_agents` shows who is doing what, `send_message` passes a note, `interrupt_agent` stops an agent you started. A message is capped at 4,000 characters, each agent holds at most 20, and they are labelled as coming from an agent, not the person.
+
+### ralph: work in rounds
+
+Hand a long, checkable job (make the tests pass, convert a batch of files) to `ralph`: every round is a fresh child that sees the unchanged objective, which round it is, and the previous round's handoff; what earlier rounds did is not remembered by conversation but kept in the working directory (files, tests, git). Each child ends with `STATUS: complete | continue | blocked` and `HANDOFF:`. Rounds default to 5, at most 10 (`[subagent] ralph_rounds`); the result is `complete`, `blocked` or `budget-limited`.
+
 ## Agent roles, agent management and discussions
 
 ### Agent roles
@@ -512,7 +525,7 @@ dirs = []                 # other directories holding role files
 [discussion]
 enabled = true
 max_rounds = 8
-max_tokens = 80000        # per discussion, moderator included
+max_tokens = 200000       # per discussion, moderator included
 speak_turns = 6           # model calls per utterance, lookups included
 ```
 

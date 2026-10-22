@@ -2,6 +2,34 @@
 
 中文 | English below
 
+## 1.17.0 — 2026-10-22
+
+對照 DeepSeek Harness 補齊剩下的工具，並讓辯論角色能自己上網查證。
+
+- **代理之間的訊息**：`list_agents`（看誰在做什麼）、`send_message`（傳話給另一個代理，下一步開始時讀到）、`report`（被啟動的代理把中途發現回報給啟動它的代理）、`interrupt_agent`（停掉自己啟動的代理；主代理可停全部，走審批）。訊息標示來源是代理而不是使用者，單則 4,000 字元、每個代理最多排 20 則，寫進 session（`agent-message`）；討論參與者不會拿到這些工具。
+- **背景子代理**：`subagent` 加 `background: true`，父代理不用等，子代理的回報與最後答案以訊息送回。背景子代理一律唯讀（沒有人守在審批畫面前）、同時最多 4 個。
+- **ralph**：同一個目標分輪做，每輪全新子代理，只看到目標與上一輪交接，進度記在工作目錄。輪數預設 5、最多 10（`[subagent] ralph_rounds`）；結果為 `complete`／`blocked`／`budget-limited`。
+- **`session_search`／`session_read`**：模型自己查這個人過去的對話；只讀自己的 session，不含目前這段，回傳標示為舊內容、不是指令。
+- **PowerShell**：`powershell` 工具與 `terminal` 的 `shell: "powershell"`（變數、目錄、載入的模組跨指令保留）；主機上找得到 `pwsh` 才會出現。持續 shell 的指令走私有暫存目錄的檔案而非標準輸入，指令讀輸入只會拿到空串流。與 bash 同一套審批與沙箱。
+- **範例角色**：正方、反方、審查員加上 `web_search`、`browser_open`，節點有設瀏覽器時辯論會自己上網查官方公告；沒有就維持依推論論述。已安裝的站台請更新 `.xharness/agents/` 底下的檔案。
+- **討論**：參與者把回合全用在查資料、一句話都沒說時（實測 .27：正方、反方各查了三份官方公告，用完 10 回合，整場 0 次發言、96,021 tokens），現在會再叫它一次，這次收走所有工具、依已查到的資料發言；範例角色的回合上限由 10 改為 16。
+- 每場討論的 token 上限預設由 80,000 提高到 200,000：參與者開始上網查證後，實測 .27 第 1 輪就用掉 80,000（總計 150,000 完成兩輪前的一場）；要更省可在 `[discussion] max_tokens` 調回。
+- `terminal` 只在主機找得到 `pwsh` 時才宣稱支援 PowerShell（實測 .70 沒裝，模型卻回答「有」）。
+- 實測：本機 PowerShell 7.5.1 跑通變數、目錄、結束碼、中文、逾時重開；13 項新測試。
+
+Closing the remaining gaps against DeepSeek Harness, and debate roles that can look things up on the web.
+
+- **Messages between agents**: `list_agents`, `send_message` (read at the start of the receiver's next step), `report` (a started agent tells the agent that started it) and `interrupt_agent` (stop an agent you started; the main agent may stop any, with approval). Messages are labelled as coming from an agent, not the person; 4,000 characters each, 20 waiting per agent, logged to the session (`agent-message`); discussion participants do not get these tools.
+- **Background subagents**: `subagent` with `background: true` returns at once and the child's reports and final answer come back as messages. Background children are read-only (nobody sits at an approval prompt for them) and capped at 4.
+- **ralph**: one objective in rounds, each by a fresh child that sees only the objective and the last handoff, with the working directory holding the progress. 5 rounds by default, at most 10 (`[subagent] ralph_rounds`); result `complete`, `blocked` or `budget-limited`.
+- **`session_search` / `session_read`**: the model looks things up in the person's earlier conversations; own sessions only, never the current one, results labelled as old text and not an instruction.
+- **PowerShell**: a `powershell` tool and `terminal` with `shell: "powershell"` (variables, directory and modules persist); offered only where `pwsh` is found. The open shell takes commands from a file in a private temp directory rather than standard input. Same approval and sandbox as bash.
+- **Example roles**: 正方, 反方 and 審查員 gain `web_search` and `browser_open`, so on a node with a browser configured a debate looks up official notices itself; without one they keep arguing from reasoning. Sites that installed the roles should update the files under `.xharness/agents/`.
+- **Discussion**: a participant that spends every turn looking things up and never speaks (seen on .27: each side read three official notices, used all 10 turns, 0 utterances for 96,021 tokens) is now asked once more with every tool taken away to speak from what it found; the example roles' turn limit goes from 10 to 16.
+- The per-discussion token limit defaults to 200,000 instead of 80,000: once participants look things up on the web, round 1 alone used 80,000 on .27. Lower it with `[discussion] max_tokens` to spend less.
+- `terminal` mentions PowerShell only where `pwsh` is found (on .70, which has none, the model had answered "yes").
+- Tested: PowerShell 7.5.1 locally for variables, directory, exit codes, Chinese text and restart after a timeout; 13 new tests.
+
 ## 1.16.2 — 2026-10-22
 
 - 討論：辯論題目沒有資料可查時（例如「颱風天是否放假」），雙方原本都回「查不到、無法佐證」就停擺。現在提示詞把「事實」和「論點」分開：數字、日期、規定這類事實仍要查到並註明出處，查不到不准編；論點本身可以從原則、推論、利弊與具體情境說理，標明「依推論」，不需要來源。辯論與組對組裡，若某一輪只說查不到資料、沒有表達立場，主持人提醒一次請它直接論述（新的發言取代舊的）。範例角色「正方」「反方」同步改寫；已安裝的站台請自行更新 `.xharness/agents/` 底下的檔案。

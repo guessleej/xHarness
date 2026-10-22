@@ -19,6 +19,7 @@ max_turns = 40
 # [subagent]
 # max_workers = 4   # subagent_batch 平行上限
 # max_turns = 20    # 每個子代理回合上限
+# ralph_rounds = 5  # ralph 每次最多幾輪（上限 10）
 
 # [memory]
 # enabled = true
@@ -228,7 +229,7 @@ model = "your-model-id"
 # [discussion]
 # enabled = true
 # max_rounds = 8               # 每場最多幾輪
-# max_tokens = 80000           # 每場討論（含主持人）的 token 上限
+# max_tokens = 200000          # 每場討論（含主持人）的 token 上限
 # speak_turns = 6              # 每次發言最多幾次模型呼叫（含查資料）
 # join_minutes = 10            # 跨對話的組對組：等其他對話加入的時限
 # turn_minutes = 15            # 等別台代表發言的時限

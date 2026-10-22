@@ -55,6 +55,7 @@ from typing import Any
 from .agent import Agent, AgentOptions
 from .context import Context, Plugin
 from .roles import Role, exclusions
+from .agentcomm import COMM_TOOLS
 from .subagent import CHILD_TOOLS, find_role
 from .telemetry import BudgetExceeded
 from .tools import Tool, ToolContext, ToolResult, register_tools
@@ -66,7 +67,7 @@ MAX_TEAMS = 4
 MAX_TEAM_SEATS = 8            # members across all teams
 DEFAULT_ROUNDS = 3
 MAX_ROUNDS = 8
-DEFAULT_MAX_TOKENS = 80_000
+DEFAULT_MAX_TOKENS = 200_000
 SPEAK_TURNS = 6               # model calls a participant may use for one utterance (tool lookups included)
 MAX_UTTERANCE_CHARS = 4_000
 MAX_OUTPUT = 20_000
@@ -130,6 +131,8 @@ def unsourced(text: str, sources: set[float]) -> list[str]:
             missing.append(shown)
     return missing
 
+WRAP_UP = ("主持人提醒：查資料的回合用完了，不能再用工具。請現在就依你已經查到的資料發言：查到的事實註明出處，"
+           "其餘依推論並標明。直接講你的立場與理由。")
 #: A turn that only says nothing could be found, and so argues nothing.
 NODATA_RE = re.compile(r"查不到|找不到|無法(?:查|找|佐證|驗證|提供|確認|查證)|沒有(?:查到|找到|相關資料|資料)|建議(?:先)?補充")
 NODATA_MAX_CHARS = 400
@@ -295,7 +298,7 @@ class Room:
                 if self.live is not None:
                     self.live.activity(seat.live_id, tool)
 
-            hidden = exclusions(registry, seat.role, CHILD_TOOLS)
+            hidden = exclusions(registry, seat.role, CHILD_TOOLS | COMM_TOOLS)
             seat.can_look = any(tool.name not in hidden for tool in registry.list())
             seat.agent = Agent(self.ctx, AgentOptions(
                 name=f"{self.id}/{seat.name}",
@@ -399,6 +402,14 @@ class Room:
             return None
         try:
             text = runner.run(prompt).strip()
+            if text.startswith("[stopped: max turns") and not (runner.stop_requested or self._stop_wanted(seat)):
+                # Used every turn looking things up and never spoke: one more run with the tools taken away.
+                saved = set(runner.options.exclude_tools)
+                runner.options.exclude_tools = saved | {tool.name for tool in self.ctx.get("tools").list()}
+                try:
+                    text = runner.run(WRAP_UP).strip()
+                finally:
+                    runner.options.exclude_tools = saved
         except BudgetExceeded:
             self.ended = self.ended or "budget"
             return None
