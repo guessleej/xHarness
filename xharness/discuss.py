@@ -130,9 +130,15 @@ def unsourced(text: str, sources: set[float]) -> list[str]:
             missing.append(shown)
     return missing
 
+#: A turn that only says nothing could be found, and so argues nothing.
+NODATA_RE = re.compile(r"查不到|找不到|無法(?:查|找|佐證|驗證|提供|確認|查證)|沒有(?:查到|找到|相關資料|資料)|建議(?:先)?補充")
+NODATA_MAX_CHARS = 400
+
 MODE_RULES = {
     "roundtable": "If you have nothing new to add, reply with exactly 【無補充】 and nothing else.",
-    "debate": "Argue for your side. Answer the other side's strongest point directly; do not change sides.",
+    "debate": ("Argue for your side and answer the other side's strongest point directly; do not change sides. "
+               "Finding no data is not a reason to stop: argue from principle, reasoning and concrete cases, "
+               "and never reply with only that you cannot find or verify something."),
     "review": "",   # set per seat: the author revises, reviewers review
     "free": "If you have nothing new to add, reply with exactly 【無補充】 and nothing else.",
     "teams": "",    # set per seat: see TEAM_RULE / SPOKESPERSON_RULE
@@ -165,6 +171,11 @@ class Seat:
     spokesperson: bool = False
 
 
+def _argues(text: str) -> bool:
+    """True when the turn makes a case as well as noting missing data (long enough to carry reasons)."""
+    return len(NODATA_RE.sub("", text).strip()) > 220
+
+
 def _seat_prompt(seat: Seat, seats: list[Seat], topic: str, mode: str, context: str, author: bool,
                  teams: list[dict[str, Any]] | None = None) -> str:
     others = "、".join(s.name + (f"（{s.stance}）" if s.stance else "") for s in seats if s is not seat)
@@ -194,9 +205,12 @@ def _seat_prompt(seat: Seat, seats: list[Seat], topic: str, mode: str, context: 
         "",
         "Rules:",
         "- Speak for yourself only. Respond to what the others said: agree, disagree with reasons, or add something new.",
-        "- Check facts with your tools before you state them, and say where each fact came from. Never invent figures or sources.",
-        "- Cite only what is in front of you: a file you read, a tool result, or the background you were given. "
-        "Never name a report, table, meeting or document you have not read.",
+        "- Two kinds of statements. A fact (a figure, a date, a rule, what a report says) must come from your tools or "
+        "the background, with its source; never invent figures or sources, and never name a report, table, meeting or "
+        "document you have not read. An argument (reasoning, a principle, a trade-off, a hypothetical case) needs no "
+        "source: state it as your reasoning (「依推論」「假設」), not as a verified fact.",
+        "- If a check finds nothing, say so in one clause and carry on with your argument. Never ask the others or the "
+        "platform to supply data instead of taking part.",
         "- Keep each turn short: a few sentences or a short list. Do not repeat what you already said.",
         f"- {rule}" if rule else "",
         "- Write in the language of the topic, in the same script (Traditional Chinese for a Traditional Chinese topic).",
@@ -347,6 +361,20 @@ class Room:
                 return None
             text, missing = again, unsourced(again, self.sources)
             refs = uncited(again, self.corpus, self.files)
+        if (self.mode in ("debate", "teams") and len(text) <= NODATA_MAX_CHARS and NODATA_RE.search(text)
+                and not _argues(text)):
+            # "No data, so nothing to say" is a stall, not a position: ask once for the argument itself.
+            self._log({"type": "discussion-note", "room": self.id,
+                       "text": f"{seat.name} 只說查不到資料而沒有表達立場，請它依推論論述"})
+            again = self._ask(seat, "主持人提醒：查不到資料不是不論述的理由。你的立場是「" + (seat.stance or seat.team or "指定方") +
+                                    "」，請直接從原則、推論、利弊與具體情境提出你的論點，並回應對方最強的一點。"
+                                    "資料查不到就用一句話帶過，推論性的內容標明「依推論」，不要把推論說成已查證的事實。"
+                                    "新的發言會取代上一段，不要道歉、不要提到上一段。")
+            if again is None:
+                return None
+            text, missing = again, unsourced(again, self.sources)
+            refs = uncited(again, self.corpus, self.files)
+            rechecked = True
         if len(text) > MAX_UTTERANCE_CHARS:
             text = text[:MAX_UTTERANCE_CHARS] + "……（截斷）"
         entry = {"round": round_no, "speaker": seat.name, "role": seat.role.name if seat.role else "",

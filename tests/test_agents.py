@@ -276,6 +276,19 @@ def test_debate_gets_sides_and_a_verdict(tmp_path):
     assert log.of("discussion-end")[0]["reason"] == "rounds" and "正方較有說服力" in out.output
 
 
+def test_a_debater_who_only_says_no_data_is_asked_to_argue(tmp_path):
+    reasons = "依推論：放假保障通勤安全，勞工與學生不必冒險出門，這個代價遠小於停工一天的損失，理由有三。" * 3
+    llm = Router([("You are A,", speaker("查不到相關資料，無法提供資料佐證。", reasons)), ("You are B,", "不應放假"),
+                  ("closing summary", "x")])
+    log = Log()
+    h = build(llm, tmp_path, ("discussion", discussion_plugin()), log=log)
+    run_room(h, tmp_path, topic="颱風天是否放假", mode="debate", participants=[{"name": "A"}, {"name": "B"}], rounds=1)
+    first = log.of("discussion-turn")[0]
+    assert first["speaker"] == "A" and first["text"].startswith("依推論") and first["rechecked"]
+    assert "查不到資料不是不論述的理由" in llm.asked("You are A,")[1]["messages"][-1]["content"]
+    assert "argue from principle" in llm.asked("You are A,")[0]["system"]
+
+
 def test_review_ends_when_every_reviewer_approves(tmp_path):
     llm = Router([("You are 作者,", speaker("初稿", "修正稿")), ("You are 審查,", speaker("第二段數字沒有出處", "【通過】")),
                   ("closing summary", "全數通過")])
@@ -523,7 +536,7 @@ def test_an_invented_source_is_marked_and_passed_on(tmp_path):
     first = log.of("discussion-turn")[0]
     assert first["uncited"] == ["六年制電資系研討會"] and first["unverified"] == []
     assert "「六年制電資系研討會」不在任何查到的資料裡" in llm.asked("You are 乙,")[0]["messages"][-1]["content"]
-    assert "Never name a report" in llm.asked("You are 甲,")[0]["system"]
+    assert "never name a report" in llm.asked("You are 甲,")[0]["system"]
 
 
 def test_reopening_a_live_session_returns_the_live_conversation(tmp_path, monkeypatch):

@@ -2,6 +2,12 @@
 
 中文 | English below
 
+## 1.16.2 — 2026-10-22
+
+- 討論：辯論題目沒有資料可查時（例如「颱風天是否放假」），雙方原本都回「查不到、無法佐證」就停擺。現在提示詞把「事實」和「論點」分開：數字、日期、規定這類事實仍要查到並註明出處，查不到不准編；論點本身可以從原則、推論、利弊與具體情境說理，標明「依推論」，不需要來源。辯論與組對組裡，若某一輪只說查不到資料、沒有表達立場，主持人提醒一次請它直接論述（新的發言取代舊的）。範例角色「正方」「反方」同步改寫；已安裝的站台請自行更新 `.xharness/agents/` 底下的檔案。
+
+- Discussion: a debate on a topic with nothing to look up (say, whether to close for a typhoon) used to stall with both sides answering "no data, cannot verify". The prompt now separates facts from arguments: figures, dates and rules still need a source and are never invented, while reasoning from principle, trade-offs and cases needs none and is labelled as reasoning. In debate and teams, a turn that only says nothing was found gets one moderator nudge to argue its side (the new turn replaces the old one). The example 正方/反方 roles are rewritten to match; sites that installed them should update the files under `.xharness/agents/`.
+
 ## 1.16.1 — 2026-10-22
 
 - 路由：成本與位置都相同時，原本會挑強度較低的模型（沒有省任何東西、只是變差）；現在先選預設模型，再依設定檔順序。成本真的比較低時照樣選便宜的。
