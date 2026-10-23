@@ -70,6 +70,14 @@ MAX_ROUNDS = 8
 DEFAULT_MAX_TOKENS = 200_000
 SPEAK_TURNS = 6               # model calls a participant may use for one utterance (tool lookups included)
 MAX_UTTERANCE_CHARS = 4_000
+#: A tenth of the room's allowance, at most this much, is kept back for the closing summary.
+CLOSE_RESERVE_MAX = 20_000
+#: Chat-template control tokens some local models leak into their text (<|channel>model, <|im_end|>).
+CONTROL_RE = re.compile(r"<\|[^|>\n]{0,40}\|?>[A-Za-z_]*")
+#: A "source" that is the speaker itself or nothing at all: noise, not a citation.
+SELF_CITE_RE = re.compile(r"[（(]\s*(?:資料來源|來源|出處)\s*[：:]\s*(?:無|作者|本人|自己|我方|推論|依推論|none|n/a)\s*[）)]", re.I)
+#: An author turn that only says nothing changed is not a draft.
+NO_REVISION_RE = re.compile(r"無需修訂|不需修改|不需要修改|無需修改|維持原稿|沒有需要修改|no (?:further )?changes", re.I)
 MAX_OUTPUT = 20_000
 PASS_RE = re.compile(r"【\s*無補充\s*】|\[\s*PASS\s*\]", re.IGNORECASE)
 APPROVE_RE = re.compile(r"【\s*通過\s*】|\[\s*APPROVED?\s*\]", re.IGNORECASE)
@@ -154,7 +162,9 @@ SPOKESPERSON_RULE = ("You are your team's spokesperson. In a public turn, speak 
 AUTHOR_RULE = ("You are the author. In your first turn write the piece the topic asks for; afterwards revise it, "
                "address every reviewer comment (accept it and change, or explain why not), and give the full revised version.")
 REVIEWER_RULE = ("You are a reviewer. List concrete problems with the latest version, each with what to change. "
-                 "If nothing needs changing, reply with exactly 【通過】.")
+                 "You may not have the data the author looked up; not finding it yourself is normal and is not a "
+                 "problem. Raise a fact only when it contradicts something you did look up, or when the author gives "
+                 "no source for it. If nothing needs changing, reply with exactly 【通過】 and nothing else, no suggestions.")
 
 
 @dataclass
@@ -172,6 +182,52 @@ class Seat:
     harvested: int = 0      # messages already scanned for tool results
     team: str = ""          # teams mode: the team this seat belongs to
     spokesperson: bool = False
+
+
+def clean_utterance(text: str) -> str:
+    """Drop leaked chat-template tokens and self-citations such as （資料來源：無）."""
+    text = SELF_CITE_RE.sub("", CONTROL_RE.sub("", text or ""))
+    return re.sub(r"[ \t]+\n", "\n", text).strip()
+
+
+CONSENSUS_HEAD = re.compile(r"共識|consensus", re.I)
+NEXT_HEAD = re.compile(r"^\s*(?:\d+[.、]|#+)?\s*(?:分歧|待確認|裁決|審查結果|各組|disagree|open|verdict)", re.I)
+
+
+def tag_one_sided(summary: str, transcript: list[dict[str, Any]]) -> str:
+    """Mark consensus items whose figures or named sources only one participant ever said.
+
+    "Agreed by two or more" written in a prompt does not hold with local models; this checks
+    the summary against the transcript instead."""
+    lines = summary.split("\n")
+    inside = False
+    for index, line in enumerate(lines):
+        if CONSENSUS_HEAD.search(line) and len(line.strip()) < 40:
+            inside = True
+            continue
+        if inside and NEXT_HEAD.match(line):
+            inside = False
+        if not inside or not line.strip():
+            continue
+        marks = [m for m in NUM_RE.findall(line) if len(m.replace(",", "")) >= 2]
+        marks += [(a or b).strip() for a, b in CITE_RE.findall(line) if (a or b).strip()]
+        if not marks:
+            continue
+        speakers = {e["speaker"] for e in transcript if any(m in e["text"] for m in marks)}
+        if len(speakers) == 1:
+            who = next(iter(speakers))
+            lines[index] = line.rstrip() + f"（主持人註記：此點只出現在 {who} 的發言，沒有其他人提到或同意）"
+    return "\n".join(lines)
+
+
+def final_draft(transcript: list[dict[str, Any]], author: str) -> str:
+    """Review mode: the author's last real draft, not a "no changes needed" reply or a short thank-you."""
+    drafts = [e["text"] for e in transcript if e["speaker"] == author and e["text"] != "（沒有發言）"]
+    if not drafts:
+        return ""
+    longest = max(len(t) for t in drafts)
+    real = [t for t in drafts if not (NO_REVISION_RE.search(t) and len(t) < 400) and len(t) >= 0.6 * longest]
+    return (real or drafts)[-1]
 
 
 def _argues(text: str) -> bool:
@@ -251,15 +307,17 @@ class Room:
         self.rounds, self.max_tokens, self.context, self.speak_turns = rounds, max_tokens, context, speak_turns
         self.transcript: list[dict[str, Any]] = []
         self.moderator_tokens = 0
+        #: Kept back from the participants for the closing summary, so a room that runs out still concludes.
+        self.close_reserve = min(CLOSE_RESERVE_MAX, max_tokens // 10)
         self.ended = ""
         self.live = ctx.optional("agents")
         self.session = ctx.optional("session")
         self._approve_lock = threading.Lock()
-        #: Numbers the room can stand on: what it was given and what its tools returned.
+        #: Numbers and sources the room can stand on: the person's topic and background, and what tools
+        #: returned. A participant's brief or role instructions are not evidence: a figure or a document
+        #: named there was never looked up, so citing it would pass unchecked (seen in staffKM's rooms).
         self.sources: set[float] = _values(topic) | _values(context)
-        for seat in seats:
-            self.sources |= _values(seat.brief) | _values(seat.role.prompt if seat.role else "")
-        self.corpus = "\n".join([topic, context] + [s.brief for s in seats])
+        self.corpus = "\n".join([topic, context])
         self.files: set[str] = set()
         self.teams = teams or []
         self.hall: Any = None           # a hall when some teams join from other conversations
@@ -325,7 +383,7 @@ class Room:
         if self._stop_wanted(seat):
             seat.left = "stopped"
             return None
-        if self.tokens() >= self.max_tokens:
+        if self.tokens() >= self.max_tokens - self.close_reserve:
             self.ended = self.ended or "budget"
             return None
         news = [e for e in self.transcript[seat.seen:] if _visible(e, seat)]
@@ -432,6 +490,7 @@ class Room:
                         if isinstance(args, dict) and isinstance(args.get(key), str) and args[key]:
                             self.files.add(args[key].rsplit("/", 1)[-1])
             seat.harvested = len(runner.messages)
+        text = clean_utterance(text) if not text.startswith("[stopped") else text
         if text.startswith("[stopped"):
             stopped = runner.stop_requested or self._stop_wanted(seat)
             seat.left = "stopped" if stopped else text.strip("[]")
@@ -611,7 +670,9 @@ class Room:
         lines = "\n".join(_line(e) for e in self.transcript)
         head = (f"Discussion {self.id} ({MODE_NAMES[self.mode]}): {len(self.transcript)} turns, "
                 f"ended because {END_REASONS.get(self.ended, self.ended)}, {tokens:,} tokens.")
-        out = f"{head}\n\n## Summary\n{summary}\n\n## Transcript\n{lines}"
+        draft = final_draft(self.transcript, self.seats[0].name) if self.mode == "review" and self.seats else ""
+        final = f"\n\n## 定稿\n{draft}" if draft else ""
+        out = f"{head}\n\n## Summary\n{summary}{final}\n\n## Transcript\n{lines}"
         return out[:MAX_OUTPUT] + ("\n[transcript truncated; the full one is in the session log]" if len(out) > MAX_OUTPUT else "")
 
     def _team_rounds(self) -> None:
@@ -679,6 +740,13 @@ class Room:
                 self.ended = "converged"
                 return
             if self.mode == "review":
+                author = self.seats[0].name
+                drafts = [e["text"] for e in self.transcript if e["speaker"] == author]
+                if round_no > 1 and len(drafts) >= 2 and (
+                        " ".join(drafts[-1].split()) == " ".join(drafts[-2].split())
+                        or (NO_REVISION_RE.search(drafts[-1]) and len(drafts[-1]) < 400)):
+                    self.ended = "unchanged"     # another round would only repeat the same reviews
+                    return
                 verdicts = [e for i, e in said if i > 0]
                 if verdicts and all(APPROVE_RE.search(e["text"]) for e in verdicts) \
                         and len(verdicts) == sum(1 for s in self.seats[1:] if not s.left):
@@ -705,6 +773,7 @@ class Room:
         except Exception:  # noqa: BLE001 - the transcript still stands without a summary
             text = ""
         if text:
+            text = tag_one_sided(clean_utterance(text), self.transcript)
             missing = unsourced(text, self.sources)
             if missing:
                 text += f"\n\n（主持人註記：結論中的 {'、'.join(missing)} 在查到的資料裡找不到原文，使用前請查證。）"
@@ -853,7 +922,7 @@ class GuestRoom(Room):
         return out[:MAX_OUTPUT]
 
 
-END_REASONS = {"rounds": "輪數用完", "converged": "整輪都沒有新意見", "approved": "審查者全數通過",
+END_REASONS = {"unchanged": "作者稿沒有再變動", "rounds": "輪數用完", "converged": "整輪都沒有新意見", "approved": "審查者全數通過",
                "moderator": "主持人判斷已有結論", "budget": "token 額度用完", "stopped": "被停止",
                "no-hall": "這裡不能開討論廳（只有網頁介面可以）", "not-enough": "加入的組別不足兩組",
                "host": "討論廳結束", "host-lost": "連不上討論廳"}

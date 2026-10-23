@@ -2,6 +2,24 @@
 
 中文 | English below
 
+## 1.17.1 — 2026-10-24
+
+討論的四個問題，由 staffKM 用 .70 xVITA 跑知識庫討論時回報。
+
+- **參與者的說明不再算證據**：每位參與者的 brief 和角色說明原本會進入可引用的資料，裡面寫到的數字或文件名稱因此不會被標成沒查證。現在只有提出討論的人給的題目與背景、以及工具查到的內容才算。
+- **共識由程式核對**：結論的「共識」各點，若其中的數字或出處只出現在一位參與者的發言裡，會加註「只出現在某某的發言，沒有其他人提到或同意」。原本只靠提示詞要求「兩位以上同意」，地端模型擋不住。
+- **審查形式**：作者稿沒有再變動（或只回「無需修訂」）就提早收場，不再白跑剩下的輪數；輸出另附「定稿」，取作者最後一篇真正的稿子，跳過「無需修訂」與篇幅不到最長一篇六成的致謝回覆；審查者的規則加上「查不到作者用的資料是正常的，不算問題」，沒問題只回【通過】。
+- **結論保留額度**：參與者用到整場 token 上限的九成就停（保留一成、最多 20,000 給主持人），預算用完也一定有結論。
+- 發言會清掉模型漏出的控制記號（`<|channel>model`、`<|im_end|>`）與「（資料來源：無）」「（出處：作者）」這類不是出處的出處。
+
+Four discussion problems, reported by staffKM from knowledge-base discussions on .70 xVITA.
+
+- **A participant's brief is not evidence**: briefs and role instructions used to count as citable material, so a figure or document named there was never flagged as unchecked. Only the person's topic and background, and what tools returned, count now.
+- **Consensus checked by code**: a consensus item whose figure or source appears in only one participant's turns is marked as such. Asking for "two or more agree" in the prompt did not hold with local models.
+- **Review**: the room ends early once the author's draft stops changing (or the author only says nothing needs changing); the output adds a "final draft", the author's last real draft, skipping "no changes" replies and thank-you notes under six tenths of the longest draft; reviewers are told that not finding the author's data is normal, and to reply only 【通過】 when nothing needs changing.
+- **A reserve for the summary**: participants stop at nine tenths of the room's allowance (a tenth, at most 20,000, is kept for the moderator), so a room that runs out still concludes.
+- Turns are cleaned of leaked chat-template tokens and of "sources" that name nothing, such as （資料來源：無）.
+
 ## 1.17.0 — 2026-10-22
 
 對照 DeepSeek Harness 補齊剩下的工具，並讓辯論角色能自己上網查證。

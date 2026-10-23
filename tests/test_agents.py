@@ -753,3 +753,61 @@ def test_a_real_file_in_book_title_marks_is_not_flagged():
     from xharness.discuss import uncited
 
     assert uncited("（資料來源：《招生數據.csv》）", "資料來源：招生數據.csv", set()) == []
+
+
+# --- lessons from staffKM's knowledge-base rooms (2026-10-24) -------------------------
+
+def test_a_participants_brief_is_not_evidence(tmp_path):
+    llm = Router([("You are 甲,", "報到 57 人（出處：招生簡報）"), ("You are 乙,", "同意"), ("closing summary", "x")])
+    log = Log()
+    h = build(llm, tmp_path, ("discussion", discussion_plugin()), log=log)
+    run_room(h, tmp_path, topic="招生怎麼看", rounds=1,
+             participants=[{"name": "甲", "brief": "你知道去年報到 57 人，資料在招生簡報"}, {"name": "乙"}])
+    first = log.of("discussion-turn")[0]
+    assert first["unverified"] == ["57"] and first["uncited"] == ["招生簡報"]
+
+
+def test_consensus_that_only_one_participant_said_is_marked():
+    from xharness.discuss import tag_one_sided
+
+    transcript = [{"speaker": "甲", "text": "報到率 87% 很穩定"}, {"speaker": "乙", "text": "我同意要調整名額"},
+                  {"speaker": "丙", "text": "名額要調整，但 87% 我沒看到"}]
+    summary = "1. 共識：\n- 報到率 87%\n- 名額要調整\n2. 分歧：\n- 甲說 120 人"
+    out = tag_one_sided(summary, transcript)
+    assert "報到率 87%" in out and "此點只出現在" not in out.split("\n")[1]        # 甲 and 丙 both said 87
+    one = tag_one_sided("共識：\n- 每年 120 人報到\n分歧：\n- 甲說 120 人", [{"speaker": "甲", "text": "每年 120 人"},
+                                                                     {"speaker": "乙", "text": "同意"}])
+    lines = one.split("\n")
+    assert "只出現在 甲 的發言" in lines[1] and "只出現在" not in lines[3]          # only consensus lines are checked
+
+
+def test_review_stops_when_the_draft_no_longer_changes_and_returns_the_real_draft(tmp_path):
+    draft = "第一段：說明招生現況與三年趨勢。" * 4
+    llm = Router([("You are 作者,", speaker(draft, "感謝建議，無需修訂。")), ("You are 審查,", "第二段沒有出處"),
+                  ("closing summary", "x")])
+    log = Log()
+    h = build(llm, tmp_path, ("discussion", discussion_plugin()), log=log)
+    out = run_room(h, tmp_path, topic="寫說明", mode="review", participants=["作者", "審查"], rounds=6)
+    assert log.of("discussion-end")[0]["reason"] == "unchanged"
+    assert len(log.of("discussion-turn")) == 4                          # two rounds, not six
+    assert "## 定稿\n" + draft in out.output                              # the thank-you is not the final draft
+    assert "not finding it yourself is normal" in llm.asked("You are 審查,")[0]["system"]
+
+
+def test_control_tokens_and_self_citations_are_cleaned():
+    from xharness.discuss import clean_utterance
+
+    assert clean_utterance("<|channel>model 我方認為應放假。（資料來源：無）") == "我方認為應放假。"
+    assert clean_utterance("結論如下<|im_end|>") == "結論如下"
+    assert clean_utterance("依推論如此（出處：作者）") == "依推論如此"
+    assert clean_utterance("（資料來源：勞動部公告）") == "（資料來源：勞動部公告）"       # a real source stays
+
+
+def test_the_closing_summary_keeps_a_reserve(tmp_path):
+    llm = Router([("You are", "說話"), ("closing summary", "結論")], tokens=500)
+    log = Log()
+    h = build(llm, tmp_path, ("discussion", discussion_plugin({"max_tokens": 10_000})), log=log)
+    run_room(h, tmp_path, topic="t", participants=["甲", "乙"], rounds=20)
+    end = log.of("discussion-end")[0]
+    assert end["reason"] == "budget" and end["summary"] == "結論"
+    assert end["turns"] == 9            # participants stop at 9,000 (10,000 less a tenth), 1,000 a turn
