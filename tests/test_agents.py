@@ -526,6 +526,15 @@ def test_invented_sources_are_found():
     assert uncited("出自表格「近年報到狀況」", corpus, files) == ["近年報到狀況"]
     assert uncited("（資料來源：背景資訊）（資料來源：招生數據.csv 的報到人數欄）出自「報到人數」欄", corpus, files) == []
     assert uncited("（資料來源：招生數據.csv、評鑑報告）", corpus, files) == ["評鑑報告"]
+    # a name with its own brackets, or with 與／及／和 in it, is one source when the whole name is known
+    known = "差旅報支與請假規定（示範）.md\n人事規章（示範）：年假 7 天"
+    assert uncited("（出處：人事規章（示範））", known, set()) == []
+    assert uncited("（出處：人事規章（正式版））", known, set()) == ["人事規章（正式版）"]
+    assert uncited("（出處：差旅報支與請假規定（示範））", known, set()) == []
+    assert uncited("（出處：差旅報支與請假規定（示範））", "", {"差旅報支與請假規定（示範）.md"}) == []
+    assert uncited("（出處：差旅報支與出國規定）", known, set()) == ["出國規定"]
+    assert uncited("（出處：人事規章（示範）、教育部年報）", known, set()) == ["教育部年報"]
+    assert uncited("（出處：會議紀要（甲與乙）、人事規章（示範））", known, set()) == ["會議紀要（甲與乙）"]
 
 
 def test_an_invented_source_is_marked_and_passed_on(tmp_path):

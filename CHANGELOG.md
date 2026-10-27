@@ -2,6 +2,11 @@
 
 中文 | English below
 
+## Unreleased
+
+- **出處名稱裡的括號與「與」**：「（出處：人事規章（示範））」原本在文件名自己的右括號就截斷，變成「人事規章（示範」；「差旅報支與請假規定」會被當成「差旅報支」「請假規定」兩個出處。現在名稱的括號成對讀完；整段名稱先和查到的資料、讀過的檔名比對，比不到才在括號外依「、，與及和」拆開逐段比。（staffKM 回報）
+- **Brackets and 與 inside a source name**: a name with its own brackets was cut at the first close bracket, and a title containing 與／及／和 was split into several sources. Names are now read with brackets balanced; the whole name is matched against what was found and the files read first, and only split (outside brackets) when it is not found.
+
 ## 1.17.1 — 2026-10-24
 
 討論的四個問題，由 staffKM 用 .70 xVITA 跑知識庫討論時回報。
