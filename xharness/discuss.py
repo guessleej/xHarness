@@ -96,26 +96,106 @@ def _values(text: str) -> set[float]:
     return found
 
 
-CITE_RE = re.compile(r"(?:資料來源|來源|出處)\s*[：:]\s*([^）)\n]{1,80})"
+#: "出處：" only marks where a citation starts; cites() reads the name with brackets balanced,
+#: so 「人事規章（示範）」 is not cut at its own close bracket.
+CITE_RE = re.compile(r"(?:資料來源|來源|出處)\s*[：:]\s*"
                      r"|(?:出自|根據|依據|參考|引用|參閱)\s*(?:表格|報告|文件|資料|會議|欄位|檔案)?\s*[「《『]([^」》』]{1,60})[」》』]")
-CITE_SPLIT = re.compile(r"[、，,；;/]|與|及|和")
+CITE_SEPS = "、，,；;/與及和"
+OPEN, CLOSE = "（(", "）)"
+QUOTES = "「」『』《》〈〉\"'。. "
 #: Citations that point at what the room was given rather than naming a document.
 GENERIC_CITES = ("背景", "資料檔", "工具", "查詢", "紀錄", "上述", "前述", "對方", "發言", "題目", "討論")
 CITE_TRIM = re.compile(r"^(?:表格|報告|文件|檔案|資料)|(?:欄位|欄|表格|表|資料|檔案|檔)$")
 
 
+def _depth(s: str) -> int:
+    return sum(ch in OPEN for ch in s) - sum(ch in CLOSE for ch in s)
+
+
+def cites(text: str) -> list[tuple[str, str]]:
+    """(whole, quoted) for each citation: `whole` is what follows "出處：" up to the newline or
+    the close bracket that ends the enclosing "（出處：…）"; brackets inside the name are kept."""
+    text = text or ""
+    found: list[tuple[str, str]] = []
+    for m in CITE_RE.finditer(text):
+        if m.group(1):
+            found.append(("", m.group(1)))
+            continue
+        depth, end = 0, m.end()
+        while end < len(text) and end - m.end() < 80 and text[end] != "\n":
+            if text[end] in OPEN:
+                depth += 1
+            elif text[end] in CLOSE:
+                if depth == 0:
+                    break
+                depth -= 1
+            end += 1
+        if end > m.end():
+            found.append((text[m.end():end], ""))
+    return found
+
+
+def _split(whole: str) -> list[str]:
+    """Split on the separators outside brackets: 「甲（A與B）、乙」 → 甲（A與B）, 乙."""
+    parts, depth, start = [], 0, 0
+    for i, ch in enumerate(whole):
+        depth += (ch in OPEN) - (ch in CLOSE)
+        if depth <= 0 and ch in CITE_SEPS:
+            parts.append(whole[start:i])
+            start = i + 1
+    return parts + [whole[start:]]
+
+
+def _wrapped(s: str) -> bool:
+    """True when s[0] is an open bracket whose partner is the last character."""
+    depth = 0
+    for i, ch in enumerate(s):
+        depth += (ch in OPEN) - (ch in CLOSE)
+        if depth == 0:
+            return i == len(s) - 1
+    return False
+
+
+def _clean(part: str) -> str:
+    """Strip quotes and the brackets that wrap the whole name or have no partner;
+    「人事規章（示範）」 keeps its own brackets."""
+    name = part.strip().strip(QUOTES)
+    while name:
+        if name[0] in OPEN and _wrapped(name):
+            name = name[1:-1]
+        elif name[0] in OPEN and _depth(name) > 0:
+            name = name[1:]
+        elif name[-1] in CLOSE and _depth(name) < 0:
+            name = name[:-1]
+        else:
+            break
+        name = name.strip().strip(QUOTES)
+    return name
+
+
+def _known(name: str, corpus: str, files: set[str], whole: bool = False) -> bool:
+    """A part also counts when it names a file read (「招生數據.csv 的報到人數欄」); the whole
+    citation does not, or 「招生數據.csv、評鑑報告」 would pass on the file alone."""
+    core = CITE_TRIM.sub("", name) or name
+    if name in corpus or core in corpus or any(f and name in f for f in files):
+        return True
+    return not whole and any(f and f in name for f in files)
+
+
 def uncited(text: str, corpus: str, files: set[str]) -> list[str]:
-    """Named sources in `text` that are none of: the background, a file read, or text a tool returned."""
+    """Named sources in `text` that are none of: the background, a file read, or text a tool returned.
+    The whole citation is matched first, so a title containing 與／及／和 is not split apart;
+    only when the whole is unknown is it split into several sources."""
     missing: list[str] = []
-    for whole, quoted in CITE_RE.findall(text or ""):
-        for part in ([quoted] if quoted else CITE_SPLIT.split(whole)):
-            name = part.strip().strip("「」『』《》〈〉\"'()（）。. ")
+    for whole, quoted in cites(text):
+        whole_name = _clean(quoted or whole)
+        if len(whole_name) >= 2 and _known(whole_name, corpus, files, whole=True):
+            continue
+        for part in ([quoted] if quoted else _split(whole)):
+            name = _clean(part)
             if len(name) < 2 or any(word in name for word in GENERIC_CITES):
                 continue
-            if any(f and f in name for f in files):
-                continue
-            core = CITE_TRIM.sub("", name) or name
-            if name in corpus or core in corpus:
+            if _known(name, corpus, files):
                 continue
             if name not in missing:
                 missing.append(name)
@@ -210,7 +290,7 @@ def tag_one_sided(summary: str, transcript: list[dict[str, Any]]) -> str:
         if not inside or not line.strip():
             continue
         marks = [m for m in NUM_RE.findall(line) if len(m.replace(",", "")) >= 2]
-        marks += [(a or b).strip() for a, b in CITE_RE.findall(line) if (a or b).strip()]
+        marks += [(a or b).strip() for a, b in cites(line) if (a or b).strip()]
         if not marks:
             continue
         speakers = {e["speaker"] for e in transcript if any(m in e["text"] for m in marks)}
