@@ -48,6 +48,14 @@ Five entrances share one core and one approval path; the core is a roughly 150-l
 
 ![Service usage report](docs/images/xharness_report_en.png)
 
+## Notification channels
+
+When a task finishes, fails or waits for an approval, a message goes to Telegram, LINE or Microsoft Teams. An admin adds them on the web page, Admin > Notification channels, which walks through getting each key; saving checks the key with the service, then stores it AES-256-GCM encrypted (needs `pip install 'xharness[secure]'`).
+
+- **Telegram** works both ways: authorised people give the node tasks from their phone, and approvals for tasks started on the web arrive with Allow and Deny buttons. A newcomer sends the bot one message; the admin presses Authorise on the page.
+- **LINE and Teams** only notify. Talking back would need a public HTTPS address, which a node on an internal network does not have. By default they carry the title and a link, not the answer; carrying the answer is a per-channel tick, and the security check page lists the channels that have it.
+- Each channel picks its events, and "task finished" can wait for a minimum duration, so a four-second answer does not buzz a phone.
+
 ## Built-in tools
 
 | Group | Tools |

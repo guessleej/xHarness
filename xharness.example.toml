@@ -59,6 +59,8 @@ model = "your-model-id"
 # browser_approval = true              # false waives approval for those two (the browser is on the node's own machine)
 
 # Telegram channel (starts with `xharness web`): tasks from your phone, approvals as buttons, /api/notify pushes.
+# Prefer the web page, Admin > Notification channels (Telegram, LINE and Teams, keys stored
+# encrypted); once a Telegram bot is saved there, this section is no longer used.
 # Keep the token in a file (chmod 600), never here; an empty allowed_chats refuses to start.
 # [channels.telegram]
 # token_file = "~/.xharness/telegram-token"

@@ -176,8 +176,11 @@ def test_every_enter_to_send_field_is_ime_safe():
     script = INDEX_HTML.split("<script>")[2]
     composer = script.split("// composer: IME-safe Enter", 1)[1].split("function autosize", 1)[0]
     assert "compositionstart" in composer and "isComposing" in composer and "keyCode===229" in composer
-    users = script.split("the user-add form submits on Enter", 1)[1][:600]
-    assert "compositionstart" in users and "isComposing" in users and "keyCode===229" in users
+    guard = script.split("function imeGuard(fields){", 1)[1][:500]
+    assert "compositionstart" in guard and "isComposing" in guard and "keyCode===229" in guard
+    # every form that submits on Enter goes through it: accounts, and the notification channel form
+    assert "imeGuard(['#usr-name','#usr-display','#usr-pass']" in script
+    assert "imeGuard([name,secret,mins])" in script
 
 
 def test_side_panels_float_and_start_closed():

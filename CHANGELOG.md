@@ -2,6 +2,30 @@
 
 中文 | English below
 
+## 未發布
+
+通知頻道：管理者在網頁上設定 Telegram、LINE、Microsoft Teams，任務完成、失敗或等人核准時發訊息。
+
+- **「管理 > 通知頻道」**：新增、編輯、停用、刪除、測試發送。每種頻道附取得金鑰的步驟；存檔時先向該服務驗證（Telegram `getMe`、LINE `bot/info`），卡片上看得到機器人或官方帳號名稱、最近一次送出成功與否（台北時間）。
+- **金鑰加密保存**：機器人權杖、LINE 權杖、Teams 網址以 AES-256-GCM 加密存在 `channels.json`（`enc:v1:` 前綴，0600），金鑰另存 `channels.key`（0600），也可掛 `/run/secrets/xharness_channels_key`。任何 API 都不回傳已存的金鑰。需要 `cryptography`，缺少時頁面直接說明修法、不開放新增。新增選用相依 `xharness[secure]`。
+- **Telegram 改由網頁管理**：網頁存的機器人優先於設定檔的 `[channels.telegram]`，改完立即重掛、不必重新啟動。沒授權的人傳訊息給機器人，機器人照樣不回，但管理頁會列出他（只記名稱與 chat id，不記內容），按「授權」即可。設定檔裡現有的機器人可一鍵「搬到網頁管理」。
+- **網頁任務的核准送到 Telegram**：需要核准時，授權的 chat 收到「允許／拒絕」按鈕，按了就生效。
+- **LINE、Teams 只通知**，預設不附回覆內容（只送標題、節點、耗時與網頁連結）；要附內容須逐一勾選。Teams 只接受 Microsoft 的 webhook 主機（logic.azure.com、powerplatform.com、webhook.office.com），表單無法用來打內網位址。
+- **事件與門檻**：每個頻道選任務完成、任務失敗、需要核准、其他系統推送（`/api/notify`）；「任務完成」可設最短秒數（預設 30 秒）。從 Telegram 下的任務不會再收到一份重複通知。
+- **遮罩補洞**：錯誤訊息與記錄裡的 Telegram 權杖（`/bot123:AA…`）與 Teams 網址的 `sig=` 原本不會被遮，現在會。
+- 機密防護檢查頁加四項（頻道金鑰是否加密、兩個檔案的權限、哪些頻道會把內容送出本機）；服務使用報告的對外串接改列「通知頻道」；新增、修改、刪除、測試、授權都寫進存取稽核。
+
+Notification channels: an admin sets up Telegram, LINE and Microsoft Teams on the web page, and a message goes out when a task finishes, fails or waits for an approval.
+
+- **Admin > Notification channels**: add, edit, disable, delete, send a test. Each kind comes with the steps for getting its key; saving checks the key with the service first (Telegram `getMe`, LINE `bot/info`), and the card shows the bot or official account and whether the last message got through (Taipei time).
+- **Keys stored encrypted**: bot token, LINE token and Teams URL are AES-256-GCM encrypted in `channels.json` (`enc:v1:` prefix, 0600), with the key in `channels.key` (0600) or mounted at `/run/secrets/xharness_channels_key`. No API returns a stored key. Needs `cryptography`; without it the page says how to fix it and adding is disabled. New optional extra `xharness[secure]`.
+- **Telegram managed on the page**: a bot saved there wins over `[channels.telegram]` and is remounted at once, no restart. Someone not yet authorised who messages the bot still gets no reply, but the page lists them (name and chat id, never the text) with an Authorise button. A bot already in the config file moves to the page with one click.
+- **Approvals for web tasks go to Telegram** as Allow and Deny buttons in the authorised chats.
+- **LINE and Teams only notify**, and by default carry no answer text (title, node, duration and a link); carrying it is a per-channel tick. Teams only accepts Microsoft webhook hosts (logic.azure.com, powerplatform.com, webhook.office.com), so the form cannot be pointed at an internal address.
+- **Events and threshold**: each channel picks task finished, task failed, approval needed and pushes from other systems (`/api/notify`); "task finished" has a minimum duration (30 s by default). Tasks given from Telegram are not notified a second time.
+- **Masking gap closed**: a Telegram token in a URL (`/bot123:AA…`) and a Teams `sig=` were not masked in errors and logs; now they are.
+- The security check page gains four items (channel keys encrypted, both files' permissions, which channels send content off the machine); the usage report lists "notification channels" under outbound connections; saving, editing, deleting, testing and authorising are written to the access audit.
+
 ## 1.17.1 — 2026-10-24
 
 討論的四個問題，由 staffKM 用 .70 xVITA 跑知識庫討論時回報。

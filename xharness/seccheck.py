@@ -99,6 +99,49 @@ def _routing_items(config: Any) -> list[dict[str, str]]:
     return items
 
 
+def _channel_items() -> list[dict[str, str]]:
+    """Notification channels saved on the web page: encrypted, private files, and what leaves the machine."""
+    from .channels import KEY_SECRET_PATH, PREFIX, TYPES, crypto_available, key_file, load_saved
+
+    saved = load_saved()
+    if not saved:
+        return []
+    items = []
+    plain = [str(c.get("name")) for c in saved if not str(c.get("secret") or "").startswith(PREFIX)]
+    items.append(_item(
+        "channels-encrypted", "通知頻道的金鑰加密保存", FAIL if plain else PASS,
+        f"{'、'.join(plain)} 的金鑰沒有加密。" if plain else f"{len(saved)} 個頻道的金鑰都以 AES-256-GCM 加密保存。",
+        "到「管理 > 通知頻道」編輯該頻道，重新貼一次金鑰。" if plain else "",
+    ))
+    if not crypto_available():
+        items.append(_item(
+            "channels-crypto", "通知頻道無法解密", FAIL,
+            "這台伺服器缺少加密套件，已存的頻道解不開，不會發出任何通知。",
+            "pip install cryptography 後重新啟動 xharness。",
+        ))
+    from .channels import channels_file
+    for key, label, path in (("channels-file", "通知頻道設定檔權限", channels_file()),
+                             ("channels-key", "通知頻道加密金鑰檔權限", key_file()),
+                             ("channels-key-secret", "通知頻道加密金鑰（掛載）權限", KEY_SECRET_PATH)):
+        exposed = _group_or_world_readable(path)
+        if exposed is None:
+            continue
+        items.append(_item(
+            key, label, FAIL if exposed else PASS,
+            f"{path} {'其他使用者讀得到' if exposed else '只有擁有者讀得到（0600）'}。",
+            f"chmod 600 {path}" if exposed else "",
+        ))
+    outside = [f"{c.get('name')}（{TYPES.get(str(c.get('type')), c.get('type'))}）" for c in saved
+               if c.get("enabled", True) and c.get("include_text") and c.get("type") != "telegram"]
+    items.append(_item(
+        "channels-content", "通知是否把回覆內容送出這台機器", WARN if outside else PASS,
+        f"{'、'.join(outside)} 會附上回覆內容，內容會經過該服務的伺服器。" if outside
+        else "LINE 與 Teams 頻道只送標題與連結，回覆內容留在本機。",
+        "公務或含個資的內容，到「管理 > 通知頻道」取消勾選「附上回覆內容」。" if outside else "",
+    ))
+    return items
+
+
 def run(config: Any, *, bound_host: str | None = None, has_token: bool = False, users: Any = None) -> dict[str, Any]:
     """Every check, against the live configuration. Read-only."""
     items: list[dict[str, str]] = []
@@ -196,6 +239,8 @@ def run(config: Any, *, bound_host: str | None = None, has_token: bool = False, 
             "token 直接寫在設定檔裡。" if inline else "token 來自檔案或環境變數，沒有進設定檔。",
             "改用 token_file 或 token_env。" if inline else "",
         ))
+
+    items += _channel_items()
 
     # --- 4. network exposure ----------------------------------------------
     loopback = bound_host in (None, "127.0.0.1", "localhost", "::1", "[::1]")

@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import threading
+import time
 import urllib.request
 from typing import Any, Callable
 
@@ -37,7 +38,10 @@ Api = Callable[[str, dict[str, Any]], Any]
 
 
 def load_token(settings: dict[str, Any]) -> str:
-    """`token_file` first (chmod 600), then `token_env`; the token is never put in the config itself."""
+    """`token` (decrypted from the web-managed store), then `token_file` (chmod 600), then `token_env`;
+    the token is never put in the config itself."""
+    if settings.get("token"):
+        return str(settings["token"]).strip()
     path = settings.get("token_file")
     if path:
         with open(os.path.expanduser(str(path)), encoding="utf-8") as handle:
@@ -101,7 +105,11 @@ class TelegramBridge:
     ) -> None:
         self.app = app
         self.allowed = {int(chat) for chat in settings.get("allowed_chats") or []}
-        if not self.allowed:
+        #: A bot saved on the web page may start with nobody allowed: whoever messages it
+        #: is listed on the page for an admin to authorise (and still gets no reply).
+        self.pairing = bool(settings.get("pairing"))
+        self.strangers: dict[int, dict[str, Any]] = {}
+        if not self.allowed and not self.pairing:
             raise RuntimeError("telegram: allowed_chats is empty; list the chat ids that may talk to this node")
         self.api = api or make_api(load_token(settings))
         self.cwd = cwd or os.getcwd()
@@ -152,6 +160,8 @@ class TelegramBridge:
         message = update.get("message") or {}
         chat = int((message.get("chat") or {}).get("id", 0))
         text = str(message.get("text") or "").strip()
+        if chat and chat not in self.allowed and self.pairing:
+            self._remember(chat, message)
         if chat not in self.allowed or not text:
             return  # silently: the bot must not confirm its existence to strangers
         if text.startswith("/"):
@@ -171,6 +181,18 @@ class TelegramBridge:
             self.send(chat, "上一個任務還在跑；先 /stop 或等它結束。")
             return
         threading.Thread(target=self._relay, args=(chat, conv), name=f"xharness-telegram-{chat}", daemon=True).start()
+
+    def _remember(self, chat: int, message: dict[str, Any]) -> None:
+        """Who knocked, for the pairing list; never what they wrote."""
+        info = message.get("chat") or {}
+        sender = message.get("from") or {}
+        name = " ".join(str(part) for part in (info.get("title") or sender.get("first_name"),
+                                                 sender.get("last_name")) if part)
+        with self.lock:
+            self.strangers[chat] = {"chat": chat, "name": name[:60], "username": str(sender.get("username") or "")[:40],
+                                    "kind": str(info.get("type") or ""), "at": time.time()}
+            for old in sorted(self.strangers, key=lambda c: self.strangers[c]["at"])[:-20]:
+                self.strangers.pop(old, None)
 
     def _command(self, chat: int, text: str) -> None:
         command = text.split()[0].split("@")[0].lower()
@@ -199,6 +221,7 @@ class TelegramBridge:
             conv = self.chats.get(chat)
             if conv is None:
                 conv = self.app.create(extra_system=CHAT_GUIDANCE)
+                conv.channel = "telegram"  # its chat already sees every step; no extra notifications
                 self.chats[chat] = conv
             return conv
 
@@ -312,6 +335,21 @@ class TelegramBridge:
                 return
 
     # ----- outbound -----
+
+    def offer_approval(self, chat: int, conv: Any, approval_id: str, text: str) -> bool:
+        """Ask in this chat about an approval from a web conversation, with Allow/Deny buttons."""
+        if chat not in self.allowed:
+            return False
+        self.pending[approval_id] = (chat, conv.id)
+        self.api("sendMessage", {
+            "chat_id": chat,
+            "text": text[:MESSAGE_LIMIT],
+            "reply_markup": {"inline_keyboard": [[
+                {"text": "允許", "callback_data": f"allow:{approval_id}"},
+                {"text": "拒絕", "callback_data": f"deny:{approval_id}"},
+            ]]},
+        })
+        return True
 
     def send(self, chat: int, text: str) -> None:
         for part in split_message(text):

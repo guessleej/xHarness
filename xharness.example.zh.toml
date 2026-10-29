@@ -60,6 +60,8 @@ model = "your-model-id"
 # browser_approval = true              # false 讓這兩個工具不走審批（瀏覽器已在節點自己的機器上）
 
 # Telegram 通道（隨 `xharness web` 啟動）：手機下任務、按鈕審批、接收 /api/notify 推播。
+# 建議改在網頁「管理 > 通知頻道」設定（Telegram、LINE、Teams 都在那裡，金鑰加密保存）；
+# 網頁上存了 Telegram 之後，這一段就不再使用。
 # token 放檔案（chmod 600），不要寫進這裡；allowed_chats 留空會拒絕啟動。
 # [channels.telegram]
 # token_file = "~/.xharness/telegram-token"

@@ -34,7 +34,8 @@ xharness = "xharness.cli:main"
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 desktop = ["pywebview>=6"]
-build = ["pywebview>=6", "pyinstaller>=6.16"]
+secure = ["cryptography>=42"]
+build = ["pywebview>=6", "pyinstaller>=6.16", "cryptography>=42"]
 
 [tool.setuptools.packages.find]
 include = ["xharness*"]

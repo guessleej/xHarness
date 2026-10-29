@@ -341,8 +341,7 @@ def _outbound_posture(config: Any, users: UserStore | None) -> dict[str, Any]:
          "detail": "地端 camofox，不經第三方搜尋 API", "safe": True},
         {"name": "MCP 外部工具", "state": "on" if getattr(config, "mcp_servers", None) else "off",
          "detail": f"{len(getattr(config, 'mcp_servers', None) or {})} 個 server，未標唯讀者一律走審批", "safe": True},
-        {"name": "Telegram 通道", "state": "on" if (getattr(config, "channels", {}) or {}).get("telegram") else "off",
-         "detail": "只服務 allowed_chats 名單", "safe": True},
+        _channels_row(config),
         {"name": "沙箱", "state": f"{mode}（{active}）" if active else f"{mode}（無後端）",
          "detail": sandbox_detail, "safe": bool(active)},
         {"name": "使用者身分", "state": "on" if (users and users.enabled) else "off",
@@ -350,6 +349,20 @@ def _outbound_posture(config: Any, users: UserStore | None) -> dict[str, Any]:
         {"name": "遙測外傳", "state": "off", "detail": "xHarness 不對外回傳任何使用資料", "safe": True},
     ]
     return {"items": items, "unsafe": [item["name"] for item in items if not item["safe"]]}
+
+
+def _channels_row(config: Any) -> dict[str, Any]:
+    from .channels import TYPES, load_saved
+
+    saved = [c for c in load_saved() if c.get("enabled", True)]
+    config_bot = bool((getattr(config, "channels", {}) or {}).get("telegram")) and not any(
+        c.get("type") == "telegram" for c in load_saved())
+    kinds = "、".join(sorted({TYPES.get(str(c.get("type")), str(c.get("type"))) for c in saved}))
+    outside = [str(c.get("name")) for c in saved if c.get("include_text") and c.get("type") != "telegram"]
+    count = len(saved) + (1 if config_bot else 0)
+    detail = (f"{count} 個（{kinds or 'Telegram'}）；Telegram 只服務已授權的對象，金鑰加密保存"
+              + (f"；{'、'.join(outside)} 會把回覆內容送到外部服務" if outside else "") if count else "未設定")
+    return {"name": "通知頻道", "state": "on" if count else "off", "detail": detail, "safe": not outside}
 
 
 def _machines(config: Any, nodes: list[dict[str, Any]] | None, totals: dict[str, int]) -> dict[str, Any]:

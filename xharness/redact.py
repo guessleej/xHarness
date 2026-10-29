@@ -27,8 +27,8 @@ SECRET_KEYS = re.compile(
 PATTERNS = (
     # Authorization: Bearer <token>
     re.compile(r"(Bearer\s+)([A-Za-z0-9._~+/=-]{8,})"),
-    # ?api_key=... / &token=... in a URL
-    re.compile(r"([?&](?:api[-_]?key|key|token|access_token|password)=)([^&\s\"']{4,})", re.IGNORECASE),
+    # ?api_key=... / &token=... in a URL; sig= signs a Teams workflow webhook
+    re.compile(r"([?&](?:api[-_]?key|key|token|access_token|password|sig)=)([^&\s\"']{4,})", re.IGNORECASE),
     # .env style: OPENAI_API_KEY=..., DB_PASSWORD="..." (upper-case names only,
     # so prose such as "max_tokens=16384" is left alone)
     re.compile(r"\b([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)\s*=\s*[\"']?)([^\s\"']{6,})"),
@@ -36,6 +36,8 @@ PATTERNS = (
     # The body includes - and _: modern keys carry them, and stopping at the
     # first dash used to mask "sk-proj" and print the actual secret after it.
     re.compile(r"\b((?:sk|pk|rk)-[A-Za-z0-9_-]{8,}|hf_[A-Za-z0-9_]{8,}|gh[pousr]_[A-Za-z0-9_]{8,})"),
+    # Telegram bot token, which the Bot API puts in the URL path: /bot123456:AA...
+    re.compile(r"(\bbot\d{5,15}:)([A-Za-z0-9_-]{20,})"),
     # user:password@host
     re.compile(r"(://[^:/\s]+:)([^@/\s]{3,})(?=@)"),
 )

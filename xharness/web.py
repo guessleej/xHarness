@@ -50,7 +50,8 @@ from .hall import HallRegistry
 from .vision import describer_from_config, save_images
 from .session import (SessionLog, clean_title, export_markdown, messages_from_events, search_sessions,
                       session_summary, sessions_dir)
-from .telegram import TelegramBridge, telegram_settings
+from .telegram import TelegramBridge, load_token, telegram_settings
+from .channels import EVENTS as CHANNEL_EVENTS, TYPES as CHANNEL_TYPES, ChannelError, ChannelHub, crypto_available
 from .telemetry import BudgetExceeded
 
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
@@ -191,6 +192,8 @@ class Conversation:
         self.provider = ""
         #: How the person reached this server (scheme://host:port), for hall invites.
         self.origin = ""
+        #: "telegram" when a Telegram chat drives it: that chat already sees every step.
+        self.channel = ""
 
     def push(self, event: dict[str, Any]) -> None:
         with self.cond:
@@ -281,6 +284,10 @@ class WebApp:
         self.halls = HallRegistry()
         self.nodes = {node.name: node for node in load_nodes(config.fleet)}
         self.telegram: TelegramBridge | None = None
+        self._telegram_lock = threading.Lock()
+        self.channels = ChannelHub()
+        self.channels.on_telegram_change = self._mount_telegram
+        self.channels.telegram_offer = self._offer_approval
         self.users = UserStore(getattr(config, "auth", {}) or {})
         self.file_rules = workspace.FileRules.from_config(getattr(config, "files", None))
         #: Recorded for the security self-check, which has to know how we are exposed.
@@ -321,16 +328,92 @@ class WebApp:
         threading.Thread(target=loop, name="xharness-reminders", daemon=True).start()
 
     def start_channels(self) -> None:
-        """Mount the channels named in [channels.*]; a bad channel config is fatal on purpose."""
-        settings = telegram_settings(self.config)
-        if settings:
-            self.telegram = TelegramBridge(self, settings)
-            self.telegram.start()
-            print(f"telegram channel on for {len(self.telegram.allowed)} chat(s)", file=sys.stderr)
+        """Mount the Telegram bot: the one saved on the web page wins over [channels.telegram].
+
+        A bad [channels.telegram] in the config file is fatal on purpose; a bad saved
+        channel is only logged, since an admin can fix it on the page.
+        """
+        if self.channels.telegram() is None:
+            settings = telegram_settings(self.config)
+            if settings:
+                self.telegram = TelegramBridge(self, settings)
+                self.telegram.start()
+                print(f"telegram channel on for {len(self.telegram.allowed)} chat(s)", file=sys.stderr)
+            return
+        self._mount_telegram()
+
+    def _mount_telegram(self) -> None:
+        """(Re)start the bridge from the saved channel; called again after every edit to it."""
+        with self._telegram_lock:
+            old, self.telegram = self.telegram, None
+            if old is not None:
+                old.stop()
+            try:
+                settings = self.channels.telegram_settings()
+            except ChannelError as error:
+                print(f"[xharness] telegram channel not mounted: {error}", file=sys.stderr)
+                return
+            if not settings:
+                return
+            bridge = TelegramBridge(self, {**settings, "pairing": True})
+            if old is not None:   # keep the chats' conversations and any pairing requests
+                bridge.chats, bridge.strangers = old.chats, old.strangers
+            bridge.start()
+            self.telegram = bridge
+            print(f"telegram channel (web) on for {len(bridge.allowed)} chat(s)", file=sys.stderr)
+
+    def _offer_approval(self, chat: int, conv: Any, approval_id: str, text: str) -> bool:
+        bridge = self.telegram
+        return bool(bridge) and bridge.offer_approval(chat, conv, approval_id, text)
 
     def notify(self, text: str, chats: list[int] | None = None) -> int:
-        """Push a message out every mounted channel; returns recipients reached."""
-        return self.telegram.notify(text, chats) if self.telegram else 0
+        """Push a message from another system; returns chats plus channels reached.
+
+        With `chats`, only those Telegram chats of the mounted bot; otherwise every
+        channel that asked for "external" (and the config-file bot's chats, if that
+        is the bot in use).
+        """
+        bridge = self.telegram
+        if chats is not None:
+            return bridge.notify(text, chats) if bridge else 0
+        reached = bridge.notify(text) if bridge and self.channels.telegram() is None else 0
+        return reached + self.channels.dispatch("external", "xHarness 通知", text, wait=True)
+
+    def channel_overview(self) -> dict[str, Any]:
+        """The notification page: saved channels (never their secrets) and who asked to pair."""
+        config_bot = telegram_settings(self.config)
+        bridge = self.telegram
+        strangers = ([s for s in sorted(bridge.strangers.values(), key=lambda s: -s["at"]) if s["chat"] not in bridge.allowed]
+                     if bridge is not None and bridge.pairing else [])
+        return {
+            "available": crypto_available(),
+            "types": CHANNEL_TYPES,
+            "events": CHANNEL_EVENTS,
+            "channels": self.channels.list_public(),
+            "config_telegram": ({"chats": len(config_bot.get("allowed_chats") or [])}
+                                if config_bot and self.channels.telegram() is None else None),
+            "telegram_running": bridge is not None,
+            "strangers": strangers,
+        }
+
+    def announce(self, conv: Conversation, event: str, detail: str, approval_id: str | None = None) -> int:
+        """Tell the notification channels that a task finished, failed or is waiting for a person."""
+        seconds = time.time() - conv.started_at if conv.started_at else None
+        head = {"done": "任務完成", "error": "任務失敗", "approval": "需要你核准"}[event]
+        subject = conv.title or conv.preview or "對話"
+        lines = ["・".join(part for part in (f"節點 {self.node_name}", conv.user or "",
+                                                f"{int(seconds)} 秒" if seconds is not None else "") if part)]
+        url = self.host_url(conv)
+        if url:
+            lines.append(("到網頁核准：" if event == "approval" else "網頁：") + url)
+        try:
+            return self.channels.dispatch(event, f"{head}：{subject[:60]}", "\n".join(lines),
+                                          detail=scrub(detail).strip()[:800] or "（沒有文字）", seconds=seconds,
+                                          skip_telegram=conv.channel == "telegram",
+                                          approval=(conv, approval_id) if approval_id else None)
+        except Exception as error:  # noqa: BLE001 - a notification must never break the task
+            print(f"[xharness] notification failed: {scrub(error)}", file=sys.stderr)
+            return 0
 
     def create(
         self,
@@ -395,6 +478,7 @@ class WebApp:
             approval = Approval(summary=summary)
             conv.approvals[approval_id] = approval
             conv.push({"type": "approval_request", "id": approval_id, "call": calls["current"], "summary": summary})
+            self.announce(conv, "approval", summary, approval_id)
             approval.event.wait(APPROVAL_TIMEOUT_SECONDS)
             decision = bool(approval.decision)
             conv.push({"type": "approval_resolved", "id": approval_id, "allowed": decision})
@@ -535,6 +619,7 @@ class WebApp:
                     extra = "\n\n".join(part for part in (note, attached) if part) or None
                     answer = conv.agent.run(text, extra_context=extra, images=(images or []) + pictures)
                 conv.push({"type": "done", "answer": answer, "usage": conv.usage(), "turn": turn})
+                self.announce(conv, "done", answer)
                 if not conv.title and (getattr(self.config, "sessions", None) or {}).get("auto_title", True):
                     self._name(conv, text)
             except Exception as error:  # noqa: BLE001 - surfaced to the browser
@@ -542,6 +627,7 @@ class WebApp:
                 # is exactly where a token would be.
                 detail = scrub(f"{type(error).__name__}: {error}")
                 conv.push({"type": "error", "message": detail, "usage": conv.usage()})
+                self.announce(conv, "error", detail)
                 session = conv.harness.ctx.optional("session")
                 if session:
                     kind = "budget-stop" if isinstance(error, BudgetExceeded) else "error"
@@ -1101,6 +1187,11 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
             if parts[1:] == ["files"]:
                 self._json(200, app.files(self.principal))
                 return
+            if parts[1:] == ["channels"]:
+                if not self._admin_only():
+                    return
+                self._json(200, app.channel_overview())
+                return
             if parts[1:] == ["access-audit"]:
                 if not self._admin_only():
                     return
@@ -1213,6 +1304,11 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 if not self._admin_only():
                     return
                 self._manage_user(body)
+                return
+            if parts[1:] == ["channels"]:
+                if not self._admin_only():
+                    return
+                self._manage_channel(body)
                 return
             if parts[1:] == ["files"]:
                 name = str(body.get("name") or "")
@@ -1391,6 +1487,53 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 self._json(400, {"error": str(error)})
                 return
             self._json(400, {"error": "action must be add, password or disable"})
+
+        def _manage_channel(self, body: dict[str, Any]) -> None:
+            action = str(body.get("action") or "")
+            channel_id = str(body.get("id") or "")
+            who = principal_name(self.principal) or "operator"
+            hub = app.channels
+            try:
+                if action == "save":
+                    form = body.get("channel") if isinstance(body.get("channel"), dict) else {}
+                    saved = hub.save({**form, "id": channel_id}, who)
+                    app.users.audit("channel-save", who, True, f"{saved['type']} {saved['name']}")
+                    self._json(200, saved)
+                    return
+                if action in ("enable", "disable"):
+                    saved = hub.set_enabled(channel_id, action == "enable")
+                    app.users.audit(f"channel-{action}", who, True, f"{saved['type']} {saved['name']}")
+                    self._json(200, saved)
+                    return
+                if action == "delete":
+                    gone = hub.get(channel_id)
+                    ok = hub.delete(channel_id)
+                    app.users.audit("channel-delete", who, ok, f"{gone['type']} {gone.get('name')}" if gone else channel_id)
+                    self._json(200 if ok else 404, {"ok": ok})
+                    return
+                if action == "test":
+                    ok, detail = hub.test(channel_id)
+                    app.users.audit("channel-test", who, ok, detail)
+                    self._json(200, {"ok": ok, "detail": detail})
+                    return
+                if action == "authorize":
+                    saved = hub.add_target(channel_id, str(body.get("chat") or ""))
+                    app.users.audit("channel-authorize", who, True, f"telegram chat {body.get('chat')}")
+                    self._json(200, saved)
+                    return
+                if action == "import":
+                    settings = telegram_settings(app.config)
+                    if not settings or hub.telegram() is not None:
+                        raise ChannelError("沒有可搬入的設定檔 Telegram，或網頁上已經有一個。")
+                    saved = hub.import_config(settings, load_token(settings), who)
+                    app.users.audit("channel-import", who, True, "telegram from config file")
+                    self._json(200, saved)
+                    return
+            except (ChannelError, RuntimeError, OSError) as error:
+                app.users.audit(f"channel-{action or 'unknown'}", who, False, str(error))
+                self._json(400, {"error": scrub(error)})
+                return
+            self._json(400, {"error": "action must be save, enable, disable, delete, test, authorize or import"})
 
     return Handler
 
@@ -1633,7 +1776,8 @@ body:not(.landing) .landing{display:none}
 
 /* messages */
 .m-user{display:flex;justify-content:flex-end;margin:20px 0 14px;animation:rise .35s var(--ease)}
-.m-user .bubble{max-width:82%;background:var(--surface-3);border-radius:18px 18px 6px 18px;padding:10px 15px;white-space:pre-wrap;word-break:break-word;font-size:15px}
+.m-user>div{max-width:82%;display:flex;flex-direction:column;align-items:flex-end}
+.m-user .bubble{max-width:100%;background:var(--surface-3);border-radius:18px 18px 6px 18px;padding:10px 15px;white-space:pre-wrap;word-break:break-word;font-size:15px}
 .m-ai{margin:14px 0;font-size:15px;line-height:1.75;word-break:break-word;animation:rise .35s var(--ease)}
 .m-ai>:first-child{margin-top:0}.m-ai>:last-child{margin-bottom:0}
 .m-ai p{margin:.5em 0}
@@ -1952,6 +2096,36 @@ body:not(.view-admin) #admin{display:none}
 .uform select.field{flex:0 0 140px}
 .err{font-size:13.5px;color:var(--brand);min-height:20px;margin:4px 0}
 .admseg{display:inline-flex;margin:0}
+.chgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.chgrid .empty{grid-column:1/-1}
+.chcard{background:var(--surface);border-radius:16px;padding:16px 18px;box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:7px}
+.chcard.off{opacity:.72}
+.chcard .hd{display:flex;align-items:center;gap:8px}
+.chcard h3{margin:0;font-size:16px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chcard .ln{font-size:13.5px;color:var(--ink-2);word-break:break-word}
+.chcard .ln.bad{color:var(--brand)}
+.chcard .acts,.chform .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.chform .acts{justify-content:flex-end;margin-top:10px}
+.chpair{background:var(--surface-2);border-radius:12px;padding:10px 12px;font-size:13.5px;color:var(--ink-2);display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.chpair .chprow{display:flex;align-items:center;gap:8px;width:100%}
+.chcheck .bd .btn{margin-top:10px}
+.chform{background:var(--surface);border-radius:18px;padding:18px 20px;box-shadow:var(--shadow-sm);margin-top:14px}
+.chform h3{margin:0 0 4px;font-size:17px}
+.chtypes{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin:10px 0 14px}
+.chtype{text-align:left;border:0;cursor:pointer;background:var(--surface-2);border-radius:14px;padding:12px 14px;font:inherit;color:var(--ink);transition:background .2s,transform .15s}
+.chtype:hover:not(:disabled){transform:translateY(-1px)}
+.chtype:disabled{cursor:not-allowed;opacity:.6}
+.chtype b{display:block;font-size:15px;margin-bottom:2px}.chtype span{font-size:13px;color:var(--ink-2)}
+.chtype.on{background:var(--tint-2);box-shadow:var(--shadow-xs)}
+.chhow{margin:0 0 16px;padding:12px 16px 12px 34px;background:var(--surface-2);border-radius:12px;font-size:13.5px;color:var(--ink-2);line-height:1.75}
+.chrow{display:grid;grid-template-columns:150px 1fr;gap:6px 14px;align-items:start;margin-bottom:12px}
+.chrow>label{font-size:13.5px;font-weight:700;color:var(--ink-2);padding-top:9px}
+.chrow .field{width:100%;box-sizing:border-box}
+.chrow .chhint{font-size:12.5px;color:var(--ink-3);margin-top:4px;line-height:1.6}
+.chevents{display:flex;gap:6px 16px;flex-wrap:wrap;padding-top:8px;font-size:14px}
+.chevents label,.chinc{display:flex;align-items:center;gap:6px;font-size:14px;padding-top:8px}
+.chevents label{padding-top:0}
+textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size:13px}
 
 /* ---- sign-in gate: a dark full page, there is nothing behind it ------------- */
 .gate{position:fixed;inset:0;z-index:90;display:none;place-items:center;background:var(--hero);padding:16px;isolation:isolate;overflow:hidden}
@@ -2003,7 +2177,8 @@ body:not(.view-admin) #admin{display:none}
   .lgrid{grid-template-columns:1fr}
   .page-in{padding:16px 14px 32px}
   .page-head h1{font-size:22px}
-  .m-user .bubble{max-width:92%}
+  .chrow{grid-template-columns:1fr}.chrow>label{padding-top:0}
+  .m-user>div{max-width:92%}
   .modepill{display:none}
   .tbl{display:block;overflow-x:auto;white-space:nowrap}
   .chk{flex-direction:column;gap:8px}
@@ -2186,12 +2361,13 @@ body:not(.view-admin) #admin{display:none}
 
     <section class="page" id="admin">
       <div class="page-in">
-        <div class="page-head"><div><h1>管理</h1><p>只有管理者看得到：這台機器的資安狀態、全體用量與帳號。</p></div>
+        <div class="page-head"><div><h1>管理</h1><p>只有管理者看得到：這台機器的資安狀態、全體用量、帳號與通知頻道。</p></div>
           <span class="grow"></span>
           <div class="seg admseg" id="adm-seg">
             <button class="on" data-adm="sec">機密防護檢查</button>
             <button data-adm="rep">服務使用報告</button>
             <button data-adm="usr">帳號</button>
+            <button data-adm="ch">通知頻道</button>
           </div></div>
 
         <div id="adm-sec">
@@ -2223,6 +2399,14 @@ body:not(.view-admin) #admin{display:none}
           </form>
           <div class="err" id="usr-err"></div>
           <div id="usr-list"></div>
+        </div>
+
+        <div id="adm-ch" hidden>
+          <div class="sect"><h2>通知頻道</h2><span class="m">任務完成、失敗或等你核准時，傳訊息到手機或群組。金鑰加密保存，存好之後本頁不再顯示。</span>
+            <span class="grow"></span><button class="btn sm primary" id="ch-add">新增頻道</button></div>
+          <div id="ch-alerts"></div>
+          <div class="chgrid" id="ch-list"></div>
+          <div class="chform" id="ch-form" hidden></div>
         </div>
       </div>
     </section>
@@ -3397,11 +3581,12 @@ body:not(.view-admin) #admin{display:none}
   // --- admin ------------------------------------------------------
   let repSince='30d';
   function admShow(which){
-    ['sec','rep','usr'].forEach(k=>{$('#adm-'+k).hidden=(k!==which);});
+    ['sec','rep','usr','ch'].forEach(k=>{$('#adm-'+k).hidden=(k!==which);});
     document.querySelectorAll('[data-adm]').forEach(b=>b.classList.toggle('on',b.dataset.adm===which));
     if(which==='sec')loadSecurity();
     if(which==='rep')loadReport();
     if(which==='usr')loadUsers();
+    if(which==='ch')loadChannels();
   }
   document.querySelectorAll('[data-adm]').forEach(b=>{b.onclick=()=>admShow(b.dataset.adm);});
   const VERDICT={pass:'通過',warn:'有建議事項',fail:'有必須修正的項目'};
@@ -3488,12 +3673,187 @@ body:not(.view-admin) #admin{display:none}
       loadUsers();toast('已新增 '+name);
     }catch(err){$('#usr-err').textContent=err.message;}
   });
-  // the user-add form submits on Enter; an IME confirming a candidate must not
-  ['#usr-name','#usr-display','#usr-pass'].forEach(sel=>{
-    let busy=false;const f=$(sel);
-    f.addEventListener('compositionstart',()=>{busy=true;});f.addEventListener('compositionend',()=>{busy=false;});
-    f.addEventListener('keydown',e=>{if(e.key==='Enter'&&(busy||e.isComposing||e.keyCode===229))e.preventDefault();});
-  });
+  // forms submit on Enter; an IME confirming a candidate must not
+  function imeGuard(fields){
+    fields.forEach(f=>{
+      let busy=false;
+      f.addEventListener('compositionstart',()=>{busy=true;});f.addEventListener('compositionend',()=>{busy=false;});
+      f.addEventListener('keydown',e=>{if(e.key==='Enter'&&(busy||e.isComposing||e.keyCode===229))e.preventDefault();});
+    });
+  }
+  imeGuard(['#usr-name','#usr-display','#usr-pass'].map(sel=>$(sel)));
+
+  // --- notification channels ------------------------------------------
+  // Loaded when the tab opens and after each action; nothing polls, so nothing redraws under the reader.
+  let chData=null,chEditing=null;
+  const CH_HOW={
+    telegram:['在 Telegram 搜尋 @BotFather，傳 /newbot，照指示取名字，最後會拿到一串權杖（像 123456789:AAH…）。',
+      '把權杖貼到下面，按「新增並驗證」。',
+      '在 Telegram 搜尋你的機器人，傳任何一句話給它；回到本頁按「重新整理」，在卡片上按「授權」。'],
+    line:['到 LINE Developers（developers.line.biz）建立 Provider，再建立一個 Messaging API channel，會一併建立 LINE 官方帳號。',
+      '在 channel 的「Messaging API」分頁最下方按 Issue，複製 Channel access token（長效）。',
+      '在「Basic settings」分頁最下方複製 Your user ID（U 開頭），再用手機掃 Messaging API 分頁的 QR code，把官方帳號加為好友。'],
+    teams:['在 Teams 要收通知的頻道，按頻道名稱旁的「…」，選「工作流程」。',
+      '選「收到 webhook 要求時張貼在頻道」，確認團隊與頻道後建立。',
+      '複製它給的網址貼到下面。這個網址等同密碼，拿到的人就能往頻道發訊息，請勿外流。']
+  };
+  const CH_SECRET={telegram:'機器人權杖',line:'Channel access token',teams:'Webhook 網址'};
+  const CH_DESC={telegram:'雙向：手機上直接下指令、按按鈕核准。',line:'只通知：用 LINE 官方帳號推播給你。',teams:'只通知：發到 Teams 頻道，團隊一起看。'};
+  const CH_ACCOUNT={telegram:'機器人 ',line:'官方帳號 ',teams:'Teams '};
+  function fmtTaipei(t){return new Date(t*1000).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false,month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})+'（台北時間）';}
+  async function loadChannels(){
+    try{chData=await api('/api/channels');}catch(e){$('#ch-list').textContent='讀取失敗：'+e.message;return;}
+    renderChannels();
+  }
+  async function chAct(body,done){
+    try{await api('/api/channels',{method:'POST',body});toast(done);}catch(e){toast(e.message,true);}
+    await loadChannels();
+  }
+  function renderChannels(){
+    const d=chData,alerts=$('#ch-alerts'),list=$('#ch-list');alerts.textContent='';list.textContent='';
+    $('#ch-add').disabled=!d.available;
+    if(!d.available)alerts.appendChild(checkRow('fail','必修','這台伺服器缺少加密套件','沒有它就無法安全保存金鑰，所以先不開放新增頻道。',
+      '修法：在執行 xharness 的環境執行 pip install cryptography，然後重新啟動 xharness。'));
+    if(d.config_telegram){
+      const row=checkRow('warn','建議','Telegram 機器人目前寫在設定檔裡',
+        '它照常運作（'+d.config_telegram.chats+' 個對象），但在網頁上看不到也改不了。搬進來之後由本頁管理，權杖改為加密保存。','');
+      row.classList.add('chcheck');
+      const b=h('button','btn sm primary','搬到網頁管理');b.onclick=()=>chAct({action:'import'},'已搬入，之後在本頁管理');
+      row.querySelector('.bd').appendChild(b);alerts.appendChild(row);
+    }
+    if(!d.channels.length){
+      const e=h('div','empty');
+      e.append(h('b',null,'還沒有通知頻道'),document.createTextNode('按「新增頻道」選 Telegram、LINE 或 Teams；存好後按「測試發送」確認收得到。'));
+      list.appendChild(e);
+    }
+    d.channels.forEach(c=>list.appendChild(channelCard(c)));
+  }
+  function channelCard(c){
+    const card=h('div','chcard'+(c.enabled?'':' off')),hd=h('div','hd');
+    hd.append(h('span','pill',c.type_label),h('h3',null,c.name),h('span','pill '+(c.enabled?'idle':'skipped'),c.enabled?'啟用中':'已停用'));
+    card.appendChild(hd);
+    card.appendChild(h('div','ln',CH_ACCOUNT[c.type]+(c.account||'')));
+    if(c.type!=='teams'){
+      const t=c.targets||[];
+      card.appendChild(h('div','ln','對象：'+(t.length?t.map(x=>c.type==='line'?x.slice(0,5)+'…'+x.slice(-4):x).join('、'):'尚未授權任何人')));
+    }
+    const ev=(c.events||[]).map(k=>k==='done'&&c.min_seconds?chData.events[k]+'（'+c.min_seconds+' 秒以上）':chData.events[k]).join('・');
+    card.appendChild(h('div','ln','通知：'+ev+(c.include_text?'；附上回覆內容':'；不附內容')));
+    const last=c.last;
+    card.appendChild(h('div','ln'+(last&&!last.ok?' bad':''),last?('最近一次'+(last.ok?'成功':'失敗')+'，'+fmtTaipei(last.at)+'：'+last.detail):'還沒送過；按「測試發送」確認收得到。'));
+    if(c.type==='telegram'&&c.enabled)card.appendChild(pairBox(c));
+    const acts=h('div','acts');
+    const test=h('button','btn sm','測試發送');
+    test.onclick=async()=>{
+      test.disabled=true;test.textContent='傳送中…';
+      try{const r=await api('/api/channels',{method:'POST',body:{action:'test',id:c.id}});toast(r.ok?'已送出，請看手機或頻道':'沒送成功：'+r.detail,!r.ok);}
+      catch(e){toast(e.message,true);}
+      await loadChannels();
+    };
+    const edit=h('button','btn sm quiet','編輯');edit.onclick=()=>openChForm(c);
+    const tog=h('button','btn sm quiet',c.enabled?'停用':'啟用');
+    tog.onclick=()=>chAct({action:c.enabled?'disable':'enable',id:c.id},c.enabled?'已停用 '+c.name:'已啟用 '+c.name);
+    const del=h('button','btn sm quiet','刪除');
+    del.onclick=async()=>{
+      if(!await askConfirm('刪除「'+c.name+'」？','金鑰會一起刪掉，之後不會再收到這個頻道的通知。','刪除'))return;
+      chAct({action:'delete',id:c.id},'已刪除 '+c.name);
+    };
+    acts.append(test,edit,tog,del);card.appendChild(acts);
+    return card;
+  }
+  function pairBox(c){
+    const box=h('div','chpair'),strangers=chData.strangers||[],bot=c.account||'你的機器人';
+    if(!chData.telegram_running){box.appendChild(h('div',null,'機器人目前沒有在運作；按「測試發送」看原因。'));return box;}
+    if(!strangers.length){
+      box.appendChild(h('div',null,(c.targets||[]).length?'要加人：請對方在 Telegram 傳一句話給 '+bot+'，再按重新整理。'
+        :'下一步：在 Telegram 搜尋 '+bot+'，傳任何一句話，再按重新整理。'));
+    }else{
+      box.appendChild(h('div',null,'這些人傳了訊息給機器人，還沒授權：'));
+      strangers.forEach(s=>{
+        const row=h('div','chprow'),who=(s.name||'（沒有名稱）')+(s.username?' @'+s.username:'');
+        row.appendChild(h('span','grow',who+'，chat id '+s.chat));
+        const b=h('button','btn sm primary','授權');
+        b.onclick=async()=>{
+          if(!await askConfirm('授權 '+who+'？','授權後他可以用 Telegram 指揮這台節點做事，需要核准的動作照樣會問。','授權'))return;
+          chAct({action:'authorize',id:c.id,chat:String(s.chat)},'已授權 '+who);
+        };
+        row.appendChild(b);box.appendChild(row);
+      });
+    }
+    const r=h('button','btn sm quiet','重新整理');r.onclick=loadChannels;box.appendChild(r);
+    return box;
+  }
+  function openChForm(c){
+    chEditing=c?{type:c.type,c}:{type:''};
+    renderChForm();
+    const f=$('#ch-form');f.hidden=false;f.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+  function closeChForm(){chEditing=null;const f=$('#ch-form');f.hidden=true;f.textContent='';}
+  function renderChForm(){
+    const f=$('#ch-form'),c=chEditing.c,type=chEditing.type;f.textContent='';
+    f.appendChild(h('h3',null,c?'編輯「'+c.name+'」':'新增通知頻道'));
+    if(!c){
+      const types=h('div','chtypes');
+      Object.keys(chData.types).forEach(k=>{
+        const taken=k==='telegram'&&chData.channels.some(x=>x.type==='telegram');
+        const b=h('button','chtype'+(type===k?' on':''));b.type='button';b.disabled=taken;
+        b.append(h('b',null,chData.types[k]),h('span',null,taken?'已經有一個機器人，請直接編輯它。':CH_DESC[k]));
+        b.onclick=()=>{chEditing.type=k;renderChForm();};
+        types.appendChild(b);
+      });
+      f.appendChild(types);
+    }
+    if(!type){
+      const a=h('div','acts'),x=h('button','btn quiet','取消');x.type='button';x.onclick=closeChForm;a.appendChild(x);f.appendChild(a);
+      return;
+    }
+    const how=h('ol','chhow');CH_HOW[type].forEach(t=>how.appendChild(h('li',null,t)));f.appendChild(how);
+    const form=document.createElement('form');form.autocomplete='off';
+    function row(label,input,hint){
+      const r=h('div','chrow'),l=h('label',null,label),w=h('div');
+      if(input.id&&/^(INPUT|TEXTAREA|SELECT)$/.test(input.tagName))l.htmlFor=input.id;
+      w.appendChild(input);if(hint)w.appendChild(h('div','chhint',hint));r.append(l,w);form.appendChild(r);return input;
+    }
+    const field=(tag,props)=>Object.assign(h(tag,'field'),props);
+    const name=row('名稱',field('input',{id:'chf-name',value:c?c.name:'',placeholder:chData.types[type],maxLength:40}));
+    const secret=row(CH_SECRET[type],field('input',{id:'chf-secret',type:'password',autocomplete:'new-password',
+      placeholder:c?'已加密保存；留空表示不變':'貼上'+(/^[A-Za-z]/.test(CH_SECRET[type])?' ':'')+CH_SECRET[type]}),'存好之後本頁不會再顯示，只用來發通知。');
+    let targets=null;
+    if(type!=='teams'){
+      targets=row(type==='line'?'接收對象 User ID':'已授權的 chat id',field('textarea',{id:'chf-targets',value:(c?c.targets:[]).join('\n'),
+        placeholder:type==='line'?'U 開頭 33 碼，一行一個':'可以先留空，存好後在卡片上授權'}),
+        type==='line'?'一行一個。LINE 群組 ID 要有對外網址才拿得到，目前只支援傳給個人。':'一行一個數字，群組是負數。授權的人可以用 Telegram 指揮這台節點。');
+    }
+    const ev=h('div','chevents'),chosen=new Set(c?c.events:['done','error','approval','external']);
+    Object.entries(chData.events).forEach(([k,label])=>{
+      const l=h('label'),cb=document.createElement('input');cb.type='checkbox';cb.value=k;cb.checked=chosen.has(k);
+      l.append(cb,document.createTextNode(label));ev.appendChild(l);
+    });
+    row('要通知的事件',ev);
+    const mins=row('多久以上才通知',field('input',{id:'chf-min',type:'number',min:0,max:86400,value:c?c.min_seconds:30}),
+      '秒，只影響「任務完成」：很快做完的時候你人還在電腦前，不必叫手機。失敗與核准一律通知。');
+    const incl=document.createElement('input');incl.type='checkbox';incl.checked=c?!!c.include_text:type==='telegram';
+    const il=h('label','chinc');il.append(incl,document.createTextNode('附上回覆內容（最多 800 字）'));
+    row('內容',il,type==='telegram'?'這是你自己的機器人，預設附上。':'勾選後，回覆內容會經過 '+chData.types[type]+' 的伺服器；公務或含個資的內容建議不勾，到網頁看。');
+    const err=h('div','err');form.appendChild(err);
+    const acts=h('div','acts'),cancel=h('button','btn quiet','取消'),save=h('button','btn primary',c?'儲存並驗證':'新增並驗證');
+    cancel.type='button';save.type='submit';cancel.onclick=closeChForm;acts.append(cancel,save);form.appendChild(acts);
+    form.addEventListener('submit',async e=>{
+      e.preventDefault();err.textContent='';save.disabled=true;const label=save.textContent;save.textContent='驗證中…';
+      const body={action:'save',id:c?c.id:'',channel:{type,name:name.value.trim(),secret:secret.value.trim(),
+        targets:targets?targets.value.split(/[\s,，、]+/).filter(Boolean):[],
+        events:[...ev.querySelectorAll('input:checked')].map(x=>x.value),min_seconds:Number(mins.value||0),include_text:incl.checked}};
+      try{
+        await api('/api/channels',{method:'POST',body});
+        toast(c?'已儲存 '+(body.channel.name||c.name):'已新增，按「測試發送」確認收得到');
+        closeChForm();await loadChannels();
+      }catch(x){err.textContent=x.message;save.disabled=false;save.textContent=label;}
+    });
+    imeGuard([name,secret,mins]);
+    f.appendChild(form);
+    (c?name:secret).focus({preventScroll:true});
+  }
+  $('#ch-add').onclick=()=>openChForm(null);
 
   // ---- menus and keys -------------------------------------------------------------------
   const whoMenu=$('#who-menu');
