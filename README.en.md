@@ -65,7 +65,7 @@ When a task finishes, fails or waits for an approval, a message goes to Telegram
 | Memory and history | `memory_*` `session_search` `session_read` `todo_write` `skill` `schedule_*` |
 | Talking to people | `ask_user` `goal_done` |
 | Code | `lsp` `security_scan` |
-| Once configured | `web_search` `browser_open` `webfetch` and MCP tools |
+| Once configured | `web_search` `browser_open` `webfetch` `desktop_look` `desktop_act` (use this computer, macOS, asks every time) and MCP tools |
 
 ## More
 

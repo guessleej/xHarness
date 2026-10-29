@@ -290,6 +290,15 @@ def run(config: Any, *, bound_host: str | None = None, has_token: bool = False, 
         "" if sandbox == "require" else '在設定檔寫 [sandbox] mode = "require"。',
     ))
 
+    if getattr(config, "desktop_control", False):
+        asked = bool(getattr(config, "desktop_approval", True))
+        items.append(_item(
+            "desktop-approval", "操作桌面逐次核准", PASS if asked else WARN,
+            "看畫面、點擊、輸入、按鍵每一次都要人按核准，自動模式也一樣；沒有人在就不做。" if asked
+            else "desktop_approval = false：桌面操作改走一般審批策略，自動模式下會直接點擊與輸入，不再問人。",
+            "" if asked else "把 [tools] desktop_approval 改回 true（預設）。",
+        ))
+
     # --- 6. weak defaults and data at rest ---------------------------------
     weak = [name for name, value in os.environ.items()
             if name.startswith("XHARNESS_") and value.strip().lower() in WEAK_VALUES]

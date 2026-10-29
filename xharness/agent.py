@@ -467,6 +467,9 @@ class Agent:
             hidden.add("goal_done")
         if self.options.name == "main":
             hidden.add("report")    # only an agent that someone started has anyone to report to
+        else:
+            # A child's approvals are forwarded to its parent's policy, which may approve silently.
+            hidden |= {tool.name for tool in registry.list() if tool.always_ask}
         return hidden
 
     def _image_context(self, task: str, images: list[str], llm: Any) -> str | None:
@@ -749,7 +752,7 @@ class Agent:
         def approve(summary: str) -> bool:
             if permission == "allow":
                 return True        # a hook vouched for this call
-            if self.options.approval_mode == "auto" and permission != "ask":
+            if self.options.approval_mode == "auto" and permission != "ask" and not tool.always_ask:
                 return True
             if self.options.prompt is None:
                 return False

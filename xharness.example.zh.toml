@@ -58,6 +58,9 @@ model = "your-model-id"
 # webfetch = false       # true 啟用 webfetch 工具（對外連線，走審批）
 # browser = "http://127.0.0.1:9377"   # 地端 camofox 位址；設了就多 web_search／browser_open 兩個工具
 # browser_approval = true              # false 讓這兩個工具不走審批（瀏覽器已在節點自己的機器上）
+# desktop_control = false              # true 讓模型看這台電腦的畫面、操作滑鼠鍵盤（desktop_look／desktop_act，目前只支援 macOS）
+#                                      # 要在「系統設定 > 隱私權與安全性」開「輔助使用」，截圖另需「螢幕錄製」；截圖描述用 [vision] provider
+# desktop_approval = true              # 每次看畫面與操作都問人（自動模式也問）；false 改走一般審批策略
 
 # Telegram 通道（隨 `xharness web` 啟動）：手機下任務、按鈕審批、接收 /api/notify 推播。
 # 建議改在網頁「管理 > 通知頻道」設定（Telegram、LINE、Teams 都在那裡，金鑰加密保存）；

@@ -34,6 +34,10 @@ class ResolvedConfig:
     files: dict[str, Any] = field(default_factory=dict)
     browser: str | None = None
     browser_approval: bool = True
+    #: [tools] desktop_control: desktop_look / desktop_act on this machine's screen (macOS);
+    #: desktop_approval = false puts them under the normal approval policy instead of asking every time
+    desktop_control: bool = False
+    desktop_approval: bool = True
     #: [skills] enabled, dirs, claude_home -- see skills.py
     skills: dict[str, Any] = field(default_factory=dict)
     #: [compaction] auto (bool), threshold (share of the context window)
@@ -135,6 +139,8 @@ def load_config(
         files=raw.get("files", {}) or {},
         browser=_browser_url(raw.get("tools", {}).get("browser")),
         browser_approval=bool(raw.get("tools", {}).get("browser_approval", True)),
+        desktop_control=bool(raw.get("tools", {}).get("desktop_control", False)),
+        desktop_approval=bool(raw.get("tools", {}).get("desktop_approval", True)),
         skills=raw.get("skills", {}) or {},
         compaction=_compaction(raw.get("compaction", {}) or {}),
         sessions=raw.get("sessions", {}) or {},

@@ -36,7 +36,7 @@ MAX_TOOL_TEXT = 4000
 MAX_DIFF_SOURCE = 200_000
 KINDS = {"read": "read", "write": "edit", "edit": "edit", "bash": "execute", "terminal": "execute",
          "job_start": "execute", "glob": "search", "grep": "search", "lsp": "search", "webfetch": "fetch",
-         "web_search": "fetch", "browser_open": "fetch", "todo_write": "think", "skill": "think",
+         "web_search": "fetch", "browser_open": "fetch", "desktop_look": "read", "desktop_act": "execute", "todo_write": "think", "skill": "think",
          "goal_done": "think"}
 
 

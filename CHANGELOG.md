@@ -2,7 +2,31 @@
 
 中文 | English below
 
-## 未發布
+## 1.18.0 — 2026-10-29
+
+操作這台電腦：模型可以看畫面、用滑鼠和鍵盤（macOS）。`[tools] desktop_control = true` 開啟，預設關閉。
+
+- **`desktop_look`**：列出前景程式（或指定程式）的視窗與畫面上的按鈕、欄位、選單、文字，每個帶編號、名稱、內容與位置。資料從「輔助使用」介面讀，不靠看圖，純文字模型也能用；只走看得到的部分，長聊天紀錄的視窗也在一兩秒內讀完（原本用 osascript 走完整棵樹要 107 秒）。`screenshot: true` 會另外截圖交給 `[vision] provider` 描述，截圖用完即刪、不留在磁碟。
+- **`desktop_act`**：點擊、雙擊、右鍵（用畫面編號或座標）、輸入文字、按鍵組合（如 `cmd+s`）、捲動、把程式叫到前面。做完自動再看一次畫面並回傳，模型看得到動作的結果。文字一律用剪貼簿貼上再還原原本的剪貼簿內容，因為逐鍵輸入會經過輸入法，注音模式下打 abc 會變成「ㄇ」。
+- **每次都問人**：看畫面與每個動作都要人按核准，審批模式設成 auto 也一樣；核准卡寫出要點的是哪個元素（例如「click AXButton「傳送」 in LINE」）。沒有人在就不做。`desktop_approval = false` 可改回一般審批策略，機密防護檢查頁會對此亮警告。
+- **核准後先把目標程式叫回前景**：在瀏覽器或桌面視窗按核准，那個視窗會跑到前景，按鍵就會打錯地方。現在核准後會先把動作的目標程式叫回前景並檢查，叫不回來就什麼都不送。
+- **直接拒絕的動作**：在密碼欄位輸入（請本人輸入），以及清空垃圾桶的按鍵組合。畫面編號在換了前景程式或超過 5 分鐘後失效，要重新看。
+- **一次一個操作者**：只有對話的主代理拿得到這兩個工具，子代理與討論參與者沒有（子代理的審批會轉給上層策略，自動模式下可能不問人就放行）；整台電腦一把鎖，同時只會有一個動作。其他代理照樣可以平行處理檔案、指令與網頁。
+- 讀畫面與送出輸入在獨立的子行程執行，macOS 介面 API 出錯或某個程式卡住都不會拖垮 xHarness，逾時 30 秒。
+- 需要在「系統設定 > 隱私權與安全性 > 輔助使用」開啟執行 xharness 的程式，截圖另需「螢幕錄製」；沒開時工具會說明要去哪裡開。Windows 與 Linux 尚未支援。
+- 服務使用報告的功能清單與機密防護檢查頁各加一項。
+
+Use this computer: the model can see the screen and use the mouse and keyboard (macOS). Off by default; `[tools] desktop_control = true` turns it on.
+
+- **`desktop_look`** lists the window and the buttons, fields, menus and text of the app in front (or a named app) as numbered elements with label, value and position, read through the Accessibility API rather than from pixels, so a text-only model can use it. Only what is visible is walked: a window with a long chat history reads in a second or two (walking the whole tree through osascript took 107 seconds). `screenshot: true` adds a screenshot described by `[vision] provider`; the picture is deleted right after.
+- **`desktop_act`**: click, double-click, right-click (an element number or a point), type, key combinations (`cmd+s`), scroll, bring an app to the front; then it looks again and returns the new screen. Text is pasted through the clipboard, which is put back afterwards: typed keys go through the input method, and with Zhuyin "abc" arrives as "ㄇ".
+- **Asks every time**: every look and every action needs the person's approval, approval mode "auto" included; the card names the element. Nobody there means no. `desktop_approval = false` puts the tools under the normal policy; the security check page warns about it.
+- **The target app comes back first**: approving in a browser or the desktop window brings that window to the front, where the keys would land. After approval the app the action is for is brought back and checked; if it will not come, nothing is sent.
+- **Refused outright**: typing into a password field, and the key combinations that empty the Trash. Element numbers expire when another app comes to the front or after 5 minutes.
+- **One operator at a time**: only a conversation's main agent gets the tools (a child's approvals go to its parent's policy, which may approve silently in auto mode); one lock for the screen. Other agents keep working on files, commands and the web in parallel.
+- Screen reading and input run in a separate process with a 30-second timeout, so a failing Accessibility call or a hung app cannot take xHarness down.
+- Needs Accessibility for the app that runs xharness, and Screen Recording for screenshots; the tools say where to turn them on. Windows and Linux are not supported yet.
+- The usage report's feature list and the security check page each gain an item.
 
 通知頻道：管理者在網頁上設定 Telegram、LINE、Microsoft Teams，任務完成、失敗或等人核准時發訊息。
 

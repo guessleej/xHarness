@@ -57,6 +57,10 @@ model = "your-model-id"
 # webfetch = false       # true enables the webfetch tool (network egress, approval-gated)
 # browser = "http://127.0.0.1:9377"   # local camofox service; adds web_search / browser_open
 # browser_approval = true              # false waives approval for those two (the browser is on the node's own machine)
+# desktop_control = false              # true lets the model see this computer's screen and use its mouse and keyboard
+#                                      # (desktop_look / desktop_act, macOS for now; needs Accessibility, and Screen
+#                                      # Recording for screenshots, which [vision] provider describes)
+# desktop_approval = true              # ask the person on every look and action, even in auto mode; false = normal policy
 
 # Telegram channel (starts with `xharness web`): tasks from your phone, approvals as buttons, /api/notify pushes.
 # Prefer the web page, Admin > Notification channels (Telegram, LINE and Teams, keys stored

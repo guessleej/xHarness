@@ -2551,7 +2551,7 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
 
   // ---- what a tool call is, in words ------------------------------------------
   const KIND={read:['eye','讀取'],write:['pen','寫入'],edit:['pen','修改'],glob:['folder','找檔案'],grep:['search','搜尋'],
-    bash:['term','執行'],webfetch:['globe','開啟網頁'],browser_open:['globe','開啟網頁'],web_search:['globe','搜尋網路'],
+    bash:['term','執行'],webfetch:['globe','開啟網頁'],browser_open:['globe','開啟網頁'],web_search:['globe','搜尋網路'],desktop_look:['eye','看畫面'],desktop_act:['term','操作電腦'],
     todo_write:['list','更新待辦清單'],security_scan:['shield','資安掃描'],ask_user:['help','問你一個問題'],
     subagent:['users','交給子代理'],subagent_batch:['users','交給多個子代理'],discussion:['users','開討論'],discussion_join:['users','加入討論廳'],
     terminal:['term','終端機'],job_start:['term','背景執行'],job_status:['list','查看背景工作'],job_wait:['list','等背景工作'],

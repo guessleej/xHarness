@@ -65,7 +65,7 @@ XHARNESS_BASE_URL=http://localhost:8080/v1 XHARNESS_MODEL=your-model ./.venv/bin
 | 記憶與對話 | `memory_*` `session_search` `session_read` `todo_write` `skill` `schedule_*` |
 | 與人互動 | `ask_user` `goal_done` |
 | 程式碼 | `lsp` `security_scan` |
-| 設定後才有 | `web_search` `browser_open` `webfetch` 與 MCP 工具 |
+| 設定後才有 | `web_search` `browser_open` `webfetch` `desktop_look` `desktop_act`（操作這台電腦，macOS，每次都問人）與 MCP 工具 |
 
 ## 更多
 
