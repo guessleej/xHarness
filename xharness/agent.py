@@ -132,7 +132,12 @@ def current_date_line(now: datetime | None = None) -> str:
     # which is also US Central and China Standard Time).
     offset = now.strftime("%z")
     zone = f" (UTC{offset[:3]}:{offset[3:]})" if offset else ""
-    return (f"Today is {now:%Y-%m-%d} ({WEEKDAYS[now.weekday()]}), local time {now:%H:%M}{zone}. "
+    # No clock: this line sits near the top of the system prompt, and a prompt
+    # that changes every minute is one the model server can never reuse --
+    # measured 2026-10-29 on Nemotron (.27), a new conversation re-read all
+    # 10,700 tokens of it (65 s) instead of 20 (5 s). For the time of day the
+    # model can run `date`.
+    return (f"Today is {now:%Y-%m-%d} ({WEEKDAYS[now.weekday()]}){zone}. "
             "Use this date; do not assume one.")
 
 
