@@ -32,7 +32,7 @@ Issues = "https://github.com/guessleej/xHarness/issues"
 xharness = "xharness.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "cryptography>=42"]
 desktop = ["pywebview>=6"]
 secure = ["cryptography>=42"]
 build = ["pywebview>=6", "pyinstaller>=6.16", "cryptography>=42"]
