@@ -38,7 +38,7 @@ from .session import harness_home
 
 CHANNELS_FILE = "channels.json"
 KEY_FILE = "channels.key"
-KEY_SECRET_PATH = "/run/secrets/xharness_channels_key"
+KEY_SECRET_PATH = "/run/secrets/xharness_channels_key"  # nosec B105 - where the key is mounted, not the key
 PREFIX = "enc:v1:"
 
 TYPES = {"telegram": "Telegram", "line": "LINE", "teams": "Microsoft Teams"}
