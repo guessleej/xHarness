@@ -47,6 +47,7 @@ from .commands import MAX_FEEDBACK_NOTE, providers_for, routing_on, switch_model
 from .goal import run_goal
 from .mentions import expand as expand_mentions, list_files
 from .hall import HallRegistry
+from .board import board_snapshot
 from .vision import describer_from_config, save_images
 from .session import (SessionLog, clean_title, export_markdown, messages_from_events, search_sessions,
                       session_summary, sessions_dir)
@@ -1151,6 +1152,11 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 return
             if parts[1:] == ["agents", "roles"]:
                 self._json(200, app.roles(self.principal))
+                return
+            if parts[1:] == ["board"]:
+                enabled = bool((getattr(app.config, "board", None) or {}).get("enabled"))
+                root = workspace.ensure(principal_name(self.principal)) or os.getcwd()
+                self._json(200, {"enabled": enabled, **(board_snapshot(root) if enabled else {})})
                 return
             if parts[1:] == ["me"]:
                 principal = self.principal
@@ -2679,6 +2685,26 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
   async function agentAction(body){
     try{await api('/api/conversations/'+conv+'/agents',{method:'POST',body});}catch(e){toast(e.message,true);}}
   async function loadRoles(){try{roles=await api('/api/agents/roles');}catch(e){roles=[];}if(rvTab==='agents')renderAgents();}
+  let board=null;
+  async function loadBoard(){try{board=await api('/api/board');}catch(e){board={enabled:false};}if(rvTab==='agents')renderAgents();}
+  const BOARD_WORDS={open:'待認領',claimed:'進行中',done:'完成','given-up':'放棄'},BOARD_PILL={open:'',claimed:'running',done:'idle','given-up':'error'};
+  function renderBoard(box){
+    if(board===null){loadBoard();return;}
+    if(!board.enabled)return;
+    const tasks=board.tasks||[],notes=board.notes||[];
+    box.appendChild(h('div','sub','任務板（'+tasks.length+' 項）'));
+    if(!tasks.length)box.appendChild(h('div','m','還沒有任務。代理用 board_add 貼上任務、board_claim 認領。'));
+    tasks.slice(0,40).forEach(t=>{const c=h('div','job'),hd=h('div','job-h');
+      hd.append(h('span','pill '+(BOARD_PILL[t.state]||''),BOARD_WORDS[t.state]||t.state),h('span','c','#'+t.id+' '+t.title));
+      const m=[];if(t.state==='claimed')m.push(t.claimed_by+'・剩 '+t.minutes_left+' 分');if(t.attempts>1)m.push('第 '+t.attempts+' 次嘗試');
+      if(t.result)m.push(t.result);c.append(hd);if(m.length)c.appendChild(h('div','m',m.join('・')));box.appendChild(c);});
+    if(notes.length){box.appendChild(h('div','sub','發現與驗證（最近 '+notes.length+' 筆）'));
+      notes.forEach(n=>{const c=h('div','job'),hd=h('div','job-h');
+        const sys=n.verified==='system',pass=sys&&n.exit===0;
+        hd.append(h('span','pill '+(sys?(pass?'idle':'error'):''),sys?('系統驗證 '+(pass?'通過':'未過')):'代理自述'),h('span','c',n.text));
+        c.append(hd,h('div','m',[n.kind==='failure'?'失敗':n.kind==='success'?'成功':'發現',n.author,n.task_id?'任務 #'+n.task_id:'',
+          sys?'指令 '+n.command+'・結束碼 '+n.exit:'沒有執行任何檢查',n.version?'版本 '+n.version:''].filter(Boolean).join('・')));box.appendChild(c);});}
+  }
   function renderAgents(){
     const run=agents.filter(a=>a.status==='running');$('#rv-agents-cnt').textContent=run.length?String(run.length):'';
     if(rvTab!=='agents')return;
@@ -2693,6 +2719,7 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
           +a.calls+' 次呼叫・'+a.seconds+' 秒'+(a.model?'・'+a.model:'')+(a.status==='running'&&a.activity?'・正在 '+a.activity:'')));
         if(a.task)c.appendChild(h('div','m',a.task));box.appendChild(c);});
     }
+    renderBoard(box);
     box.appendChild(h('div','sub','代理角色'));
     if(roles===null){box.appendChild(h('div','m','讀取中…'));loadRoles();return;}
     if(!roles.length){const e=h('div','empty');e.append(h('b',null,'還沒有代理角色'),document.createTextNode(
@@ -3184,7 +3211,7 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
   function rvShow(tab){
     rvTab=tab;document.querySelectorAll('[data-rv]').forEach(b=>b.classList.toggle('on',b.dataset.rv===tab));
     if(tab==='jobs')renderJobs();
-    if(tab==='agents'){roles=null;renderAgents();}
+    if(tab==='agents'){roles=null;board=null;renderAgents();}
     ['changes','files','jobs','agents','tools','memory'].forEach(k=>{$('#rv-'+k).hidden=k!==tab;});
     if(tab==='files')loadFiles();if(tab==='tools')loadTools();if(tab==='memory')loadMemory();
   }

@@ -28,6 +28,22 @@ Use this computer: the model can see the screen and use the mouse and keyboard (
 - Needs Accessibility for the app that runs xharness, and Screen Recording for screenshots; the tools say where to turn them on. Windows and Linux are not supported yet.
 - The usage report's feature list and the security check page each gain an item.
 
+多代理協作：代理分工之後，成果能安全地合回來，也知道誰在做什麼、什麼已經被驗證過。參考 microsoft/Agensh 的做法，但寫成 xHarness 的插件、不需要另外架服務。
+
+- **獨立工作區＋整合閘門**：`subagent`、`subagent_batch`、`workflow` 加 `isolate: true`，每個代理在自己的 git worktree 改程式。工作區從工作目錄「現在的樣子」建立（含未 commit 與未追蹤的檔案，用暫存索引做快照，不動使用者的索引）。代理做完，系統在它的工作區跑 `check` 指令（照 bash 的審批與沙箱），通過、`git apply --check` 確認沒有衝突、使用者同意後，才把改動套回工作目錄（不 commit，留給人在 `git status` 檢視）。沒過、衝突或不同意的改動保留成分支 `xharness/<名稱>-<代號>`，回報裡附查看指令。`subagent_batch` 全部套回後，再用同一個檢查跑一次整體。
+- **共享任務板**（`[board] enabled = true`）：`board_add` 貼任務（同名未完成的不重複貼）、`board_claim` 認領（預設 30 分鐘，`board_heartbeat` 續約，逾時自動釋放；跨行程也只會有一個代理領到）、`board_release` 結束（完成／失敗／還回去；失敗可由其他代理重試，最多 3 次，之後留給人處理）、`board_list` 看全貌。
+- **發現與驗證紀錄**：`board_note` 記錄發現、成功、失敗，附證據與適用版本（`git describe`）。帶 `verify` 指令的紀錄由系統實際執行、記下結束碼，標成「系統驗證」；沒帶的標成「代理自述」。Agensh 的看板只檢查文字、不執行指令；這裡分得出兩者。`board_notes` 依任務、種類、關鍵字查。
+- 任務板存在專案頂層的 `.xharness/board.db`（0600），在 worktree 裡的子代理與上層共用同一塊；目前只限同一台機器。
+- 網頁「代理」分頁顯示任務板與最近的驗證紀錄；服務使用報告與 Word 月報統計獨立工作區的結果（套回、檢查沒過、衝突、不同意）；機密防護檢查頁加一項。
+
+Multi-agent collaboration: work split across agents comes back together safely, and agents can see who is doing what and what has actually been verified. Modelled on microsoft/Agensh, written as xHarness plugins with no extra services.
+
+- **Separate workspaces and an integration gate**: `isolate: true` on `subagent`, `subagent_batch` and `workflow` gives each agent a git worktree of its own, made from the working directory as it is now (uncommitted and untracked files included, snapshotted through a scratch index so the person's index is untouched). When the agent finishes, the system runs `check` in its worktree (approved and sandboxed like bash); the change is applied to the working directory, uncommitted, only if the check passes, `git apply --check` shows no conflict and the person approves. Otherwise it is kept as branch `xharness/<name>-<id>`. After a `subagent_batch` the same check runs once more on everything together.
+- **Shared task board** (`[board] enabled = true`): `board_add`, `board_claim` (30 minutes by default, renewed with `board_heartbeat`, released when it runs out; one winner across processes too), `board_release` (done / failed, retried by another agent up to 3 attempts / open), `board_list`.
+- **Findings and verification**: `board_note` records findings, successes and failures with evidence and the version they apply to. A note with `verify` gets the command run by the system and its exit code recorded ("verified by the system"); without it the note is "the agent's own report". Agensh's board checks text only and never runs the command. `board_notes` searches by task, kind and text.
+- The board lives in `.xharness/board.db` (0600) at the top of the project, shared by children in worktrees; one machine for now.
+- The Web UI's agents tab shows the board and recent verifications; the usage report and the Word report count workspace outcomes; the security check page gains an item.
+
 通知頻道：管理者在網頁上設定 Telegram、LINE、Microsoft Teams，任務完成、失敗或等人核准時發訊息。
 
 - **「管理 > 通知頻道」**：新增、編輯、停用、刪除、測試發送。每種頻道附取得金鑰的步驟；存檔時先向該服務驗證（Telegram `getMe`、LINE `bot/info`），卡片上看得到機器人或官方帳號名稱、最近一次送出成功與否（台北時間）。

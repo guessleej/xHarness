@@ -290,6 +290,12 @@ def run(config: Any, *, bound_host: str | None = None, has_token: bool = False, 
         "" if sandbox == "require" else '在設定檔寫 [sandbox] mode = "require"。',
     ))
 
+    if (getattr(config, "board", None) or {}).get("enabled"):
+        items.append(_item(
+            "board-local", "共享任務板只在本機", PASS,
+            "任務板存在專案資料夾的 .xharness/board.db（權限 0600），不經網路；紀錄的驗證指令照一般審批與沙箱執行。",
+        ))
+
     if getattr(config, "desktop_control", False):
         asked = bool(getattr(config, "desktop_approval", True))
         items.append(_item(

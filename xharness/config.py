@@ -61,6 +61,8 @@ class ResolvedConfig:
     discussion: dict[str, Any] = field(default_factory=dict)
     #: [routing] enabled, models, prefer, external_sees, ... -- see router.py
     routing: dict[str, Any] = field(default_factory=dict)
+    #: [board] enabled -- the shared task board, see board.py
+    board: dict[str, Any] = field(default_factory=dict)
 
 
 def _find_config_file(explicit_path: str | None) -> str | None:
@@ -153,6 +155,7 @@ def load_config(
         agents=raw.get("agents", {}) or {},
         discussion=raw.get("discussion", {}) or {},
         routing=raw.get("routing", {}) or {},
+        board=raw.get("board", {}) or {},
     )
 
 

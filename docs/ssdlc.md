@@ -152,7 +152,9 @@ Rules the architecture enforces:
   stopped changes nothing; `B404`/`B603`/`B108` in `tools/powershell.py` — running an approved command is that tool's purpose, the command file lives in a private directory under /tmp (the only writable place in the sandbox); `B110` in `schedule.py` — a failing UI listener must not stop reminders; `B310` in `hall.py` — the joining side
   opens the host URL from an invite, checked to be http or https in `parse_invite`; `B404`/`B603` in `tools/desktop_control.py`
   and `tools/desktop_mac.py` — they run this package's own backend and fixed system tools (osascript, screencapture,
-  sips, open) with a fixed argv, no shell and a timeout, and every action is approved by the person first).
+  sips, open) with a fixed argv, no shell and a timeout, and every action is approved by the person first; `B404`/`B603`/`B607` in `isolation.py` and
+  `board.py` — git with a fixed argv and no shell, and the `check`/`verify` commands are approved, sandboxed and timed
+  out exactly like the bash tool).
 
 ### Phase 4 — Verification
 

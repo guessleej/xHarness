@@ -19,6 +19,15 @@ max_turns = 40
 # max_workers = 4   # parallelism for subagent_batch
 # max_turns = 20    # per-child turn limit
 # ralph_rounds = 5  # ralph: rounds per run (at most 10)
+# subagent, subagent_batch and workflow take isolate = true: each agent edits code in a git worktree of its own;
+# the system runs the check command when it finishes and applies the change to the working directory (uncommitted)
+# only if it passes and applies cleanly, otherwise it is kept as a branch xharness/<name>-<id>.
+
+# Shared task board: agents claim tasks (time-limited, renewable, released when they run out, retried up to three
+# times after a failure) and record findings; a note with a verify command gets it run by the system, exit code
+# recorded. Stored in .xharness/board.db at the top of the project, on this machine only.
+# [board]
+# enabled = false
 
 # [memory]
 # enabled = true

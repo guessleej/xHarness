@@ -20,6 +20,13 @@ max_turns = 40
 # max_workers = 4   # subagent_batch 平行上限
 # max_turns = 20    # 每個子代理回合上限
 # ralph_rounds = 5  # ralph 每次最多幾輪（上限 10）
+# 子代理、subagent_batch、workflow 都可以帶 isolate = true：每個代理在自己的 git worktree 改程式，
+# 做完由系統跑 check 指令，通過且沒有衝突才套回工作目錄（不 commit），否則保留成分支 xharness/<名稱>-<代號>。
+
+# 共享任務板：代理認領任務（有期限、可續約、逾時自動釋放、失敗可重試三次）並記錄發現；
+# 紀錄帶 verify 指令時由系統實際執行、記下結束碼。存在專案頂層的 .xharness/board.db，只在這台機器上。
+# [board]
+# enabled = false
 
 # [memory]
 # enabled = true

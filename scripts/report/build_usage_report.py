@@ -318,6 +318,17 @@ def build_docx(report: dict, output: str) -> str:
         table(document, ["代理角色", "執行次數", "tokens", "模型呼叫", "失敗", "被停止"],
               [[row["role"], row["runs"], f"{row['tokens']:,}", row["calls"], row["failed"], row["stopped"]]
                for row in agents.get("by_role", [])] or [["本期無資料", 0, "0", 0, 0, 0]])
+    spaces = agents.get("workspaces") or {}
+    if spaces:
+        held = spaces.get("check-failed", 0) + spaces.get("conflict", 0) + spaces.get("denied", 0)
+        body(document, (
+            f"代理在各自獨立的工作區改程式共 {sum(spaces.values())} 次：{spaces.get('integrated', 0)} 次通過檢查、套回工作目錄；"
+            f"{held} 次沒有套回（檢查沒過、與其他代理的修改衝突，或使用者不同意），改動保留成分支供人檢視；"
+            f"{spaces.get('no-changes', 0)} 次沒有改到檔案。"
+        ))
+        words = {"integrated": "通過檢查並套回", "check-failed": "檢查沒過，保留成分支", "conflict": "與其他修改衝突，保留成分支",
+                 "denied": "使用者不同意套回", "no-changes": "沒有改到檔案", "error": "工作區出錯"}
+        table(document, ["結果", "次數"], [[words.get(k, k), v] for k, v in sorted(spaces.items(), key=lambda kv: -kv[1])])
 
     heading(document, "ch3", CHAPTERS[2][1], 3)
     total = hosting["self_hosted"]["tokens"] + hosting["external"]["tokens"]
