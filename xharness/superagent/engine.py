@@ -65,6 +65,9 @@ class Engine:
         self._emit = emit
         self._now = now or now_iso
         self.prepare_ticket = prepare_ticket
+        #: Subscriptions deliver a person's follow-up straight to its ticket's worker. Off only for the
+        #: ablation that measures what that saves: every follow-up then goes through the main Session.
+        self.direct = True
 
     # Shared helpers
 
@@ -152,7 +155,7 @@ class Engine:
                 if not thread.get("lastAt") or trigger["at"] > thread["lastAt"]:
                     thread["lastAt"] = trigger["at"]
                 thread["correlated"] = sorted(set(thread["correlated"]) | {k for k in keys if k != thread["key"]})
-                for ticket_id in thread["subscriptions"]:
+                for ticket_id in (thread["subscriptions"] if self.direct or not trigger.get("human") else []):
                     ticket = self.repo.ticket(ticket_id)
                     followed = ticket_id in thread.get("context", [])
                     # Only a person's message on a Thread of its own resumes an ended ticket; a stopped one gets nothing.

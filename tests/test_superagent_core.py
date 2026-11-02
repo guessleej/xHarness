@@ -309,3 +309,17 @@ def test_policy_effects_name_the_rules_that_changed(world):
 def test_thread_key_and_key_are_stable():
     assert thread_key({"source": "gh", "id": "x"}) == "gh:x"
     assert key("a", "b") == key("a", "b") != key("a", "c")
+
+
+def test_without_direct_delivery_a_follow_up_goes_through_the_main_session(world):
+    engine, ports, _, store, _ = world
+    engine.direct = False
+    engine.receive(trig("t1"))
+    engine.evaluate_due()
+    ticket_id = accept(engine, "t1")["ticketId"]
+    engine.receive(trig("t2", addressed=None, text="also the title"))
+    assert not any(i.get("triggerId") == "t2" for i in store.ticket(ticket_id)["inputs"])
+    engine.evaluate_due()
+    assert ports.requests[-1]["triggers"][0]["id"] == "t2"           # a candidate for the main Session
+    engine.attach(ticket_id, "t2")
+    assert any(i.get("triggerId") == "t2" for i in store.ticket(ticket_id)["inputs"])

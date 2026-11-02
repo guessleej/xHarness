@@ -56,6 +56,16 @@ When a task finishes, fails or waits for an approval, a message goes to Telegram
 - **LINE and Teams** only notify. Talking back would need a public HTTPS address, which a node on an internal network does not have. By default they carry the title and a link, not the answer; carrying the answer is a per-channel tick, and the security check page lists the channels that have it.
 - Each channel picks its events, and "task finished" can wait for a minimum duration, so a four-second answer does not buzz a phone.
 
+## Resident agent
+
+An agent that stays up on the node (`[superagent] enabled = true`). It listens to a GitHub repository and Telegram groups, hands the work it accepts to workers in isolated directories, and answers in the topic or pull request where it was asked; people are called only for decisions and reviews. The design follows DeepSeek's open Super-agent prototype (MIT) and keeps xHarness's approvals, sandbox and audit.
+
+- **Code decides who may ask**: an allowed person who addresses the agent makes an explicit request. Anything else needs a rule the team wrote, and by default the agent only observes, recording what it would have accepted. An accept freezes its Mandate on the ticket, which message text cannot change.
+- **The main Session routes; workers work**, each in its own git worktree. Later messages, CI results and reviews on the same pull request or topic go straight to that ticket's worker.
+- **The system opens pull requests**: workers never hold the GitHub token. The team's check runs first; a code change without a pull request cannot be reported ready.
+- **Every outside write waits for approval** by default, on the page or Telegram. Chat replies stay under 100 words.
+- The "常駐代理" page shows the setup steps, then inbox, tickets, events (where each message went) and settings; a watchdog outside the agents watches for stalled or looping work.
+
 ## Built-in tools
 
 | Group | Tools |
