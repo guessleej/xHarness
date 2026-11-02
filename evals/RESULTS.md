@@ -112,6 +112,8 @@ the result message in the same thread. Limit 25 minutes. Code at `c19a7e3`.
 | no direct delivery | 2 | 5/5 | 11.5 min | 12.2 min | 390,592 | yes |
 | one conversation, neutral prompt | 1 | 0/5 | – | – | 65,598 | yes |
 | one conversation, told to delegate | 1 | 0/5 | – | – | 72,302 | no |
+| superagent, code `9299140` | 1 | 5/5 | 8.9 min | 9.0 min | 213,839 | yes |
+| superagent, code `9299140` | 2 | 5/5 | 9.0 min | 10.3 min | 233,777 | no |
 
 - The single conversation finished the work fastest (each request done 1.4–3.9
   minutes after it was posted) but never used its `reply` tool: it wrote the
@@ -129,6 +131,13 @@ the result message in the same thread. Limit 25 minutes. Code at `c19a7e3`.
   main Session in one batch and it accepted both as one ticket, showing the
   worker only the stop. With seed 2 the stop queued behind the request's
   decision and reached the main Session after the work was done.
+- After the fixes (last two rows, code `9299140`) results arrived 2–3 minutes
+  sooner and used about 30% fewer tokens; the main Session stopped polling
+  after its third ask. The stop that queued behind the request now went to the
+  new ticket and the worker dropped the work. The stop accepted in one batch
+  with its request still failed: the worker was shown both messages, oldest
+  first, and did the work anyway. That is the model's judgement, not a
+  delivery problem.
 - In one earlier run of the no-direct mode the main Session ignored every
   request ("do_work is not defined"), with the same prompt that accepted them
   in the other runs. One run per mode is not enough to compare modes.
