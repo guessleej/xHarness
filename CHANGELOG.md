@@ -2,6 +2,36 @@
 
 中文 | English below
 
+## 1.19.0 — 未發布
+
+常駐代理：節點上常駐一個代理，自己聽 GitHub 存放庫與 Telegram 群組的事件，接下的工作交給各自隔離的工作代理去做，結果回到原本的話題或 PR；人只在要決定、要驗收時被叫。設計照 DeepSeek〈Super-agent 設計探索〉與其公開原型 dsh-superagent（MIT）的領域模型與規則，以 Python 標準函式庫重寫，並保留 xHarness 的審批、沙箱與稽核。`[superagent] enabled = true` 開啟，預設關閉。
+
+- **雙層架構**：常駐的主會話只負責分派、回覆與跨工作協調，沒有 shell，也不讀程式碼；每張工單一個工作代理，在自己的 git worktree 實作。主會話忙的時候，進來的事件累積到下一輪一次處理。
+- **事件與兩層准入**：每則訊息是一筆觸發，同一個 PR、Issue 或回覆串是一條線程。先用程式規則篩選（名單、有沒有點名代理、每個接收範圍的准入表、可信機器人名單），才交給模型判斷。名單上的人點名就是明確要求；沒點名的訊息要符合團隊寫的主動規則，而且每條規則都要逐一表態。接單模式分 off、observe（預設，只記錄「本來會接」）、auto。
+- **授權寫死在工單上**：接單時記下強度、範圍、依據的規則與政策版本，訊息內容改不了。改了名單或規則，進行中的工單會收到通知；已結束的工單要重新驗過授權才能接續。
+- **訂閱直通**：工單訂閱它的線程，之後同一線程的訊息、CI 結果、審查留言直接送給工作代理，不再經過主會話；人在已結束工單的線程留言，會在原授權下接續。工作代理可以把超出範圍的訊息交回、把無關的線程退訂、追蹤相關的 Issue 或 PR。
+- **GitHub 來源**：用輪詢接收，不需要對外網址。來源包括代理帳號的通知、訂閱線程的新留言、行內審查與審查結果、PR 合併或關閉、head commit 的 CI 變化，以及可選的全收範圍（新 Issue、新 PR、所有留言、預設分支 CI）。留言帶標記，重送不會重複貼。
+- **PR 由系統代開**：工作代理 commit 後呼叫 `ticket_pull_request`，系統先跑團隊的檢查指令（沙箱內），通過才推分支、開 PR，並讓工單訂閱這個 PR。權杖只出現在 git 子行程的環境變數，工作代理拿不到。
+- **Telegram 群組來源**：沿用節點已掛的機器人，回覆照話題與回覆串；群組回覆硬性上限 100 字。名單用數字 id，不用顯示名稱。
+- **對外寫入預設每筆核准**：留言、回覆、開 PR 都會在「常駐代理：對外寫入待核准」對話等人按，同時推到 Telegram。auto 模式只放寬接單，寫入要另外設定才放寬。
+- **可靠性**：決定之後的動作先存成待辦再做，失敗以 2 秒起倍增、最長 1 分鐘重試。重啟後進行中的派工會附復原說明重開，提醒先查目錄、git 與討論串，不要重複對外動作。
+- **看門狗**：在代理之外定時檢查來源、待辦、死掉、卡住或繞圈的工作代理。能自癒的自癒，其餘每小時最多通知一次；可選另開一段沒有工具的對話，判斷工單有沒有實質進展。
+- **網頁「常駐代理」頁**：上方是設定順序軸（接上來源、設名單、寫規則、先觀察、開自動，狀態由實際資料算出），分頁依序是待處理、工單、事件（每則訊息去了哪裡）、設定。服務使用報告加入常駐代理的事件數、判斷、工單結果與對外寫入數。
+
+Resident agent: an agent that stays up on the node, listens to a GitHub repository and Telegram groups, hands the work it accepts to workers in isolated directories, and answers where it was asked; people are called only for decisions and reviews. The design follows DeepSeek's "Exploring Super-agent Design" and its open prototype dsh-superagent (MIT): the same domain model and rules, rewritten with the Python standard library, keeping xHarness's approvals, sandbox and audit trail. Off by default; `[superagent] enabled = true` turns it on.
+
+- **Two layers**: a resident main Session routes, replies and coordinates; it has no shell and reads no code. Each ticket has a worker in its own git worktree. Events that arrive while the main Session is busy go into its next turn together.
+- **Events and a two-stage gate**: each message is a Trigger; one pull request, issue or reply chain is a Thread. Code decides first (the allowed list, whether the agent was addressed, each receiving scope's admission table, trusted bots); only then a model. An allowed sender who addresses the agent makes an explicit request; anything else needs a team rule, and every enabled rule is judged. Accept modes: off, observe (default: records what it would accept) and auto.
+- **A frozen Mandate**: an accept records its strength, scope, matched rules and Policy version on the ticket; message text cannot change it. A Policy change is delivered to open tickets, and an ended ticket is revalidated before it resumes.
+- **Subscriptions**: a ticket subscribes to its Threads; later messages, CI results and reviews there go straight to its worker without the main Session, and a person's message resumes an ended ticket under its Mandate. A worker can hand back what is beyond its ticket, drop an unrelated Thread and follow a related one.
+- **GitHub Source** by polling (no public address): the agent account's notifications, new comments, inline reviews and reviews on subscribed Threads, merges and closes, CI changes on the head commit, and optional receive-all scopes. Comments carry a marker so a retry never posts twice.
+- **The system opens pull requests**: a worker commits and calls `ticket_pull_request`; the host runs the team's check (sandboxed), then pushes and opens the pull request and subscribes the ticket to it. The token reaches only the git child process's environment; workers never hold it.
+- **Telegram group Source** on the node's existing bot, answering in the right topic and reply chain, at most 100 words per chat reply; the allowed list uses numeric ids.
+- **Every write is approved by default**, in a conversation of its own and on Telegram; auto mode widens accepting, not writing.
+- **Reliability**: work after a decision is stored first and retried (2 s doubling to a minute); after a restart, running assignments start again with a recovery note.
+- **Watchdog**: a control loop outside the agents checks Sources, stored work and dead, stalled or looping workers, heals what it can and tells a person at most once an hour; optionally a tool-less conversation judges whether a stalled ticket still progresses.
+- **"常駐代理" page**: a setup track computed from real data, then inbox, tickets, events (where each message went) and settings. The usage report gains the resident agent's numbers.
+
 ## 1.18.0 — 2026-10-29
 
 操作這台電腦：模型可以看畫面、用滑鼠和鍵盤（macOS）。`[tools] desktop_control = true` 開啟，預設關閉。

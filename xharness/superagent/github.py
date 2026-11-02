@@ -413,9 +413,9 @@ def _git_env(token: str) -> dict[str, str]:
             "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}", "GIT_TERMINAL_PROMPT": "0"}
 
 
-def git(args: list[str], cwd: str, token: str = "", timeout: int = 600) -> str:
+def git(args: list[str], cwd: str, token: str | None = None, timeout: int = 600) -> str:
     env = {**os.environ, **(_git_env(token) if token else {})}
-    done = subprocess.run(["git", "-c", "user.name=xharness", "-c", "user.email=xharness@localhost", *args],  # nosec B603 B607
+    done = subprocess.run(["git", "-c", "user.name=xharness", "-c", "user.email=xharness@localhost", *args],  # nosec B603 B607 - git, fixed argv, no shell
                           cwd=cwd, capture_output=True, text=True, errors="replace", timeout=timeout, env=env)
     if done.returncode != 0:
         raise RuntimeError(f"git {args[0]} failed: {scrub((done.stderr or done.stdout).strip())[:400]}")

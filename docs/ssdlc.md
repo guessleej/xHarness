@@ -64,6 +64,11 @@ the threat model in the same pull request.
 | Multi-node hub compromised or node token leaked | Node tokens are referenced by environment variable name (`token_env`), never written to config; the hub forwards only `approvals` and `stop` with validated ids; nodes ignore `nodes` fan-out when asked by a hub (no recursive polling); a node must bind non-loopback with a token, and `XHARNESS_WEB_TOKEN_FILE` keeps it off the command line; plain http is for trusted LANs only — put TLS in front across boundaries | Mitigated; residual: LAN sniffing without TLS |
 | Consolidation lets the model rewrite or delete memory wholesale | Plans are proposals: CLI dry-run by default, the agent tool returns the plan unless `apply` is set and then goes through approval; model proposals may only name memories that exist in the topic, everything else is dropped; the deterministic layer only merges near-duplicates into the newer entry; every merge/delete is audited as `consolidate` | Mitigated; residual in `auto` mode |
 | Stale memory keeps steering the agent after reality changed | Freshness = latest of verified / updated / last read; past `stale_days` the entry is flagged 待確認 in the injected index and the model is told to treat it with caution; re-verification is explicit (`memory_verify` through approval, `xharness memory verify`), model-assisted verdicts only use newer same-topic memories as evidence and only `verify` verdicts are ever applied; expiry archives, never deletes, and is audited as `expire` | Mitigated |
+| Prompt injection in a group message, PR comment or CI output drives the resident agent to unrequested work | Authorization never reads message text: code admits by the allowed list, addressing, the admission table and the bot list, and an accept freezes strength, scope, matched rules and Policy version on the ticket; inferred work needs a team rule and auto mode (observe by default); messages that arrive by subscription are data and grant nothing; workers stay under approvals and the sandbox | Mitigated; residual: a listed person's own account taken over |
+| Someone poses as a listed person by display name | The allowed list matches only the Source's account id (GitHub login, Telegram numeric id), never a display name; accounts on different Sources are never mapped | Mitigated |
+| Resident agent writes (comments, replies, pull requests) run away or spam | By default every write waits for a person's approval on the page or Telegram; writes go through an outbox with a fixed id per message, sent once, and GitHub comments carry a marker against reposting; chat replies are capped at 100 words; a declined write is recorded as dropped and never retried | Mitigated; residual with `writes = "auto"` |
+| The GitHub token leaks to the model or to disk in clear | Stored AES-256-GCM encrypted (or mounted as a file), never returned by the API; it travels only in the API's Authorization header and the git child process's environment, never in argv or the clone's config; the system pushes and opens pull requests, so neither workers nor the main Session hold it; error text is scrubbed of token shapes | Mitigated |
+| The resident agent stalls, hangs or loops unnoticed | A watchdog outside the agents checks Sources, stored work, and each worker's liveness, progress and repeated calls every minute, restarts what it can and notifies at most hourly; every decision, assignment and write is in the audit event table | Mitigated |
 | Model exfiltrates file contents to the endpoint | Inherent to the design: the model must see file contents to work. Point xHarness at an endpoint you trust (on-prem friendly by construction) | Accepted, disclosed |
 
 ### Residual risks (accepted and disclosed)
@@ -154,7 +159,9 @@ Rules the architecture enforces:
   and `tools/desktop_mac.py` — they run this package's own backend and fixed system tools (osascript, screencapture,
   sips, open) with a fixed argv, no shell and a timeout, and every action is approved by the person first; `B404`/`B603`/`B607` in `isolation.py` and
   `board.py` — git with a fixed argv and no shell, and the `check`/`verify` commands are approved, sandboxed and timed
-  out exactly like the bash tool).
+  out exactly like the bash tool; `B404`/`B603`/`B607` in `superagent/github.py` — git with a fixed argv and no shell
+  (clone, fetch, worktree, push), the token only in the child's environment; `B310` there — the GitHub API address is
+  restricted to https when configured, and every request URL is checked to stay under it).
 
 ### Phase 4 — Verification
 

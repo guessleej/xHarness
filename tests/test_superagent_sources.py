@@ -125,3 +125,52 @@ def test_the_http_surface_lists_settles_and_guards(agent):
     assert api.post(sa, {"action": "retry", "ticket": ticket_id}, "admin")[0] == 400
     assert api.post(sa, {"action": "save", "settings": {"eval": {"mode": "sometimes"}}}, "admin")[0] == 400
     assert api.post(sa, {"action": "pause"}, "admin")[1]["paused"] is True
+
+
+def test_the_security_check_warns_when_writes_skip_approval(agent):
+    from xharness.seccheck import _superagent_items
+    sa, bridge = agent
+    items = {i["id"]: i for i in _superagent_items(sa)}
+    assert items["superagent-writes"]["state"] == "pass"
+    sa.save_settings({**sa.settings, "writes": "auto"})
+    assert {i["id"]: i for i in _superagent_items(sa)}["superagent-writes"]["state"] == "warn"
+
+
+def test_ready_needs_a_pull_request_once_the_code_changed(tmp_path):
+    import subprocess
+
+    from xharness.superagent import github as gh
+
+    def git(*args, cwd):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@x", *args], cwd=cwd, check=True, capture_output=True)
+    origin, work = tmp_path / "origin", tmp_path / "work"
+    origin.mkdir()
+    git("init", "-q", "-b", "main", cwd=origin)
+    (origin / "README.md").write_text("Instalation\n")
+    git("add", ".", cwd=origin)
+    git("commit", "-qm", "init", cwd=origin)
+    git("clone", "-q", str(origin), str(work), cwd=tmp_path)
+
+    sa = Superagent(str(tmp_path / "home"), Host(Bridge()), sources={})
+    sa.sources["gh"] = type("GH", (), {"kind": "github", "id": "gh", "config": {"defaultBranch": "main"},
+                                       "scope": lambda self, m: {"listened": True, "observed": False, "row": "r"},
+                                       "thread_ref": lambda self, n: {"source": "gh", "id": str(n)}})()
+    sa.settings["policy"]["sources"]["gh"] = {"allowed": [{"id": "a", "name": ""}], "bots": [], "admission": {}}
+    sa.engine.receive({"id": "r", "source": "gh", "threads": [{"source": "gh", "id": "1"}], "actor": {"source": "gh", "id": "a"},
+                       "human": True, "addressed": "mention", "at": "2099-01-01T00:00:00Z", "text": "fix", "meta": {}})
+    sa.engine.evaluate_due()
+    ticket_id = sa.engine.decide("r", {"kind": "accept", "title": "t", "scope": "s", "reason": "asked"})["ticketId"]
+    ticket = sa.store.ticket(ticket_id)
+    ticket["execution"] = {"name": "fix", "directory": str(work)}
+    sa.store.save_ticket(ticket)
+
+    sa.ready_check(ticket_id)                                   # nothing changed: ready is allowed
+    (work / "README.md").write_text("Installation\n")
+    with pytest.raises(ValueError, match="uncommitted"):
+        sa.ready_check(ticket_id)
+    git("commit", "-qam", "fix", cwd=work)
+    with pytest.raises(ValueError, match="no pull request"):
+        sa.ready_check(ticket_id)
+    sa.engine.bind_thread(ticket_id, {"source": "gh", "id": "2"}, own=True)
+    sa.ready_check(ticket_id)
+    assert gh.git(["log", "--oneline", "origin/main..HEAD"], str(work)).strip()

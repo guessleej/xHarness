@@ -21,6 +21,7 @@ server) supplies conversations, approvals and notifications; see `Host`.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import queue
 import threading
@@ -112,10 +113,8 @@ class Worker:
 
     def stop(self) -> None:
         self.stopped = True
-        try:
+        with contextlib.suppress(Exception):  # a conversation that is already gone needs no stopping
             self.handle.cancel()
-        except Exception:  # noqa: BLE001
-            pass
 
 
 class Superagent:
@@ -846,6 +845,8 @@ class Superagent:
         def report(args: Doc, _ctx: ToolContext) -> ToolResult:
             def work() -> str:
                 state = args.get("state")
+                if state == "ready":
+                    sa.ready_check(ticket_id)
                 body: Doc = {"state": state, "summary": str(args.get("summary", ""))[:4000]}
                 if "question" in args:
                     body["question"] = args["question"] if args["question"] else None
@@ -910,6 +911,21 @@ class Superagent:
                  {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}},
                   "required": ["title", "body"]}, pull_request, mutating=True),
         ]
+
+    def ready_check(self, ticket_id: str) -> None:
+        """Code is delivered through a pull request: a model's word that it is ready is not enough."""
+        ticket = self.engine.require(ticket_id)
+        source = self.work_source()
+        path = (ticket.get("execution") or {}).get("directory", "")
+        if source is None or not path or not os.path.isdir(os.path.join(path, ".git")) and not os.path.isfile(os.path.join(path, ".git")):
+            return
+        if gh.git(["status", "--porcelain"], path).strip():
+            raise ValueError("not ready: the directory has uncommitted changes. Commit them and call ticket_pull_request, "
+                             "or undo them and report dropped if nothing needs to change.")
+        base = f"origin/{source.config['defaultBranch'] or 'main'}"
+        ahead = gh.git(["log", "--oneline", f"{base}..HEAD"], path).strip()
+        if ahead and not any(f.get("own") for f in ticket.get("follows", [])):
+            raise ValueError("not ready: the commits have no pull request yet. Call ticket_pull_request first.")
 
     def open_pull_request(self, ticket_id: str, title: str, body: str, ctx: ToolContext) -> str:
         ticket = self.engine.require(ticket_id)

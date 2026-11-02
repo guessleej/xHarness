@@ -942,6 +942,7 @@ class WebApp:
             bound_host=self.bound_host,
             has_token=self.has_token,
             users=self.users,
+            superagent=self.superagent,
         )
 
     def dispose(self) -> None:

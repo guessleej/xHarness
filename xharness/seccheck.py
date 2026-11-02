@@ -142,7 +142,41 @@ def _channel_items() -> list[dict[str, str]]:
     return items
 
 
-def run(config: Any, *, bound_host: str | None = None, has_token: bool = False, users: Any = None) -> dict[str, Any]:
+def _superagent_items(agent: Any) -> list[dict[str, str]]:
+    """The resident agent: who may start work, whether writes wait for a person, and where its tokens live."""
+    if agent is None:
+        return []
+    import os
+
+    settings = agent.settings
+    items = []
+    writes = settings.get("writes") == "auto"
+    items.append(_item(
+        "superagent-writes", "常駐代理對外寫入是否先經人核准", WARN if writes else PASS,
+        "已接下的工作會直接在 GitHub 或群組留言、開 PR，不經人核准。" if writes else "每一則留言、回覆與 PR 都等人在網頁或 Telegram 按核准。",
+        "到「常駐代理 > 設定 > 對外寫入」改回「每一則都要核准」。" if writes else "",
+    ))
+    from_env = [sid for sid, s in settings["sources"].items() if s["kind"] == "github"
+                and not s["config"].get("token_file") and not agent.store.kv(f"secret:{sid}:token")
+                and os.environ.get(f"XHARNESS_SUPERAGENT_{sid.upper().replace('-', '_')}_TOKEN")]
+    items.append(_item(
+        "superagent-token", "常駐代理的 GitHub 權杖存放方式", WARN if from_env else PASS,
+        f"{'、'.join(from_env)} 的權杖從環境變數讀，會出現在行程環境與容器檢視裡。" if from_env
+        else "權杖加密保存或以檔案掛載，工作代理與模型都拿不到。",
+        "到「常駐代理 > 設定」貼上權杖（加密保存），或改用 token_file 掛載檔案，再移除環境變數。" if from_env else "",
+    ))
+    nobody = [sid for sid in settings["sources"] if not (settings["policy"]["sources"].get(sid) or {}).get("allowed")]
+    if nobody:
+        items.append(_item(
+            "superagent-allowed", "常駐代理的名單", WARN,
+            f"來源 {'、'.join(nobody)} 沒有設定誰能叫代理；只會依准入表與主動規則行事。",
+            "到「常駐代理 > 設定 > 誰能叫它」加入同事的帳號。",
+        ))
+    return items
+
+
+def run(config: Any, *, bound_host: str | None = None, has_token: bool = False, users: Any = None,
+        superagent: Any = None) -> dict[str, Any]:
     """Every check, against the live configuration. Read-only."""
     items: list[dict[str, str]] = []
     config_path = _find_config_file(None)
@@ -241,6 +275,7 @@ def run(config: Any, *, bound_host: str | None = None, has_token: bool = False, 
         ))
 
     items += _channel_items()
+    items += _superagent_items(superagent)
 
     # --- 4. network exposure ----------------------------------------------
     loopback = bound_host in (None, "127.0.0.1", "localhost", "::1", "[::1]")

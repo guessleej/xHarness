@@ -10,6 +10,7 @@ conversations and the main Session's tools.
 
 from __future__ import annotations
 
+import contextlib
 import secrets
 import threading
 import time
@@ -125,10 +126,8 @@ class WebHost:
         return self.app.telegram
 
     def notify(self, event: str, text: str) -> None:
-        try:
+        with contextlib.suppress(Exception):  # a notice must never stop the agent
             self.app.channels.dispatch("external", "常駐代理", text)
-        except Exception:  # noqa: BLE001 - a notice must never stop the agent
-            pass
 
 
 def mount(app: Any) -> Superagent:

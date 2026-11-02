@@ -149,8 +149,9 @@ class Store:
         return self._all("SELECT doc FROM thread WHERE active = 1")
 
     def threads(self, limit: int = 200, subscribed: bool = False) -> list[Doc]:
-        where = "WHERE subscribed = 1 " if subscribed else ""
-        return self._all(f"SELECT doc FROM thread {where}ORDER BY last_at DESC LIMIT ?", (limit,))  # nosec B608 - fixed text
+        if subscribed:
+            return self._all("SELECT doc FROM thread WHERE subscribed = 1 ORDER BY last_at DESC LIMIT ?", (limit,))
+        return self._all("SELECT doc FROM thread ORDER BY last_at DESC LIMIT ?", (limit,))
 
     # Tickets
 
@@ -244,8 +245,11 @@ class Store:
 
     def effects(self, kind: str = "") -> list[Doc]:
         with self._lock:
-            rows = self._db.execute("SELECT id, kind, key, payload, attempts, error, due FROM effect " +
-                                    ("WHERE kind = ? " if kind else "") + "ORDER BY id", (kind,) if kind else ()).fetchall()
+            if kind:
+                rows = self._db.execute("SELECT id, kind, key, payload, attempts, error, due FROM effect WHERE kind = ? ORDER BY id",
+                                        (kind,)).fetchall()
+            else:
+                rows = self._db.execute("SELECT id, kind, key, payload, attempts, error, due FROM effect ORDER BY id").fetchall()
         return [{"id": r[0], "kind": r[1], "key": r[2], "payload": json.loads(r[3]), "attempts": r[4], "error": r[5], "due": r[6]}
                 for r in rows]
 

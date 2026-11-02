@@ -57,6 +57,11 @@
 | 多節點 hub 被入侵或節點 token 外洩 | 節點 token 以環境變數名稱參照（`token_env`）、絕不寫進設定檔；hub 只轉發 `approvals` 與 `stop` 且驗證 id；節點被 hub 詢問時不再輪詢自己的節點（不遞迴）；節點綁非 loopback 必須有 token，`XHARNESS_WEB_TOKEN_FILE` 讓 token 不出現在命令列；純 http 僅限信任的 LAN——跨網段前面放 TLS | 已緩解；殘餘：無 TLS 的 LAN 竊聽 |
 | 彙整讓模型大幅改寫或刪除記憶 | 計畫只是提案：CLI 預設 dry-run，agent 工具不帶 `apply` 只回計畫、帶了要過審批；模型提案只能引用主題內存在的名稱，其餘丟棄；確定性層只把近乎重複者併入較新那則；每筆合併／刪除都以 `consolidate` 稽核 | 已緩解；`auto` 模式仍有殘餘風險 |
 | 過時的記憶在現實已改變後仍引導 agent | 新鮮度取 verified／updated／最後一次讀取三者最晚者；超過 `stale_days` 在注入的索引標「待確認」並告知模型謹慎；重驗是明確動作（`memory_verify` 走審批、`xharness memory verify`），模型輔助判定只拿同主題較新記憶當證據、且只套用 `verify` 判定；到期只歸檔不刪、稽核記 `expire` | 已緩解 |
+| 常駐代理被群組訊息、PR 留言或 CI 輸出裡的提示注入驅使去做沒被要求的事 | 授權不看訊息內容：准入由程式依名單、是否點名、准入表與機器人名單決定，接單時把強度、範圍、依據的規則與政策版本寫死在工單上；推斷出來的工作要符合團隊規則且在 auto 模式才接，預設 observe 只記錄；訂閱直通進來的訊息只是資料、不帶授權；工作代理照樣受審批與沙箱管 | 已緩解；殘留：名單內的人自己被冒用帳號 |
+| 有人冒用顯示名稱假裝是名單上的人 | 名單只比對來源給的帳號 ID（GitHub 登入名、Telegram 數字 id），從不比對顯示名稱；不同來源的帳號不互相對應 | 已緩解 |
+| 常駐代理對外寫入（留言、回覆、開 PR）失控或洗版 | 預設每一筆都要人在網頁或 Telegram 按核准；寫入走 outbox，同一則訊息有固定 id、只會送一次，GitHub 留言另帶標記防重貼；群組回覆硬性上限 100 字；被拒的寫入記錄為 dropped 不重試 | 已緩解；`writes = "auto"` 時殘留 |
+| GitHub 權杖外洩給模型或寫進磁碟明文 | 權杖以 AES-256-GCM 加密存放（或掛檔案），API 永不回傳；只放在 API 請求的 Authorization 標頭與 git 子行程的環境變數，不進命令列參數、不寫進 clone 的設定；PR 由系統代推代開，工作代理與主會話都拿不到權杖；錯誤訊息先遮罩權杖樣式 | 已緩解 |
+| 常駐代理停擺、卡住或繞圈卻沒人知道 | 看門狗在代理之外每分鐘檢查來源、待辦、工作代理的存活、進展與重複動作，能自癒的重開，其餘每小時最多推播一次；所有決定、派工與寫回都記在稽核事件表 | 已緩解 |
 | 模型把檔案內容外送到端點 | 設計本質：模型必須看到檔案內容才能工作。請把 xHarness 指向你信任的端點（本設計對地端友善） | 接受並揭露 |
 
 ### 殘餘風險（接受並揭露）
@@ -98,7 +103,7 @@
   輸出上限與逾時。
 - 每個 `# nosec` 抑制都要在現場附理由註解，並在本文件登錄
   （現有：`tools/bash.py` 的 `B404`/`B603`/`B607`——執行指令就是該工具的本職；
-  `llm.py` 的 `B310`——scheme 已在建構時驗證；`tools/security.py` 的 `B404`/`B603`——呼叫掃描器是該工具本職，argv 固定且有逾時；`evals.py` 的 `B404`/`B603`——`command` 檢查是案例作者的程式碼、在用完即丟的工作區執行；`desktop.py` 的 `B110`——關閉時銷毀可能已關閉的原生視窗屬預期行為，沒有可回復之處；`sandbox.py` 的 `B404`/`B603`/`B108`——後端功能探測與 bwrap 的 /tmp bind 目標，探測 argv 固定；`tools/jobs.py` 與 `tools/terminal.py` 的 `B404`/`B603`、`tools/powershell.py` 的 `B404`/`B603`/`B108`（持續 PowerShell 的指令檔放在 /tmp 下的私有目錄，沙箱只開放 /tmp 可寫）——執行經核准的指令（在背景，或在一直開著的 shell 裡）是這兩個工具的本職，審批與沙箱與 bash 相同；`tools/jobs.py` 的 `B110`——畫面監聽失敗不能連帶讓執行中的背景工作中斷；`hooks.py` 的 `B404`/`B602`/`B603`——hooks 是操作者自己設定檔裡自己的指令，shell 語法是 Claude Code hook 協定的一部分（工作中的專案永遠不能註冊 hook）；`lsp.py` 的 `B404`/`B603`/`B110`——設定或常見的語言伺服器執行檔、argv 固定，關閉中的伺服器關閉失敗不影響任何事；`schedule.py` 的 `B110`——畫面監聽失敗不能讓提醒停擺；`hall.py` 的 `B310`——加入的一方開啟邀請碼裡的主機網址，`parse_invite` 已限定只能是 http 或 https；`tools/desktop_control.py` 與 `tools/desktop_mac.py` 的 `B404`/`B603`——執行本套件自己的後端程式與 osascript、screencapture、sips、open 等固定系統工具，argv 固定、不經 shell、有逾時，每個動作都先經人核准；`isolation.py` 與 `board.py` 的 `B404`/`B603`/`B607`——git 固定 argv 不經 shell，`check`／`verify` 指令與 bash 工具相同，先經審批、在沙箱內執行、有逾時）。
+  `llm.py` 的 `B310`——scheme 已在建構時驗證；`tools/security.py` 的 `B404`/`B603`——呼叫掃描器是該工具本職，argv 固定且有逾時；`evals.py` 的 `B404`/`B603`——`command` 檢查是案例作者的程式碼、在用完即丟的工作區執行；`desktop.py` 的 `B110`——關閉時銷毀可能已關閉的原生視窗屬預期行為，沒有可回復之處；`sandbox.py` 的 `B404`/`B603`/`B108`——後端功能探測與 bwrap 的 /tmp bind 目標，探測 argv 固定；`tools/jobs.py` 與 `tools/terminal.py` 的 `B404`/`B603`、`tools/powershell.py` 的 `B404`/`B603`/`B108`（持續 PowerShell 的指令檔放在 /tmp 下的私有目錄，沙箱只開放 /tmp 可寫）——執行經核准的指令（在背景，或在一直開著的 shell 裡）是這兩個工具的本職，審批與沙箱與 bash 相同；`tools/jobs.py` 的 `B110`——畫面監聽失敗不能連帶讓執行中的背景工作中斷；`hooks.py` 的 `B404`/`B602`/`B603`——hooks 是操作者自己設定檔裡自己的指令，shell 語法是 Claude Code hook 協定的一部分（工作中的專案永遠不能註冊 hook）；`lsp.py` 的 `B404`/`B603`/`B110`——設定或常見的語言伺服器執行檔、argv 固定，關閉中的伺服器關閉失敗不影響任何事；`schedule.py` 的 `B110`——畫面監聽失敗不能讓提醒停擺；`hall.py` 的 `B310`——加入的一方開啟邀請碼裡的主機網址，`parse_invite` 已限定只能是 http 或 https；`tools/desktop_control.py` 與 `tools/desktop_mac.py` 的 `B404`/`B603`——執行本套件自己的後端程式與 osascript、screencapture、sips、open 等固定系統工具，argv 固定、不經 shell、有逾時，每個動作都先經人核准；`isolation.py` 與 `board.py` 的 `B404`/`B603`/`B607`——git 固定 argv 不經 shell，`check`／`verify` 指令與 bash 工具相同，先經審批、在沙箱內執行、有逾時；`superagent/github.py` 的 `B404`/`B603`/`B607`——git 固定 argv 不經 shell（clone、fetch、worktree、push），權杖只放在子行程的環境變數；`B310`——GitHub API 位址在設定時限定為 https，送出前再檢查網址仍在同一主機下）。
 
 ### 階段四：驗證
 
