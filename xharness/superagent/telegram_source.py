@@ -85,6 +85,12 @@ class TelegramGroupSource:
         self.health = {"state": "ready", "detail": f"@{self.username} in {len(self.config['chats'])} group(s)", "at": now_iso()}
         return 0
 
+    def detach(self) -> None:
+        """Hand group messages back to the bridge: this Source was removed, disabled or rebuilt."""
+        bridge = self.bridge()
+        if bridge is not None and bridge.intercept == self.take:
+            bridge.intercept = None
+
     def _root(self, chat: int, message: Doc) -> str:
         if message.get("is_topic_message") and message.get("message_thread_id"):
             return f"topic-{message['message_thread_id']}"
@@ -137,12 +143,16 @@ class TelegramGroupSource:
         if address.get("topic"):
             params["message_thread_id"] = int(address["topic"])
         try:
-            bridge.api("sendMessage", params)
+            sent = bridge.api("sendMessage", params) or {}
         except Exception as error:  # noqa: BLE001
             text = str(error).lower()
             if "chat not found" in text or "kicked" in text or "forbidden" in text:
                 return "gone"
             raise
+        if sent.get("message_id") and not address.get("topic"):
+            # A reply to the bot's message continues the reply chain it answered, not a new Thread.
+            root = message["channel"]["thread"][len(f"{self.id}:{address['chat']}:"):]
+            self.store.set_kv(f"tg-root:{self.id}:{address['chat']}:{sent['message_id']}", root)
         return "sent"
 
     def link(self, address: Doc) -> str:

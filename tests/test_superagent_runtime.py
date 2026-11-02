@@ -336,3 +336,87 @@ def test_a_candidate_left_undecided_is_named_again_in_the_same_turn(agent):
     settle(sa, 10)
     assert any("still undecided" in s for s in seen)
     assert sa.store.decisions(10)[0]["kind"] == "ignore"
+
+
+def test_a_ticket_works_in_the_repository_its_request_came_from(agent):
+    sa, client, host = agent
+    sa.save_settings({**sa.settings, "sources": {
+        "gh": {"kind": "github", "config": {"repository": "acme/app", "login": "xcloud-agent", "defaultBranch": "main"}},
+        "gh2": {"kind": "github", "config": {"repository": "acme/site", "login": "xcloud-agent", "defaultBranch": "main"}}}})
+    sa.store.save_trigger({"id": "s2", "source": "gh2", "threads": [], "at": "2099-01-01T00:00:00Z", "text": "x"})
+    sa.store.save_trigger({"id": "tg", "source": "tg", "threads": [], "at": "2099-01-01T00:00:00Z", "text": "x"})
+    assert sa.work_source({"origin": {"triggerId": "s2"}}).repo == "acme/site"
+    assert sa.work_source({"origin": {"triggerId": "tg"}}) is None          # not from GitHub and two repositories: ambiguous
+
+
+def test_idle_workers_do_not_all_start_at_once_beyond_the_limit(agent):
+    import queue
+    sa, client, host = agent
+
+    class W:
+        def __init__(self, busy: bool) -> None:
+            self.busy, self.stopped, self.inbox = busy, False, queue.Queue()
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    sa.save_settings({**sa.settings, "executor": {**sa.settings["executor"], "maxWorkers": 1}})
+    sa.workers = {"a": W(True), "b": W(False)}
+    bot = {"id": "b", "inputs": [{"id": "i", "human": False}], "undelivered": ["i"]}
+    person = {"id": "b", "inputs": [{"id": "i", "human": True}], "undelivered": ["i"]}
+    assert sa._full(bot) is True                          # an idle worker takes a slot like a new one
+    assert sa._full(person) is False                      # the reserved slot is a person's
+    assert sa._full({**bot, "id": "a"}) is False          # a working worker just queues
+
+
+def test_an_edited_issue_is_a_new_trigger_and_a_new_comment_on_it_is_not(agent):
+    sa, client, host = agent
+    source = sa.sources["gh"]
+    client.routes = {"repos/acme/app/issues/7/comments": [], "repos/acme/app/issues/7": issue(7, "alice", "fix the typo")}
+    assert source._read_thread(7, "2026-01-01T00:00:00Z") == 1
+    client.routes["repos/acme/app/issues/7"] = {**issue(7, "alice", "fix the typo"), "updated_at": "2099-02-01T00:00:00Z"}
+    assert source._read_thread(7, "2099-01-15T00:00:00Z") == 0              # only updated_at moved
+    client.routes["repos/acme/app/issues/7"] = {**issue(7, "alice", "@xcloud-agent fix the typo and the title"),
+                                                "updated_at": "2099-02-02T00:00:00Z"}
+    assert source._read_thread(7, "2099-01-15T00:00:00Z") == 1
+    client.routes = {"repos/acme/app/issues/8/comments": [], "repos/acme/app/issues/8": issue(8, "alice", "old")}
+    assert source._read_thread(8, "2099-01-15T00:00:00Z") == 0              # an old issue first seen is not a request
+
+
+def test_ci_is_not_passed_while_a_check_run_on_a_later_page_still_runs(agent):
+    sa, client, host = agent
+    done = [{"name": f"c{n}", "status": "completed", "conclusion": "success"} for n in range(100)]
+    pages = {1: done, 2: [{"name": "slow", "status": "in_progress"}]}
+    client.routes = {"repos/acme/app/commits/abc/check-runs": lambda p: {"total_count": 101, "check_runs": pages[p["page"]]}}
+    assert sa.sources["gh"]._checks("abc") == ("", False)
+    pages[2] = [{"name": "slow", "status": "completed", "conclusion": "success"}]
+    assert sa.sources["gh"]._checks("abc")[0].endswith("(101 checks)")
+
+
+def test_a_followed_thread_that_cannot_be_read_shows_as_a_source_problem(agent):
+    sa, client, host = agent
+    sa.engine.receive({"id": "r", "source": "gh", "threads": [{"source": "gh", "id": "5"}], "actor": {"source": "gh", "id": "alice"},
+                       "human": True, "addressed": "mention", "at": "2099-01-01T00:00:00Z", "text": "fix it", "meta": {"row": "comments"}})
+    sa.engine.evaluate_due()
+    sa.engine.decide("r", {"kind": "accept", "title": "t", "scope": "s", "reason": "asked"})
+
+    def boom(_params):
+        raise gh.GitHubError(502, "bad gateway")
+    client.routes = {"repos/acme/app/issues/5": boom}
+    source = sa.sources["gh"]
+    source.poll()
+    assert source.health["state"] == "error" and "#5" in source.health["detail"]
+    assert any("#5" in (p.get("error") or "") for p in sa.overview()["problems"])
+    client.routes = {"repos/acme/app/issues/5/comments": [], "repos/acme/app/issues/5": issue(5, "alice", "")}
+    source.poll()
+    assert source.health["state"] == "ready"
+
+
+def test_disposing_the_web_app_stops_the_resident_agent(agent):
+    from xharness.web import WebApp
+    sa, client, host = agent
+    sa.start()
+    app = WebApp.__new__(WebApp)
+    app.lock, app.conversations, app.telegram, app.superagent = __import__("threading").Lock(), {}, None, sa
+    WebApp.dispose(app)
+    assert not sa._thread.is_alive()

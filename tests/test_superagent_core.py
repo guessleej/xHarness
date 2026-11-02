@@ -363,3 +363,37 @@ def test_a_follow_up_read_after_a_resume_does_not_come_back_forever(world):
     engine.report(ticket_id, {"state": "ready", "summary": "date added"})
     assert store.ticket(ticket_id)["ended"]["outcome"] == "completed"
     assert "f1" not in store.thread("gh:issue-1")["pending"]
+
+
+def test_automatic_inputs_held_behind_a_block_reach_the_worker_once_a_person_answers(world):
+    engine, ports, outbox, store, _ = world
+    engine.receive(trig("t1"))
+    engine.evaluate_due()
+    ticket_id = accept(engine, "t1")["ticketId"]
+    engine.assignment_started(ticket_id, store.ticket(ticket_id)["assignments"][0]["id"])
+    engine.receive(trig("ci1", actor="", human=False, addressed=None, text="lint failed"))
+    engine.report(ticket_id, {"state": "blocked", "summary": "no access"})
+    engine.receive(trig("ci2", actor="", human=False, addressed=None, text="tests failed"))
+    ids = {i.get("triggerId"): i["id"] for i in store.ticket(ticket_id)["inputs"]}
+    assert ids["ci1"] not in store.ticket(ticket_id)["undelivered"]
+    engine.receive({**trig("t2", addressed=None, text="access granted"), "at": "2026-11-03T00:00:00Z"})
+    ids = {i.get("triggerId"): i["id"] for i in store.ticket(ticket_id)["inputs"]}
+    assert store.ticket(ticket_id)["undelivered"][-3:] == [ids["ci1"], ids["ci2"], ids["t2"]]
+
+
+def test_the_same_result_text_after_a_resume_is_a_new_message(world):
+    engine, ports, outbox, store, _ = world
+    engine.receive(trig("t1"))
+    engine.evaluate_due()
+    ticket_id = accept(engine, "t1")["ticketId"]
+    first = store.ticket(ticket_id)["assignments"][0]["id"]
+    engine.assignment_started(ticket_id, first)
+    engine.report(ticket_id, {"state": "ready", "summary": "done"})
+    one = engine.reply({"purpose": "result", "ticketId": ticket_id, "text": "Done."})
+    assert engine.reply({"purpose": "result", "ticketId": ticket_id, "text": "Done."})["id"] == one["id"]   # a retry
+    engine.receive({**trig("t2", addressed=None, text="one more line please"), "at": "2026-11-03T00:00:00Z"})
+    ticket = store.ticket(ticket_id)
+    assert len(ticket["assignments"]) == 2
+    engine.assignment_started(ticket_id, ticket["assignments"][-1]["id"])
+    engine.report(ticket_id, {"state": "ready", "summary": "done again"})
+    assert engine.reply({"purpose": "result", "ticketId": ticket_id, "text": "Done."})["id"] != one["id"]

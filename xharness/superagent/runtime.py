@@ -24,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import os
 import queue
+import statistics
 import threading
 import time
 import traceback
@@ -252,7 +253,10 @@ class Superagent:
                 built[sid] = self.kinds[instance["kind"]](sid, instance["config"])
             except Exception as error:  # noqa: BLE001 - a bad Source shows its problem, the rest run
                 built[sid] = _Broken(sid, str(error))
-        self.sources = built
+        old, self.sources = self.sources, built
+        for source in old.values():
+            if hasattr(source, "detach"):
+                source.detach()        # a removed or rebuilt Telegram Source stops taking the bot's group messages
 
     def save_settings(self, raw: Doc, origin: str = "page", user: str = "") -> Doc:
         """Validate, move secrets out of the config, keep a version, and tell open tickets how a Policy change bears on them."""
@@ -314,6 +318,9 @@ class Superagent:
         self._stop.set()
         for worker in list(self.workers.values()):
             worker.stop()
+        for source in self.sources.values():
+            if hasattr(source, "detach"):
+                source.detach()
         if self._thread:
             self._thread.join(timeout=10)
 
@@ -381,6 +388,14 @@ class Superagent:
     def slots_used(self) -> int:
         return sum(1 for w in self.workers.values() if w.busy or not w.inbox.empty())
 
+    def _full(self, ticket: Doc) -> bool:
+        """No slot for a worker that is not already working; a person's message may use the one reserved slot."""
+        worker = self.workers.get(ticket["id"])
+        if worker is not None and not worker.stopped and (worker.busy or not worker.inbox.empty()):
+            return False
+        person = any(i.get("human") for i in ticket["inputs"] if i["id"] in ticket["undelivered"])
+        return self.slots_used() >= self.settings["executor"]["maxWorkers"] + (1 if person else 0)
+
     def _do_launch(self, payload: Doc) -> Any:
         ticket = self.store.ticket(payload["ticketId"])
         if not ticket or not live(ticket):
@@ -388,9 +403,7 @@ class Superagent:
         assignment = next((a for a in ticket["assignments"] if a["id"] == payload["assignmentId"]), None)
         if not assignment or assignment["state"] == "ended":
             return True
-        person = any(i.get("human") for i in ticket["inputs"] if i["id"] in ticket["undelivered"])
-        limit = self.settings["executor"]["maxWorkers"] + (1 if person else 0)
-        if ticket["id"] not in self.workers and self.slots_used() >= limit:
+        if self._full(ticket):
             return "defer"
         worker = self.workers.get(ticket["id"])
         if worker is None or worker.stopped:
@@ -425,6 +438,8 @@ class Superagent:
         if worker is None or worker.stopped:
             self.store.effect_add("launch", ticket["id"], {"ticketId": ticket["id"], "assignmentId": running["id"], "reopen": True})
             return True
+        if self._full(ticket):
+            return "defer"
         ids = list(ticket["undelivered"])
         worker.enqueue(self.inputs_text(ticket, ids), ids)
         self.engine.inputs_delivered(ticket["id"], running["id"], ids)
@@ -579,11 +594,14 @@ class Superagent:
         ticket["execution"] = {"name": name, "assignment": outcome.get("note", "")}
         return ticket
 
-    def work_source(self) -> Any:
-        for source in self.sources.values():
-            if getattr(source, "kind", "") == "github":
-                return source
-        return None
+    def work_source(self, ticket: Doc) -> Any:
+        """The GitHub Source a ticket works in: the one its request came from, else the only one configured."""
+        origin = self.store.trigger(ticket["origin"]["triggerId"]) or {}
+        source = self.sources.get(origin.get("source", ""))
+        if getattr(source, "kind", "") == "github":
+            return source
+        repos = [s for s in self.sources.values() if getattr(s, "kind", "") == "github"]
+        return repos[0] if len(repos) == 1 else None
 
     def prepare_directory(self, ticket: Doc) -> str:
         name = (ticket.get("execution") or {}).get("name") or ticket["id"][:8]
@@ -591,7 +609,7 @@ class Superagent:
         if existing and os.path.isdir(existing):
             return existing
         work = os.path.join(self.home, "superagent-work")
-        source = self.work_source()
+        source = self.work_source(ticket)
         if source is None:
             path = os.path.join(work, name)
             os.makedirs(path, exist_ok=True)
@@ -923,9 +941,9 @@ class Superagent:
 
         def follow(args: Doc, _ctx: ToolContext) -> ToolResult:
             def work() -> str:
-                source = sa.work_source()
+                source = sa.work_source(sa.engine.require(ticket_id))
                 if source is None:
-                    raise ValueError("no GitHub Source")
+                    raise ValueError("no GitHub Source for this ticket")
                 number = int(args.get("number", 0))
                 return "following" if sa.engine.follow_for_context(ticket_id, source.thread_ref(number)) else "already following"
             return sa._guard(work)
@@ -965,7 +983,7 @@ class Superagent:
     def ready_check(self, ticket_id: str) -> None:
         """Code is delivered through a pull request: a model's word that it is ready is not enough."""
         ticket = self.engine.require(ticket_id)
-        source = self.work_source()
+        source = self.work_source(ticket)
         path = (ticket.get("execution") or {}).get("directory", "")
         if source is None or not path or not os.path.isdir(os.path.join(path, ".git")) and not os.path.isfile(os.path.join(path, ".git")):
             return
@@ -979,9 +997,9 @@ class Superagent:
 
     def open_pull_request(self, ticket_id: str, title: str, body: str, ctx: ToolContext) -> str:
         ticket = self.engine.require(ticket_id)
-        source = self.work_source()
+        source = self.work_source(ticket)
         if source is None:
-            raise ValueError("no GitHub Source is configured")
+            raise ValueError("no GitHub Source for this ticket: it did not come from one and several are configured")
         path = (ticket.get("execution") or {}).get("directory", "")
         name = (ticket.get("execution") or {}).get("name", "")
         if not path or not os.path.isdir(path):
@@ -1059,7 +1077,7 @@ class Superagent:
                 "wouldAccept": sum(1 for d in decisions if (d.get("audit") or {}).get("would_accept")),
                 "tickets": len(tickets), "ended": len(ended),
                 "byOutcome": {o: sum(1 for t in ended if t["ended"]["outcome"] == o) for o in ("completed", "merged", "closed", "dropped", "stopped")},
-                "medianMinutes": round(durations[len(durations) // 2], 1) if durations else None,
+                "medianMinutes": round(statistics.median(durations), 1) if durations else None,
                 "repliesSent": counts.get("reply.sent", 0), "repliesDropped": counts.get("reply.dropped", 0),
                 "pullRequests": counts.get("pull.opened", 0)}
 

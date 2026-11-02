@@ -947,6 +947,8 @@ class WebApp:
 
     def dispose(self) -> None:
         self._closing = True
+        if self.superagent is not None:
+            self.superagent.stop()
         with self.lock:
             convs = list(self.conversations.values())
         for conv in convs:

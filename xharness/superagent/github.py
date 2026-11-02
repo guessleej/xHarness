@@ -147,6 +147,7 @@ class GitHubSource:
         self.closed = closed
         self.login = self.config["login"]
         self.health: Doc = {"state": "starting", "detail": "", "at": now_iso()}
+        self.thread_errors: dict[int, str] = {}
 
     # The domain's view
 
@@ -167,10 +168,13 @@ class GitHubSource:
         return {"actor": {"source": self.id, "id": user["login"]},
                 "human": human_login(user) and user["login"].lower() != self.login.lower()}
 
-    def issue_trigger(self, issue: Doc, pr: bool) -> Doc:
+    def issue_trigger(self, issue: Doc, pr: bool, edited: bool = False) -> Doc:
         body = issue.get("body") or ""
-        trigger = {"id": key(self.id, "issue", str(issue["number"])), "source": self.id, "threads": [self.thread_ref(issue["number"])],
-                   **self._actor(issue.get("user")), "at": issue["created_at"], "text": f"{issue['title']}\n\n{body}",
+        # The title and body are the version: an edit is a new Trigger, a new comment (which also bumps updated_at) is not.
+        version = key(issue["title"], body)
+        at = (issue.get("updated_at") or issue["created_at"]) if edited else issue["created_at"]
+        trigger = {"id": key(self.id, "issue", str(issue["number"]), version), "source": self.id, "threads": [self.thread_ref(issue["number"])],
+                   **self._actor(issue.get("user")), "at": at, "text": f"{issue['title']}\n\n{body}",
                    "channel": self.channel(issue["number"], issue.get("html_url", "")), "url": issue.get("html_url", ""),
                    "meta": {"repository": self.repo, "number": issue["number"], "isPr": pr, "kind": "pull" if pr else "issue",
                             "row": "pulls" if pr else "issues", "title": issue["title"]}}
@@ -231,13 +235,26 @@ class GitHubSource:
             stored += self._subscribed()
             if self.config["receive"]["ci"]:
                 stored += self._branch_ci()
-            self.health = {"state": "ready", "detail": f"{stored} new events", "at": started}
+            if self.thread_errors:
+                # A ticket's reviews, merge state and CI come from these threads: unreadable ones are a problem to show.
+                failed = ", ".join(f"#{n}: {e[:120]}" for n, e in sorted(self.thread_errors.items())[:5])
+                self.health = {"state": "error", "detail": f"cannot read {len(self.thread_errors)} followed thread(s): {failed}", "at": started}
+            else:
+                self.health = {"state": "ready", "detail": f"{stored} new events", "at": started}
         except GitHubError as error:
             self.health = {"state": "error", "detail": str(error), "at": started}
         return stored
 
     def _take(self, trigger: Doc) -> int:
         return 1 if self.receive(trigger) == "stored" else 0
+
+    def _take_issue(self, issue: Doc, pr: bool, since: str) -> int:
+        """An issue opened since the last read, or an edit of one already received (an old issue's new comment is not a request)."""
+        seen = self._state(f"issue:{issue['number']}")
+        if (issue.get("user") or {}).get("login", "").lower() == self.login.lower() or not seen and issue.get("created_at", "") < since:
+            return 0
+        self._set_state(f"issue:{issue['number']}", True)
+        return self._take(self.issue_trigger(issue, pr, bool(seen)))
 
     def _notifications(self, started: str) -> int:
         since = self._state("since") or _shift(started, -3600)
@@ -254,9 +271,7 @@ class GitHubSource:
     def _read_thread(self, number: int, since: str) -> int:
         issue = self.client.get(f"repos/{self.repo}/issues/{number}")
         pr = bool(issue.get("pull_request"))
-        stored = 0
-        if issue.get("created_at", "") >= since and (issue.get("user") or {}).get("login", "").lower() != self.login.lower():
-            stored += self._take(self.issue_trigger(issue, pr))
+        stored = self._take_issue(issue, pr, since)
         stored += self._comments(number, pr, since)
         return stored
 
@@ -279,9 +294,8 @@ class GitHubSource:
             since = self._state("stream-issues") or started
             for issue in self.client.pages(f"repos/{self.repo}/issues", state="all", sort="created", direction="asc", since=since):
                 pr = bool(issue.get("pull_request"))
-                if issue.get("created_at", "") >= since and receive["pulls" if pr else "issues"] \
-                        and (issue.get("user") or {}).get("login", "").lower() != self.login.lower():
-                    stored += self._take(self.issue_trigger(issue, pr))
+                if receive["pulls" if pr else "issues"]:
+                    stored += self._take_issue(issue, pr, since)
             self._set_state("stream-issues", _shift(started, -OVERLAP_SECONDS))
         if receive["comments"]:
             since = self._state("stream-comments") or started
@@ -318,8 +332,9 @@ class GitHubSource:
                 elif issue.get("state") == "closed":
                     self.closed(self.thread_ref(number), "closed", issue.get("closed_at") or started)
                 self._set_state(checkpoint, _shift(started, -OVERLAP_SECONDS))
+                self.thread_errors.pop(number, None)
             except GitHubError as error:
-                self._set_state(f"thread-error:{number}", str(error))
+                self.thread_errors[number] = str(error)
         return stored
 
     def _pull_state(self, number: int) -> int:
@@ -342,7 +357,14 @@ class GitHubSource:
 
     def _checks(self, sha: str) -> tuple[str, bool]:
         """A one-line CI summary once every check finished; empty while any still runs."""
-        runs = (self.client.get(f"repos/{self.repo}/commits/{sha}/check-runs", per_page=100) or {}).get("check_runs", [])
+        runs: list[Doc] = []
+        for page in range(1, 11):
+            got = self.client.get(f"repos/{self.repo}/commits/{sha}/check-runs", per_page=100, page=page) or {}
+            runs += got.get("check_runs", [])
+            if len(runs) >= int(got.get("total_count") or 0) or not got.get("check_runs"):
+                break
+        else:
+            return "", False                # ponytail: over 1,000 runs is read as still running, not as passed
         if not runs or any(r.get("status") != "completed" for r in runs):
             return "", False
         bad = [r["name"] for r in runs if r.get("conclusion") not in ("success", "neutral", "skipped")]

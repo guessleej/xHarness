@@ -677,6 +677,7 @@ class Engine:
                 raise UserError("notRetryable")
             self._end_assignment(ticket, latest, "retried")
             self._requeue_untaken(ticket, latest)
+            self._release_held(ticket)
             assignment = self._new_assignment(ticket)
             ticket["updatedAt"] = self.now()
             self.repo.save_ticket(ticket)
@@ -742,7 +743,11 @@ class Engine:
         ticket["inputs"].append(item)
         ticket["updatedAt"] = self.now()
         held = live(ticket) and automatic(item) and waits_for_person(ticket)
-        if not held:
+        if held:
+            ticket["held"] = [*ticket.get("held", []), item["id"]]
+        else:
+            if not waits_for_person(ticket):
+                self._release_held(ticket)
             ticket["undelivered"].append(item["id"])
         self.repo.save_ticket(ticket)
         if not live(ticket) or held:
@@ -752,6 +757,12 @@ class Engine:
             self.executor.deliver(ticket, running)
         elif latest and latest["state"] == "pending" and not waits_for_person(ticket):
             self.executor.start(ticket, latest)
+
+    @staticmethod
+    def _release_held(ticket: Doc) -> None:
+        """The wait for a person ended: CI results and bot updates held meanwhile go out first, in arrival order."""
+        held = [i for i in ticket.pop("held", []) if i not in ticket["undelivered"]]
+        ticket["undelivered"] = held + ticket["undelivered"]
 
     def wake(self, ticket_id: str) -> None:
         """Resume an ended ticket under its unchanged Mandate when a person's message waits for it: no Eval."""
@@ -772,6 +783,7 @@ class Engine:
         ticket.pop("ended", None)
         ticket["updatedAt"] = at
         assignment = self._new_assignment(ticket)
+        self._release_held(ticket)
         resumed = {"id": key("input", ticket_id, "resumed", first["triggerId"]), "kind": "resumed", "triggerId": first["triggerId"], "at": at}
         ticket["inputs"].append(resumed)
         ticket["undelivered"].insert(0, resumed["id"])
@@ -818,6 +830,7 @@ class Engine:
         waiting = self._triggers_of(ticket, ticket["undelivered"])
         left = self._untaken(ticket, ticket["undelivered"])
         ticket["undelivered"] = []
+        ticket.pop("held", None)
         self.repo.save_ticket(ticket)
         self._let_go(ticket["id"], waiting, left)
 
@@ -1025,7 +1038,9 @@ class Engine:
             if answers:
                 self.take_up(ticket_id, answers)
             if report["state"] in ("blocked", "failed"):
-                ticket["undelivered"] = [i for i in ticket["undelivered"] if not automatic(self._input(ticket, i))]
+                parked = [i for i in ticket["undelivered"] if automatic(self._input(ticket, i))]
+                ticket["undelivered"] = [i for i in ticket["undelivered"] if i not in parked]
+                ticket["held"] = [*ticket.get("held", []), *(i for i in parked if i not in ticket.get("held", []))]
             self.repo.save_ticket(ticket)
             ready = "completed" if not ticket.get("follows") else (self.follows_done(ticket) or {}).get("outcome")
             if report["state"] == "dropped":
@@ -1094,8 +1109,10 @@ class Engine:
             raise UserError("notAttention")
         if purpose == "answer" and not (trigger or {}).get("human"):
             raise UserError("notQuestion")
+        # A result belongs to one assignment: the same "Done." after a resume is a new message, a retry the same one.
+        generation = [(latest_assignment(ticket) or {}).get("id", "")] if purpose == "result" and ticket else []
         message_id = key("attention-reply", attention["id"]) if attention else \
-            key("reply", (trigger or {}).get("id") or (ticket or {}).get("id", ""), request["text"])
+            key("reply", (trigger or {}).get("id") or (ticket or {}).get("id", ""), *generation, request["text"])
         existing = self.outbox.status(message_id)
         ready = not ticket or not trigger or trigger["id"] in ticket.get("answers", [])
         if purpose == "answer" and not ready and existing is None:

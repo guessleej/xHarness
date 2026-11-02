@@ -19,7 +19,7 @@ class Bridge:
         if method == "getMe":
             return {"id": 42, "username": "xcloud_bot"}
         self.sent.append(params)
-        return {}
+        return {"message_id": 500 + len(self.sent)}
 
 
 class Host:
@@ -174,3 +174,23 @@ def test_ready_needs_a_pull_request_once_the_code_changed(tmp_path):
     sa.engine.bind_thread(ticket_id, {"source": "gh", "id": "2"}, own=True)
     sa.ready_check(ticket_id)
     assert gh.git(["log", "--oneline", "origin/main..HEAD"], str(work)).strip()
+
+
+def test_removing_the_telegram_source_hands_group_messages_back_to_the_bridge(agent):
+    sa, bridge = agent
+    assert bridge.intercept is not None
+    sa.save_settings({**sa.settings, "sources": {}})
+    assert bridge.intercept is None
+
+
+def test_a_reply_to_the_bots_answer_continues_the_original_thread(agent):
+    sa, bridge = agent
+    bridge.intercept(message(10, "@xcloud_bot 幫我把 README 的錯字改掉"))
+    source = sa.sources["tg"]
+    status = source.send({"channel": {"source": "tg", "thread": "tg:-100:10", "address": {"chat": "-100", "reply_to": "10"}},
+                          "text": "好，處理中"})
+    assert status == "sent"
+    bot_message = {**message(501, "好，處理中", user=42), "from": {"id": 42, "is_bot": True}}
+    bridge.intercept(message(12, "標題也改", reply_to=bot_message))
+    threads = {t["threads"][0]["id"] for t in sa.store.recent_triggers("", 10)}
+    assert threads == {"-100:10"}
