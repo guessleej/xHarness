@@ -325,6 +325,20 @@ def test_without_direct_delivery_a_follow_up_goes_through_the_main_session(world
     assert any(i.get("triggerId") == "t2" for i in store.ticket(ticket_id)["inputs"])
 
 
+def test_a_message_queued_on_the_thread_while_the_main_session_decides_goes_to_the_new_ticket(world):
+    """Live run on granite: a stop queued behind the request's Eval reached the main Session after the work was done."""
+    engine, ports, _, store, _ = world
+    engine.receive(trig("t1"))
+    engine.evaluate_due()
+    engine.receive(trig("t2", text="never mind, stop"))           # queued: the thread is still evaluating t1
+    assert store.thread("gh:issue-1")["pending"] == ["t2"]
+    ticket_id = accept(engine, "t1")["ticketId"]
+    ticket = store.ticket(ticket_id)
+    assert any(i.get("triggerId") == "t2" for i in ticket["inputs"]) and ticket["undelivered"]
+    assert store.thread("gh:issue-1")["pending"] == []
+    assert engine.owners(store.trigger("t2")) == [ticket_id]
+
+
 def test_a_follow_up_read_after_a_resume_does_not_come_back_forever(world):
     """Live run on granite: a follow-up attached just before a ready report came back after every later end."""
     engine, ports, _, store, _ = world

@@ -609,8 +609,13 @@ class Superagent:
                    "Read the inputs that follow; check the directory and the threads before repeating anything."
         note = (ticket.get("execution") or {}).get("assignment")
         parts = [f"Assignment: {ticket['title']}\nScope: {ticket['mandate']['scope']}" + (f"\nRouting note: {note}" if note else "")]
-        if origin:
-            parts.append("Source message:\n" + prompts.trigger_line(origin, 3000, f"ticket_read trigger {origin['id'][:12]}"))
+        # Every message the decision covered, oldest first: a request and a later "stop" accepted together must
+        # both reach the worker (measured: only the stop was shown and the worker did the work anyway).
+        sources = sorted((t for t in (self.store.trigger(i) for i in ticket["origin"].get("triggerIds") or []) if t),
+                         key=lambda t: t["at"]) or ([origin] if origin else [])
+        if sources:
+            parts.append(("Source message:\n" if len(sources) == 1 else "Source messages, oldest first:\n") + "\n\n".join(
+                prompts.trigger_line(t, 3000 // len(sources), f"ticket_read trigger {t['id'][:12]}") for t in sources[-10:]))
         return "\n\n".join(parts)
 
     def inputs_text(self, ticket: Doc, ids: list[str]) -> str:

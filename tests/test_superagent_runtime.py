@@ -221,6 +221,21 @@ def test_a_follow_up_that_resumes_a_ticket_opens_the_new_assignment_and_is_not_h
     assert len(ticket["assignments"]) == 2 and ticket["ended"]
 
 
+def test_a_request_and_a_stop_accepted_together_both_open_the_assignment_in_order(agent):
+    sa, client, host = agent
+    turns: list[str] = []
+    host.worker_script = lambda handle, text: turns.append(text) or "ok"
+    client.routes.update({"repos/acme/app/issues/5/comments": [], "repos/acme/app/issues/5": issue(5, "alice", "")})
+    for tid, text, at in (("r", "please compile report 5", "2099-01-01T00:00:00Z"), ("s", "report 5 is not needed, stop", "2099-01-01T00:00:15Z")):
+        sa.engine.receive({"id": tid, "source": "gh", "threads": [{"source": "gh", "id": "5"}], "actor": {"source": "gh", "id": "alice"},
+                           "human": True, "addressed": "mention", "at": at, "text": text, "meta": {"row": "comments"}})
+    sa.engine.evaluate_due()
+    sa.engine.decide("s", {"kind": "accept", "title": "t", "scope": "s", "reason": "asked"})
+    settle(sa, 5)
+    first = turns[0]
+    assert "oldest first" in first and first.index("compile report 5") < first.index("not needed, stop")
+
+
 def test_polling_a_working_ticket_is_refused_after_two_asks(agent):
     sa, client, host = agent
     sa.engine.receive({"id": "r", "source": "gh", "threads": [{"source": "gh", "id": "5"}], "actor": {"source": "gh", "id": "alice"},

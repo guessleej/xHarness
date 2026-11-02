@@ -70,3 +70,111 @@ queue at the model. Each agent gets 60 turns, so the total budget grows with K.
   is the bottleneck (at most four llama.cpp slots in total). Eight agents also spent 35%
   more tokens than four for the same 8 tasks — agents with nothing left to claim
   still pay for board_list calls. On this hardware, two agents is the best value.
+
+## 2026-11-02 — the resident agent (superagent)
+
+Modelled on DeepSeek's "Exploring Super-agent Design": a resident main Session
+decides what comes in (accept, attach, stop, ignore), one worker per ticket does
+the work, and follow-ups on a ticket's threads go straight to its worker.
+granite-4.2-30b Q6_K on the MI50 farm (two llama.cpp instances, :8093 and
+:8095, thinking off). Scripts are kept outside the repo, like `bench/`.
+Each configuration ran once or twice; read the numbers as one sample, not as
+a distribution. The article's experiments are far larger.
+
+### Live run: a GitHub issue to a pull request
+
+A fake GitHub API and a local git origin; everything else is real. An issue
+mentions the agent and asks for a README typo fix.
+
+| | |
+|---|---|
+| wall | 174 s |
+| tokens | 105,946 |
+| main Session accept | 44 s after the issue arrived |
+| writes approved | 3 (acknowledgement, push + pull request, result) |
+| result | commit `Fix README typo`, pull request #101 opened by the system, result posted on the issue |
+
+The worker never saw the token: the system pushed and opened the pull request.
+Two earlier live runs failed and each led to a fix in code (see below).
+
+### Ablation: one group chat stream
+
+53 messages over about 2.5 minutes: 6 work requests (each a `do_work` tool that
+only sleeps 30–60 s), 2 follow-ups ("also add the date"), 1 stop for request 5,
+36 chatter lines and 8 CI bot lines. Completion is the time from the request to
+the result message in the same thread. Limit 25 minutes. Code at `c19a7e3`.
+
+| mode | seed | delivered | P50 | slowest | tokens | stop honoured |
+|---|---|---|---|---|---|---|
+| superagent | 1 | 5/5 | 10.8 min | 11.6 min | 282,928 | no |
+| superagent | 2 | 5/5 | 12.1 min | 13.1 min | 327,585 | no |
+| no direct delivery | 1 | 5/5 | 10.6 min | 11.6 min | 349,747 | yes |
+| no direct delivery | 2 | 5/5 | 11.5 min | 12.2 min | 390,592 | yes |
+| one conversation, neutral prompt | 1 | 0/5 | – | – | 65,598 | yes |
+| one conversation, told to delegate | 1 | 0/5 | – | – | 72,302 | no |
+
+- The single conversation finished the work fastest (each request done 1.4–3.9
+  minutes after it was posted) but never used its `reply` tool: it wrote the
+  result as plain text, which reaches nobody in a group chat. The two-layer
+  agent delivers because the system reminds the main Session when a ready
+  result or a decision is still owed.
+- At this load, direct delivery did not make results arrive sooner; it saved
+  about 17% of tokens (611k against 740k over two seeds). The article reports a
+  speed gain under much heavier load; we have not reproduced that.
+- Results waited behind the main Session, not behind the work: a ticket done
+  at 144 s was announced at 647 s. The main Session wrote long explanations at
+  the end of turns (60–116 s each) that nobody reads, and once polled a working
+  ticket's status 17 times in one turn.
+- The stop failed in two ways. With seed 1 the request and the stop reached the
+  main Session in one batch and it accepted both as one ticket, showing the
+  worker only the stop. With seed 2 the stop queued behind the request's
+  decision and reached the main Session after the work was done.
+- In one earlier run of the no-direct mode the main Session ignored every
+  request ("do_work is not defined"), with the same prompt that accepted them
+  in the other runs. One run per mode is not enough to compare modes.
+
+### Batching in the main Session
+
+Candidates (requests, thanks, greetings) arrive at a fixed rate for 4 minutes,
+then 5 minutes to drain; workers are stubs. Seconds per decision = total
+main-Session turn time / decisions recorded.
+
+| rate / min | candidates | decided, no cap | s / decision, no cap | decided, cap 8 | s / decision, cap 8 |
+|---|---|---|---|---|---|
+| 1 | 2 | 2 | 24.9 | 2 | 37.8 |
+| 5 | 18 | 18 | 13.3 | 19 | 10.5 |
+| 10 | 45–46 | 45 | 6.2 | 46 | 7.7 |
+| 20 | 90 | 15 | 20.8 | 57 | 8.5 |
+| 40 | 158 | 40 | 12.1 | 33 | 15.0 |
+
+- Up to 10 a minute, batching works as the article describes: the cost per
+  decision falls as batches grow.
+- Without a cap, a batch of about 20 left most candidates undecided even after
+  the reminder. With at most 8 items per turn, 63% were decided at 20 a minute
+  instead of 17%. At 40 a minute one granite main Session cannot keep up with
+  or without the cap.
+- Every decision in this test was "ignore", requests included: the requests
+  ("compile report 3") name no source, and the main Session said so. That is
+  the test's wording, not a bug, but it means the test measures deciding, not
+  accepting.
+
+### Defects these runs found, all fixed in code with a test
+
+1. A worker reported ready with commits but no pull request: ready is refused
+   until the change has its own pull request.
+2. The main Session answered in plain text: an owed result or decision is named
+   again in the same turn.
+3. A follow-up attached just before a ready report came back after every later
+   end (looped 5 times): once any copy of a message was read, it was read.
+4. On a resumed ticket the follow-up arrived one turn after the opening text,
+   after the worker had already reported ready: the opening text now carries
+   the waiting messages.
+5. Batches of 20 or more were mostly left undecided: at most 8 items per turn.
+6. Status polling: the answer says the ticket's stage and that reports arrive
+   by themselves; a third ask in one turn is refused.
+7. The stop's two failures above: a ticket opens with every message its
+   decision covered, oldest first, and a person's message queued on the
+   ticket's thread while the main Session decided goes to the new ticket.
+8. The ablation script itself compared thread names in two formats and
+   reported 0 delivered for the two-layer modes; the first ablation numbers
+   were discarded.

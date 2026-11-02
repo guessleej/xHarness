@@ -561,9 +561,20 @@ class Engine:
             ticket = self.prepare_ticket(ticket, outcome)
         assignment = self._new_assignment(ticket)
         self.repo.save_ticket(ticket)
-        for trigger_id in trigger_ids:
-            for ref in (self.repo.trigger(trigger_id) or {}).get("threads", []):
-                self._subscribe(ticket_id, ref)
+        refs = {thread_key(ref): ref for trigger_id in trigger_ids for ref in (self.repo.trigger(trigger_id) or {}).get("threads", [])}
+        for ref in refs.values():
+            self._subscribe(ticket_id, ref)
+        if self.direct:
+            # A person's message that queued on these Threads while the main Session decided is now the worker's
+            # (measured: a stop waited minutes behind the main Session and arrived after the work was done).
+            for thread_id in refs:
+                thread = self.repo.thread(thread_id)
+                queued = [t for t in (self.repo.trigger(i) for i in thread["pending"]) if t and t.get("human")]
+                if queued:
+                    thread["pending"] = [i for i in thread["pending"] if i not in {t["id"] for t in queued}]
+                    self.repo.save_thread(thread)
+                for trigger in queued:
+                    self._attach(ticket_id, trigger, "")
         if outcome.get("acknowledgement") and primary:
             self._acknowledge_accepted(ticket_id, primary, outcome["acknowledgement"])
         self.executor.start(self.require(ticket_id), assignment)
