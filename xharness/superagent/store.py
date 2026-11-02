@@ -288,6 +288,9 @@ class Store:
     def set_kv(self, key: str, value: Any) -> None:
         self._run("INSERT OR REPLACE INTO kv (key, value) VALUES (?,?)", (key, _dump(value)))
 
+    def kv_delete(self, key: str) -> None:
+        self._run("DELETE FROM kv WHERE key = ?", (key,))
+
     def kv_prefix(self, prefix: str) -> dict[str, Any]:
         with self._lock:
             rows = self._db.execute("SELECT key, value FROM kv WHERE key >= ? AND key < ?", (prefix, prefix + "￿")).fetchall()

@@ -58,7 +58,7 @@ class FakeHost:
         self.main_script: Callable[[FakeHandle, str], str] = lambda h, t: "nothing"
         self.worker_script: Callable[[FakeHandle, str], str] = lambda h, t: "nothing"
 
-    def open_conversation(self, name: str, cwd: str, system: str, tools: list, model: str = "") -> FakeHandle:
+    def open_conversation(self, name: str, cwd: str, system: str, tools: list, model: str = "", role: str = "worker") -> FakeHandle:
         script = self.main_script if name.startswith("resident") else self.worker_script
         handle = FakeHandle(name, tools, script)
         self.handles[name] = handle

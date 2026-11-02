@@ -51,7 +51,8 @@ class Handle(Protocol):
 
 
 class Host(Protocol):
-    def open_conversation(self, name: str, cwd: str, system: str, tools: list[Tool], model: str = "") -> Handle: ...
+    def open_conversation(self, name: str, cwd: str, system: str, tools: list[Tool], model: str = "",
+                          role: str = "worker") -> Handle: ...
 
     def approve(self, summary: str) -> bool: ...
 
@@ -133,6 +134,7 @@ class Superagent:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._polled: dict[str, float] = {}
+        self._approving: set[str] = set()
         self.engine = Engine(self.store, policy=self.policy, scope=lambda t: self.scope(t["source"], t.get("meta", {})),
                              assessor=self._Assessor(self), executor=self._Executor(self), outbox=self._Outbox(self),
                              emit=self._emit, now=now, prepare_ticket=self._prepare_ticket)
@@ -380,7 +382,7 @@ class Superagent:
             rules = [r for r in self.settings["policy"]["rules"] if r["id"] in (ticket["mandate"]["basis"].get("rules") or [])]
             handle = self.host.open_conversation(f"ticket {ticket['id'][:8]}: {ticket['title']}", cwd,
                                                  prompts.worker_prompt(self.settings, ticket, rules), self.worker_tools(ticket["id"]),
-                                                 self.settings["executor"]["model"])
+                                                 self.settings["executor"]["model"], role="worker")
             self.workers[ticket["id"]] = Worker(self, ticket["id"], handle, cwd)
             ticket = self.store.ticket(ticket["id"])
             ticket["execution"] = {**(ticket.get("execution") or {}), "directory": cwd, "conversation": handle.id}
@@ -422,17 +424,39 @@ class Superagent:
         if source is None or not hasattr(source, "send"):
             self.store.outbox_set(message["id"], "dropped", reason="sourceGone")
             return True
-        if self.settings["writes"] == "approve":
+        if self.settings["writes"] == "approve" and not message.get("approved"):
+            # A person decides off the loop's thread, so polling and other work go on meanwhile.
+            if message["id"] not in self._approving:
+                self._approving.add(message["id"])
+                threading.Thread(target=self._approve_and_send, args=(message, source), daemon=True,
+                                 name=f"superagent-approve-{message['id'][:8]}").start()
+            return "defer"
+        self._send(message, source)
+        return True
+
+    def _approve_and_send(self, message: Doc, source: Any) -> None:
+        try:
             where = source.link(message["channel"]["address"]) if hasattr(source, "link") else message["channel"]["thread"]
             if not self.host.approve(f"post on {where}: {message['text'][:300]}"):
                 self.store.outbox_set(message["id"], "dropped", reason="denied")
-                return True
+                self.store.log_event("reply.denied", now_iso(), {"id": message["id"], "ticketId": message.get("ticketId", "")})
+                self.store.effect_drop("reply", message["id"])
+                return
+            self.store.outbox_set(message["id"], "pending", approved=True)
+            self._send(message, source)
+            self.store.effect_drop("reply", message["id"])
+        except Exception as error:  # noqa: BLE001 - left in the queue, retried without asking again
+            self.store.set_kv(f"problem:reply:{message['id'][:8]}", {"at": now_iso(), "error": gh.scrub(str(error))[:300]})
+        finally:
+            self._approving.discard(message["id"])
+
+    def _send(self, message: Doc, source: Any) -> None:
         result = source.send(message)
         self.store.outbox_set(message["id"], "sent" if result == "sent" else "dropped",
                               **({} if result == "sent" else {"reason": result}), sentAt=now_iso())
         self.store.log_event("reply.sent" if result == "sent" else "reply.dropped", now_iso(),
                              {"id": message["id"], "ticketId": message.get("ticketId", "")})
-        return True
+        self.store.kv_delete(f"problem:reply:{message['id'][:8]}")
 
     # The main Session
 
@@ -488,7 +512,7 @@ class Superagent:
             if self.main is None:
                 self.main = self.host.open_conversation("resident agent (main Session)", self.home,
                                                         prompts.orchestrator_prompt(self.settings), self.main_tools(),
-                                                        self.settings["eval"]["model"])
+                                                        self.settings["eval"]["model"], role="main")
             self.main_last = self.main.run(text) or ""
         except Exception as error:  # noqa: BLE001
             self.store.set_kv("problem:main", {"at": now_iso(), "error": gh.scrub(str(error))[:500]})
