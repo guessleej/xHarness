@@ -929,7 +929,12 @@ class WebApp:
     def usage_report(self, since: str = "30d") -> dict[str, Any]:
         """The six-block service usage report; admin-only at the route level."""
         nodes = poll_all(list(self.nodes.values())) if self.nodes else []
-        return collect_report(self.config, since=since, users=self.users, nodes=nodes)
+        report = collect_report(self.config, since=since, users=self.users, nodes=nodes)
+        if self.superagent is not None:
+            from datetime import datetime, timezone
+            start = datetime.fromisoformat(report["from"]).astimezone(timezone.utc)
+            report["superagent"] = self.superagent.usage(start.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+        return report
 
     def security_check(self) -> dict[str, Any]:
         return seccheck.run(
@@ -3732,12 +3737,13 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
   $('#ag-pause').onclick=async()=>{try{await api('/api/superagent',{method:'POST',body:{action:agData&&agData.paused?'resume':'pause'}});agRefresh();}catch(e){toast(e.message,true);}};
   function agSteps(){
     const s=agSettings&&agSettings.settings;if(!s)return [];
-    const gh=Object.entries(s.sources).find(([k,v])=>v.kind==='github');
-    const hl=agData&&gh?(agData.sources[gh[0]]||{}):{};
-    const allowed=gh?((s.policy.sources[gh[0]]||{}).allowed||[]).length:0;
+    const srcs=Object.entries(s.sources),health=k=>(agData&&agData.sources[k])||{};
+    const ok=srcs.filter(([k,v])=>(v.kind!=='github'||v.tokenSet)&&health(k).state!=='error');
+    const bad=srcs.map(([k])=>health(k)).find(x=>x.state==='error');
+    const allowed=srcs.reduce((n,[k])=>n+((s.policy.sources[k]||{}).allowed||[]).length,0);
     const rules=s.policy.rules.filter(r=>r.enabled).length,mode=s.eval.mode;
     return [
-      {t:'接上 GitHub',w:'代理才收得到事件、開得了 PR',done:!!(gh&&gh[1].tokenSet&&hl.state!=='error'),bad:hl.state==='error'?hl.detail:''},
+      {t:'接上來源',w:'GitHub 存放庫或 Telegram 群組；代理才收得到事件',done:ok.length>0,bad:bad?bad.detail:''},
       {t:'設定誰能叫它',w:'名單上的人點名代理，就是明確的要求',done:allowed>0,need:1},
       {t:'寫主動規則',w:'哪些事不用點名也能做；不寫也能用',done:rules>0,opt:true},
       {t:'先觀察',w:'只記錄「本來會接」，核對對不對',done:mode!=='off'},
@@ -3831,9 +3837,15 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
     const tok=row('權杖',field('input',{id:'agf-token',type:'password',autocomplete:'new-password',placeholder:src.tokenSet?'已加密保存；留空表示不變':'貼上只限這個存放庫的權杖'}),'權限只給 Issues、Pull requests、Contents。加密保存，本頁不再顯示；工作代理拿不到它。');
     const recv=h('div','chevents');[['issues','新 Issue'],['pulls','新 PR'],['comments','所有留言'],['ci','預設分支 CI']].forEach(([k,l])=>{const lb=h('label'),cb=document.createElement('input');cb.type='checkbox';cb.dataset.k=k;cb.checked=!!cfg.receive[k];lb.append(cb,document.createTextNode(l));recv.appendChild(lb);});
     row('全部都收',recv,'不勾也收得到點名代理的訊息與已訂閱的討論；勾了才會評估沒點名的訊息（要配合主動規則）。');
+    const tgEntry=Object.entries(s.sources).find(([k,v])=>v.kind==='telegram')||['telegram',{kind:'telegram',enabled:true,config:{chats:[]}}];
+    const tgid=tgEntry[0],tgcfg=tgEntry[1].config||{chats:[]},tgpart=s.policy.sources[tgid]||{allowed:[],bots:[],admission:{}};
+    const chats=row('Telegram 群組',field('textarea',{id:'agf-chats',value:(tgcfg.chats||[]).map(c=>c.id+(c.all?' *':'')+(c.name?' '+c.name:'')).join('\n'),placeholder:'-1001234567890 * 研發群'}),
+      '一行一個群組 chat id（負數），後面加 * 表示全收、再加名稱。用節點已掛的 Telegram 機器人；要收沒點名的訊息，機器人要關掉隱私模式或設成管理員。');
     sec('2. 誰能叫它');
     const allowed=row('名單',field('textarea',{id:'agf-allowed',value:(part.allowed||[]).map(x=>x.id).join('\n'),placeholder:'GitHub 帳號，一行一個'}),'名單上的人點名代理，就是明確的要求；其他人點名預設不理。');
     const bots=row('可信的機器人',field('textarea',{id:'agf-bots',value:(part.bots||[]).map(x=>x.id).join('\n'),placeholder:'例如 dependabot[bot]'}),'它們的訊息最多只能是「推斷」，要符合主動規則才會接。');
+    const tgAllowed=row('Telegram 名單',field('textarea',{id:'agf-tgallowed',value:(tgpart.allowed||[]).map(x=>x.id+(x.name?' '+x.name:'')).join('\n'),placeholder:'Telegram 使用者 id（數字），一行一個，可加名字'}),
+      '用數字 id，不用顯示名稱（名稱可以改，冒名就擋不住）。不知道 id：先在群組裡講一句話，到「事件」看。');
     sec('3. 主動規則');
     const rules=h('div','rules');
     function ruleBox(r){const b=h('div','rulebox'),hd=h('div','chevents'),lb=h('label'),cb=document.createElement('input');cb.type='checkbox';cb.checked=r.enabled;lb.append(cb,document.createTextNode('啟用'));
@@ -3855,8 +3867,14 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
       const lines=t=>t.value.split(/\n|,/).map(x=>x.trim()).filter(Boolean).map(id=>({id}));
       const receive={};recv.querySelectorAll('input').forEach(cb=>receive[cb.dataset.k]=cb.checked);
       const config={...cfg,repository:repo.value.trim(),login:login.value.trim(),receive};if(tok.value.trim())config.token=tok.value.trim();
-      const next={...s,sources:{...Object.fromEntries(Object.entries(s.sources).map(([k,v])=>[k,{kind:v.kind,enabled:v.enabled,config:v.config}])),[sid]:{kind:'github',enabled:true,config}},
-        policy:{rules:[...rules.querySelectorAll('.rulebox')].map(b=>b._get()).filter(r=>r.name&&r.instruction),sources:{...s.policy.sources,[sid]:{...part,allowed:lines(allowed),bots:lines(bots)}}},
+      const chatList=chats.value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const m=l.match(/^(-?\d+)\s*(\*)?\s*(.*)$/);return m?{id:Number(m[1]),all:!!m[2],name:m[3]||''}:null;}).filter(Boolean);
+      const people=t=>t.value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const [id,...rest]=l.split(/\s+/);return {id,name:rest.join(' ')};});
+      const srcs=Object.fromEntries(Object.entries(s.sources).map(([k,v])=>[k,{kind:v.kind,enabled:v.enabled,config:v.config}]));
+      if(repo.value.trim())srcs[sid]={kind:'github',enabled:true,config};else delete srcs[sid];
+      if(chatList.length)srcs[tgid]={kind:'telegram',enabled:true,config:{chats:chatList}};else delete srcs[tgid];
+      const next={...s,sources:srcs,
+        policy:{rules:[...rules.querySelectorAll('.rulebox')].map(b=>b._get()).filter(r=>r.name&&r.instruction),
+          sources:{...s.policy.sources,[sid]:{...part,allowed:lines(allowed),bots:lines(bots)},[tgid]:{...tgpart,allowed:people(tgAllowed)}}},
         eval:{...s.eval,mode:mode.value},writes:writes.value,executor:{...s.executor,maxWorkers:parseInt(workers.value,10)||3,check:check.value.trim()}};
       save.disabled=true;
       try{await api('/api/superagent',{method:'POST',body:{action:'save',settings:next}});toast('已儲存');tok.value='';await agLoadSettings();agSig={};}

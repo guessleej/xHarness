@@ -119,6 +119,9 @@ class TelegramBridge:
         #: While one is open, a plain text message in that chat answers it.
         self.asking: dict[int, tuple[str, str, list[dict[str, str]]]] = {}
         self.offset = 0
+        #: The resident agent's group Source, when one listens: it takes the group messages it is
+        #: configured for before anything else here looks at them (see superagent/telegram_source.py).
+        self.intercept: Any = None
         self.lock = threading.Lock()
         self._stop = threading.Event()
         self.thread: threading.Thread | None = None
@@ -137,7 +140,7 @@ class TelegramBridge:
         while not self._stop.is_set():
             try:
                 updates = self.api("getUpdates", {"offset": self.offset, "timeout": POLL_TIMEOUT_SECONDS,
-                                                  "allowed_updates": ["message", "callback_query"]})
+                                                  "allowed_updates": ["message", "edited_message", "callback_query"]})
                 backoff = 1.0
             except Exception as error:  # noqa: BLE001 - network hiccups must not kill the bridge
                 print(f"[telegram] poll failed: {type(error).__name__}: {str(error)[:120]}", file=sys.stderr)
@@ -157,7 +160,15 @@ class TelegramBridge:
         if "callback_query" in update:
             self._callback(update["callback_query"])
             return
-        message = update.get("message") or {}
+        message = update.get("message") or update.get("edited_message") or {}
+        if self.intercept is not None:
+            try:
+                if self.intercept(message):
+                    return
+            except Exception as error:  # noqa: BLE001 - the agent's problem must not stop the bridge
+                print(f"[telegram] resident agent failed on a message: {type(error).__name__}", file=sys.stderr)
+        if "edited_message" in update:
+            return
         chat = int((message.get("chat") or {}).get("id", 0))
         text = str(message.get("text") or "").strip()
         if chat and chat not in self.allowed and self.pairing:

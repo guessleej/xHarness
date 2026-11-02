@@ -55,11 +55,28 @@ class WebHandle:
     def cancel(self) -> None:
         self.app.stop(self.conv)
 
+    def recent_calls(self, n: int = 12) -> list[str]:
+        calls = [f"{e.get('name')}:{str(e.get('args', ''))[:200]}" for e in self.conv.events if e.get("type") == "tool_start"]
+        return calls[-n:]
+
+    def transcript(self) -> str:
+        lines = []
+        for event in self.conv.events[-80:]:
+            kind = event.get("type")
+            if kind == "tool_start":
+                lines.append(f"call {event.get('name')} {str(event.get('args', ''))[:300]}")
+            elif kind == "tool_end":
+                lines.append(f"result {'ok' if event.get('ok') else 'error'} {str(event.get('output', ''))[:300]}")
+            elif kind in ("done", "user"):
+                lines.append(f"{kind}: {str(event.get('answer') or event.get('text') or '')[:500]}")
+        return "\n".join(lines)
+
 
 class WebHost:
     def __init__(self, app: Any) -> None:
         self.app = app
         self._writes: Any = None
+        self._judge: WebHandle | None = None
         self._lock = threading.Lock()
 
     def open_conversation(self, name: str, cwd: str, system: str, tools: list[Tool], model: str = "",
@@ -95,6 +112,17 @@ class WebHost:
         decision = bool(approval.decision)
         conv.push({"type": "approval_resolved", "id": approval_id, "allowed": decision})
         return decision
+
+    def judge(self, question: str) -> str:
+        """The Watchdog's own conversation: no tools, so it can only read what it is given and answer."""
+        with self._lock:
+            if self._judge is None or self.app.get(self._judge.id) is None:
+                self._judge = self.open_conversation("常駐代理：看門狗", ".", "You check whether an agent's work makes progress. "
+                                                     "You have no tools; answer from what you are given.", [], role="main")
+        return self._judge.run(question)
+
+    def telegram(self) -> Any:
+        return self.app.telegram
 
     def notify(self, event: str, text: str) -> None:
         try:

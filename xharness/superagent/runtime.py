@@ -31,10 +31,12 @@ from typing import Any, Callable, Protocol
 from ..tools import Tool, ToolContext, ToolResult
 from . import github as gh
 from . import prompts
+from . import telegram_source as tg
 from .engine import Engine
 from .model import Doc, UserError, key, live, now_iso, reason_text, running_assignment, thread_key, ticket_stage
 from .policy import Policy, SettingsError, assessment_outcome, policy_effects, policy_version, validate
 from .store import Store
+from .watchdog import Watchdog, open_problems
 
 TICK_SECONDS = 2.0
 RETRY_FIRST, RETRY_MAX = 2.0, 60.0
@@ -122,7 +124,7 @@ class Superagent:
         self.home = home
         self.host = host
         self.store = Store(os.path.join(home, "superagent.db"))
-        self.kinds = sources if sources is not None else {"github": self._github}
+        self.kinds = sources if sources is not None else {"github": self._github, "telegram": self._telegram}
         self._token_reader = token_reader
         self.lock = threading.RLock()
         self.settings = validate(self.store.kv("settings", {}) or {})
@@ -139,6 +141,7 @@ class Superagent:
                              assessor=self._Assessor(self), executor=self._Executor(self), outbox=self._Outbox(self),
                              emit=self._emit, now=now, prepare_ticket=self._prepare_ticket)
         self._build_sources()
+        self.watchdog = Watchdog(self)
 
     # Ports: each only stores the work, inside the Engine's transaction.
 
@@ -233,6 +236,10 @@ class Superagent:
         return gh.GitHubSource(source_id, config, client, self.store, self.engine.receive, self.engine.bind_thread,
                                self.engine.thread_closed)
 
+    def _telegram(self, source_id: str, config: Doc) -> Any:
+        bridge = lambda: getattr(self.host, "telegram", lambda: None)()  # noqa: E731
+        return tg.TelegramGroupSource(source_id, config, self.store, self.engine.receive, bridge)
+
     def _build_sources(self) -> None:
         built: dict[str, Any] = {}
         for sid, instance in self.settings["sources"].items():
@@ -259,6 +266,10 @@ class Superagent:
         for sid, instance in new["sources"].items():
             if instance["kind"] == "github":
                 gh.check_config(instance["config"])
+            elif instance["kind"] == "telegram":
+                tg.check_config(instance["config"])
+            else:
+                raise SettingsError(f"source {sid}: kind github or telegram")
         with self.lock:
             old = self.settings
             if secrets_given:
@@ -333,6 +344,8 @@ class Superagent:
                         source.poll()
         self.engine.evaluate_due()
         self.run_effects()
+        if self.watchdog.due():
+            self.watchdog.check()
 
     # Stored work
 
@@ -609,6 +622,19 @@ class Superagent:
 
     # Tools
 
+    def check_length(self, request: Doc) -> None:
+        """A chat reply is at most 100 words (a hard ceiling, not a target); GitHub takes structured text."""
+        trigger = self.store.trigger(request["triggerId"]) if request.get("triggerId") else None
+        if trigger is None and request.get("ticketId"):
+            ticket = self.store.ticket(request["ticketId"]) or {}
+            trigger = self.store.trigger((ticket.get("origin") or {}).get("triggerId", ""))
+        source = self.sources.get((trigger or {}).get("source", ""))
+        if getattr(source, "kind", "") == "telegram" and tg.words(request["text"]) > tg.IM_WORD_LIMIT:
+            raise ValueError(f"too long for a chat: {tg.words(request['text'])} words; at most {tg.IM_WORD_LIMIT}. "
+                             "Say the outcome and what the person must do, nothing else.")
+        if len(request["text"]) > 6000:
+            raise ValueError("too long: at most 6000 characters")
+
     def _guard(self, work: Callable[[], str]) -> ToolResult:
         try:
             return ToolResult(work())
@@ -732,14 +758,13 @@ class Superagent:
                 request = {"purpose": args.get("purpose"), "text": str(args.get("text", ""))}
                 if request["purpose"] not in ("answer", "result", "attention"):
                     raise ValueError("purpose: answer, result or attention")
-                if len(request["text"].split()) > 120 and request["purpose"] != "result" or len(request["text"]) > 1200:
-                    raise ValueError("too long: an IM reply is at most 100 words")
                 if args.get("ticket"):
                     request["ticketId"] = sa._find_ticket(str(args["ticket"]))["id"]
                 if args.get("trigger"):
                     request["triggerId"] = sa._find_trigger(str(args["trigger"]))["id"]
                 if args.get("question"):
                     request["question"] = str(args["question"])
+                sa.check_length(request)
                 result = sa.engine.reply(request)
                 return f"queued {result['id'][:12]} ({result['status']}{', already queued before' if result['reused'] else ''})"
             return sa._guard(work)
@@ -933,6 +958,7 @@ class Superagent:
         for decision in self.store.decisions(50, "unavailable"):
             if not decision.get("dismissed"):
                 problems.append({"kind": "eval", "decisionId": decision["id"], "error": reason_text(decision["reason"])})
+        problems += open_problems(self.watchdog)
         pending_writes = [m for m in self.store.outbox("pending", 50)]
         return {
             "person": [self.ticket_view(t, s) for t, s in stages if s["stage"] == "person"],

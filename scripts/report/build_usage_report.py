@@ -333,6 +333,21 @@ def build_docx(report: dict, output: str) -> str:
                  "denied": "使用者不同意套回", "no-changes": "沒有改到檔案", "error": "工作區出錯"}
         table(document, ["結果", "次數"], [[words.get(k, k), v] for k, v in sorted(spaces.items(), key=lambda kv: -kv[1])])
 
+    resident = report.get("superagent")
+    if resident:
+        outcomes = resident.get("byOutcome") or {}
+        median = resident.get("medianMinutes")
+        body(document, (
+            f"常駐代理本期收到 {resident['triggers']:,} 則事件（GitHub 與群組訊息、CI 結果），做出 {resident['decisions']:,} 個判斷，"
+            f"接下 {resident['accepted']:,} 件工作；觀察模式下另有 {resident['wouldAccept']:,} 件「本來會接」的紀錄供核對。"
+            f"本期開了 {resident['tickets']:,} 張工單、結束 {resident['ended']:,} 張"
+            + (f"，從接單到結束的中位數 {median} 分鐘" if median is not None else "")
+            + f"；對外留言送出 {resident['repliesSent']:,} 則，被拒絕或無法送達 {resident['repliesDropped']:,} 則，"
+            f"開出 {resident['pullRequests']:,} 個 PR。"
+        ))
+        names = {"completed": "完成", "merged": "PR 已合併", "closed": "PR 被關閉", "dropped": "不需處理", "stopped": "被人停止"}
+        table(document, ["工單結果", "張數"], [[names[k], outcomes.get(k, 0)] for k in names])
+
     heading(document, "ch3", CHAPTERS[2][1], 3)
     total = hosting["self_hosted"]["tokens"] + hosting["external"]["tokens"]
     share = f"{hosting['self_hosted']['tokens'] / total * 100:.1f}%" if total else "本期未收集"

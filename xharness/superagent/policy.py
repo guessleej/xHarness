@@ -54,6 +54,8 @@ DEFAULTS: Doc = {
     "executor": {"model": "", "maxWorkers": 3, "check": "", "maxTurns": 80},
     # xHarness: what a Channel write (a comment, a pull request, a group reply) needs.
     "writes": "approve",
+    "watchdog": {"stall_minutes": 30, "loop_calls": 6, "judge": False},
+    "prompts": {"orchestrator": "", "worker": ""},
 }
 
 
@@ -143,6 +145,15 @@ def validate(raw: Any) -> Doc:
     if writes not in WRITE_MODES:
         raise SettingsError("writes: approve or auto")
     settings["writes"] = writes
+    watch = raw.get("watchdog", {}) or {}
+    stall, loops = watch.get("stall_minutes", 30), watch.get("loop_calls", 6)
+    if not isinstance(stall, int) or not 5 <= stall <= 600:
+        raise SettingsError("watchdog.stall_minutes: 5 to 600")
+    if not isinstance(loops, int) or not 3 <= loops <= 30:
+        raise SettingsError("watchdog.loop_calls: 3 to 30")
+    settings["watchdog"] = {"stall_minutes": stall, "loop_calls": loops, "judge": bool(watch.get("judge", False))}
+    team = raw.get("prompts", {}) or {}
+    settings["prompts"] = {name: _text(team.get(name, ""), f"prompts.{name}", 4000, True) for name in ("orchestrator", "worker")}
     return settings
 
 

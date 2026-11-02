@@ -68,7 +68,7 @@ def check_config(config: Doc) -> Doc:
         raise ValueError("interval: 20 to 3600 seconds")
     return {"repository": repository, "api": api, "login": str(config.get("login", "")).strip(),
             "receive": {row: bool(receive.get(row)) for row in ROWS}, "interval": interval,
-            "defaultBranch": str(config.get("defaultBranch", "")).strip()}
+            "defaultBranch": str(config.get("defaultBranch", "")).strip(), "token_file": str(config.get("token_file", "")).strip()}
 
 
 class Client:
