@@ -204,3 +204,18 @@ def test_a_ci_failure_on_a_subscribed_pull_request_reaches_its_worker_directly(a
     assert any("CI failed" in t["text"] for t in ci)
     source._subscribed()                                    # the same CI result is not stored twice
     assert len([i for i in sa.store.ticket(ticket_id)["inputs"] if i["kind"] == "trigger"]) == len(ci)
+
+
+def test_a_canary_token_is_nowhere_in_the_database_or_the_api(agent, tmp_path):
+    from xharness.superagent import api
+    sa, client, host = agent
+    canary = "ghp_" + "CANARY" * 6
+    sa.save_settings({**sa.settings, "sources": {"gh": {"kind": "github", "config": {
+        "repository": "acme/app", "login": "xcloud-agent", "token": canary}}}})
+    sa.store.close()
+    with open(sa.store.path, "rb") as handle:
+        assert canary.encode() not in handle.read()
+    sa.store = type(sa.store)(sa.store.path)
+    sa.engine.repo = sa.store
+    for parts in ([], ["settings"], ["tickets"], ["threads"], ["decisions"]):
+        assert canary not in str(api.get(sa, parts, {})[1])
