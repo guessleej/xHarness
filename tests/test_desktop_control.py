@@ -13,6 +13,7 @@ class FakeBackend:
         self.calls = []
         self.front = {"app": "TextEdit", "pid": 7, "secure": False}
         self.obeys = True
+        self.button = [100, 200, 40, 20]
 
     def call(self, request, timeout=30):
         self.calls.append(request)
@@ -22,7 +23,7 @@ class FakeBackend:
                     "apps": ["Finder", "TextEdit"], "window": "t.txt", "windows": ["t.txt"], "truncated": False,
                     "elements": [
                         {"role": "AXGroup", "subrole": "", "label": "", "value": "", "rect": [0, 0, 900, 900], "enabled": True, "focused": False},
-                        {"role": "AXButton", "subrole": "", "label": "儲存", "value": "", "rect": [100, 200, 40, 20], "enabled": True, "focused": False},
+                        {"role": "AXButton", "subrole": "", "label": "儲存", "value": "", "rect": list(self.button), "enabled": True, "focused": False},
                         {"role": "AXTextField", "subrole": "", "label": "", "value": "舊內容", "rect": [300, 400, 200, 30], "enabled": True, "focused": True},
                     ]}
         if op == "focus":
@@ -88,6 +89,29 @@ def test_type_pastes_and_refuses_password_fields(rig):
     result = act.execute({"action": "type", "text": "hunter2"}, ctx)
     assert result.is_error and "password" in result.output
     assert not any(a["action"] == "paste" for a in backend.actions())
+
+
+def test_character_keys_are_refused_in_a_password_field(rig):
+    backend, _look, act, ctx, _asked = rig
+    backend.front = {"app": "TextEdit", "pid": 7, "secure": True}
+    result = act.execute({"action": "key", "keys": "shift+h"}, ctx)
+    assert result.is_error and "password" in result.output and backend.actions() == []
+    assert not act.execute({"action": "key", "keys": "tab"}, ctx).is_error      # moving on is fine
+    assert not act.execute({"action": "key", "keys": "cmd+a"}, ctx).is_error
+    assert all("typing" not in a for a in backend.actions())
+
+
+def test_an_element_that_moves_while_waiting_for_approval_is_not_clicked(rig):
+    backend, look, act, _ctx, _asked = rig
+    def approve(summary):
+        if summary.startswith("desktop click"):
+            backend.button[1] = 500             # the window scrolled while the person read the prompt
+        return True
+
+    ctx = ToolContext(cwd=".", approve=approve)
+    look.execute({}, ctx)
+    result = act.execute({"action": "click", "element": 1}, ctx)
+    assert result.is_error and "moved" in result.output and backend.actions() == []
 
 
 def test_keys_parse_and_emptying_the_trash_is_refused_before_asking(rig):

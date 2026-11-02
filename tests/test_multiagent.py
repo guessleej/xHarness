@@ -209,3 +209,122 @@ def test_children_in_worktrees_share_the_parents_board(repo):
         assert os.path.realpath(project_root(ws.cwd)) == os.path.realpath(str(repo))
     finally:
         isolation.finish(ws, "", yes)
+
+
+# --- review fixes --------------------------------------------------------------
+
+def _parent(repo, llm, prompt=None):
+    harness = Harness()
+    harness.use("tools", tools_plugin)
+    harness.use("fs", fs_tools_plugin)
+    harness.use("subagent", subagent_plugin())
+    harness.ctx.provide("llm", llm)
+    mode = "prompt" if prompt else "auto"
+    return Agent(harness.ctx, AgentOptions(approval_mode=mode, prompt=prompt, cwd=str(repo)))
+
+
+class CrashingChild(WritingChild):
+    def stream(self, messages, tools, on_delta=None):
+        if "child agent" in messages[0]["content"] and messages[-1]["role"] == "tool":
+            raise RuntimeError("model went away")
+        return super().stream(messages, tools, on_delta)
+
+
+def test_a_child_that_crashes_keeps_its_partial_work_as_a_branch(repo):
+    answer = _parent(repo, CrashingChild({"task": "fix add", "name": "fixer", "isolate": True})).run("fix it")
+    assert "partial work was kept" in answer and "xharness/fixer-" in answer
+    assert "a - b" in (repo / "calc.py").read_text()
+
+
+def test_a_declined_integration_is_a_failed_child(repo):
+    seen = []
+    agent = _parent(repo, WritingChild({"task": "fix add", "name": "fixer", "isolate": True}),
+                    prompt=lambda s: seen.append(s) or "integrate" not in s)
+    agent.run("fix it")
+    result = next(e for e in agent.messages if e.get("role") == "tool")
+    assert "the person declined" in result["content"]
+    assert "a - b" in (repo / "calc.py").read_text()
+
+
+def test_child_names_are_unique_and_main_is_reserved(repo):
+    harness = Harness()
+    harness.use("tools", tools_plugin)
+    harness.use("subagent", subagent_plugin())
+    names = []
+
+    class Echo:
+        model = "fake"
+
+        def stream(self, messages, tools, on_delta=None):
+            system = messages[0]["content"]
+            if "child agent" in system:
+                names.append(system.split("You are ")[1].split(",")[0] if "You are " in system else system[:80])
+            return AssistantTurn(content="done", usage=Usage(1, 1))
+
+    harness.ctx.provide("llm", Echo())
+    batch = next(t for t in harness.ctx.get("tools").list() if t.name == "subagent_batch")
+    ctx = ToolContext(cwd=str(repo), approve=yes)
+    out = batch.execute({"tasks": [{"task": "a", "name": "main"}, {"task": "b", "name": "w"}, {"task": "c", "name": "w"}]},
+                        ctx).output
+    headings = [line[3:] for line in out.splitlines() if line.startswith("## ")]
+    assert "main" not in headings and len(set(headings)) == 3 and "w" in headings
+
+
+def test_a_batch_whose_changes_break_together_is_an_error(repo):
+    # Each child alone passes its own check; the combined check fails.
+    class Twins(WritingChild):
+        def stream(self, messages, tools, on_delta=None):
+            system = messages[0]["content"]
+            if "child agent" in system and messages[-1]["role"] != "tool":
+                target = "a.txt" if "task a" in messages[-1]["content"] else "b.txt"
+                body = json.dumps({"path": target, "content": "x\n"})
+                return AssistantTurn(content="", tool_calls=[{"id": "w", "name": "write", "arguments": body}],
+                                     usage=Usage(1, 1))
+            return super().stream(messages, tools, on_delta)
+
+    llm = Twins({"tasks": [{"task": "task a", "check": "true"}, {"task": "task b", "check": "true"}],
+                 "isolate": True, "check": "test ! -e a.txt || test ! -e b.txt"})
+    harness = Harness()
+    harness.use("tools", tools_plugin)
+    harness.use("fs", fs_tools_plugin)
+    harness.use("subagent", subagent_plugin())
+    harness.ctx.provide("llm", llm)
+    batch = next(t for t in harness.ctx.get("tools").list() if t.name == "subagent_batch")
+    result = batch.execute(llm.args, ToolContext(cwd=str(repo), approve=yes))
+    assert "all changes together" in result.output and result.is_error
+
+
+def test_claims_show_the_detail_and_lapsed_claims_cannot_be_released(tmp_path):
+    board = Board(str(tmp_path / "b.db"))
+    board.add("lead", [("parse", "read logs/app.log and count ERROR lines")])
+    ok, text = board.claim(1, "a", 30)
+    assert ok and "count ERROR lines" in text
+    with board._db() as db:
+        db.execute("UPDATE tasks SET claim_until = ?", (time.time() - 1,))
+    ok, text = board.release(1, "a", "done", "late")
+    assert not ok and "ran out" in text and board.tasks()[0]["state"] == "open"
+
+
+def test_board_list_pages_and_the_board_is_ignored_by_git(repo):
+    harness = Harness()
+    harness.use("tools", tools_plugin)
+    harness.use("board", board_plugin())
+    tools = {t.name: t for t in harness.ctx.get("tools").list()}
+    ctx = ToolContext(cwd=str(repo), approve=yes, agent="w1")
+    for start in range(0, 70, 30):
+        tools["board_add"].execute({"tasks": [{"title": f"t{i}"} for i in range(start, min(start + 30, 70))]}, ctx)
+    first = tools["board_list"].execute({}, ctx).output
+    assert "#60 " in first and "#61 " not in first and "offset 60" in first
+    assert "#70 " in tools["board_list"].execute({"offset": 60}, ctx).output
+    assert ".xharness" not in git(repo, "status", "--porcelain")
+
+
+def test_report_counts_only_real_workspace_events(tmp_path):
+    from datetime import datetime, timezone
+    from xharness.report import _agent_events
+    now = datetime.now(timezone.utc).isoformat()
+    lines = [{"type": "message", "role": "user", "content": "workspace", "ts": now},
+             {"type": "workspace", "status": "integrated", "ts": now}]
+    (tmp_path / "s.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    found = _agent_events(str(tmp_path), "s", datetime(2000, 1, 1, tzinfo=timezone.utc))
+    assert [e["type"] for e in found] == ["workspace"]

@@ -320,13 +320,16 @@ def build_docx(report: dict, output: str) -> str:
                for row in agents.get("by_role", [])] or [["本期無資料", 0, "0", 0, 0, 0]])
     spaces = agents.get("workspaces") or {}
     if spaces:
-        held = spaces.get("check-failed", 0) + spaces.get("conflict", 0) + spaces.get("denied", 0)
+        held = sum(spaces.get(k, 0) for k in ("check-failed", "conflict", "denied", "kept"))
         body(document, (
             f"代理在各自獨立的工作區改程式共 {sum(spaces.values())} 次：{spaces.get('integrated', 0)} 次通過檢查、套回工作目錄；"
-            f"{held} 次沒有套回（檢查沒過、與其他代理的修改衝突，或使用者不同意），改動保留成分支供人檢視；"
+            f"{spaces.get('integrated-unchecked', 0)} 次沒有指定檢查就直接套回；"
+            f"{held} 次沒有套回（檢查沒過、與其他代理的修改衝突、使用者不同意，或代理沒做完），改動保留成分支供人檢視；"
             f"{spaces.get('no-changes', 0)} 次沒有改到檔案。"
         ))
-        words = {"integrated": "通過檢查並套回", "check-failed": "檢查沒過，保留成分支", "conflict": "與其他修改衝突，保留成分支",
+        words = {"integrated": "通過檢查並套回", "integrated-unchecked": "未指定檢查，直接套回",
+                 "kept": "代理沒做完，保留成分支",
+                 "check-failed": "檢查沒過，保留成分支", "conflict": "與其他修改衝突，保留成分支",
                  "denied": "使用者不同意套回", "no-changes": "沒有改到檔案", "error": "工作區出錯"}
         table(document, ["結果", "次數"], [[words.get(k, k), v] for k, v in sorted(spaces.items(), key=lambda kv: -kv[1])])
 

@@ -203,6 +203,14 @@ class Desktop:
         return f"Screenshot, as described by {name}:\n{text.strip()}"
 
 
+def _still_there(desktop: Desktop, target: dict[str, Any]) -> bool:
+    """The element the person approved is still where it was: same role, text and place."""
+    raw = desktop.backend.call({"op": "look", "app": "", "limit": MAX_ELEMENTS * 2})
+    want = target["element"]
+    same = lambda e: all(e.get(k) == want.get(k) for k in ("role", "subrole", "label", "rect"))  # noqa: E731
+    return int(raw.get("pid", -1)) == target["pid"] and any(same(e) for e in listed(raw.get("elements") or []))
+
+
 def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
     def run_look(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         app = str(args.get("app") or "").strip()
@@ -230,6 +238,7 @@ def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
             if not 1 <= index <= len(snapshot.elements):
                 raise ValueError(f"no element {index}; the last look listed 1-{len(snapshot.elements)}")
             x, y, w, h = snapshot.elements[index - 1]["rect"]
+            front["element"] = snapshot.elements[index - 1]     # checked again after the approval
             return x + w // 2, y + h // 2, f"{describe_element(snapshot, index)} in {snapshot.app}"
         if args.get("x") is None or args.get("y") is None:
             raise ValueError("give element (a number from desktop_look) or x and y")
@@ -276,7 +285,10 @@ def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
             if names in REFUSED_COMBOS:
                 raise PermissionError(f"refused: {args.get('keys')} {REFUSED_COMBOS[names]}, which cannot be undone; "
                                       "ask the person to do it themselves")
-            return f"desktop key: {args.get('keys')} in {front.get('app')}", [{"action": "key", "code": code, "flags": flags}], front
+            # A key that types a character is typing, and a password field refuses it like a paste.
+            typing = not names & {"cmd", "ctrl"} and any(len(n) == 1 or n == "space" for n in names)
+            return (f"desktop key: {args.get('keys')} in {front.get('app')}",
+                    [{"action": "key", "code": code, "flags": flags, "typing": typing}], front)
         if action == "scroll":
             direction = str(args.get("direction") or "down")
             if direction not in ("up", "down"):
@@ -315,8 +327,12 @@ def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
                     if now.get("pid") != target["pid"]:
                         return ToolResult(f"nothing was sent: {target['app']} could not be brought back to the front "
                                           f"({now.get('app')} is in front); look again", is_error=True)
+                    if target.get("element") is not None and not _still_there(desktop, target):
+                        return ToolResult("nothing was sent: the element moved or changed while waiting for the "
+                                          "approval; look again", is_error=True)
                 for step in steps:
-                    if step["action"] == "paste" and desktop.backend.call({"op": "focus"}).get("secure"):
+                    typing = step.pop("typing", False) or step["action"] == "paste"
+                    if typing and desktop.backend.call({"op": "focus"}).get("secure"):
                         return ToolResult("refused: the focused field is a password field. Ask the person to type "
                                           "the password themselves.", is_error=True)
                     desktop.backend.call(step)

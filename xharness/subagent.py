@@ -145,7 +145,8 @@ def run_child(
             live.end(holder["id"], ok=False)
         ctx.emit("subagent/end", {"name": name, "ok": False})
         if workspace is not None:
-            outcome = _integrate(ctx, tool_ctx, workspace, check, name)
+            # Half-done work is kept as a branch, never applied.
+            outcome = _integrate(ctx, tool_ctx, workspace, check, name, keep_only=True)
             return ToolResult(f"[{name}] failed: {error}\n{isolation.describe(outcome, name)}", is_error=True)
         return ToolResult(f"[{name}] failed: {error}", is_error=True)
     if live is not None:
@@ -158,15 +159,17 @@ def run_child(
     answer = answer or "(child returned no answer)"
     if workspace is not None:
         outcome = _integrate(ctx, tool_ctx, workspace, check, name)
-        failed = outcome.get("status") in ("check-failed", "conflict")
+        failed = outcome.get("status") not in ("integrated", "no-changes")
         return ToolResult(f"{answer}\n\n{isolation.describe(outcome, name)}", is_error=failed)
     return ToolResult(answer)
 
 
-def _integrate(ctx: Context, tool_ctx: ToolContext, workspace: Any, check: str, name: str) -> dict[str, Any]:
+def _integrate(ctx: Context, tool_ctx: ToolContext, workspace: Any, check: str, name: str,
+               keep_only: bool = False) -> dict[str, Any]:
     """Collect a child's worktree: check it, apply it or keep it as a branch; log what happened."""
     try:
-        outcome = isolation.finish(workspace, check, lambda s: tool_ctx.approve(f"[{name}] {s}"), ctx.optional("sandbox"))
+        outcome = isolation.finish(workspace, check, lambda s: tool_ctx.approve(f"[{name}] {s}"), ctx.optional("sandbox"),
+                                   keep_only=keep_only)
     except (isolation.IsolationError, OSError, subprocess.SubprocessError) as error:
         outcome = {"status": "error", "detail": str(error)}
     session = ctx.optional("session")
@@ -174,7 +177,8 @@ def _integrate(ctx: Context, tool_ctx: ToolContext, workspace: Any, check: str, 
         session.append({"type": "workspace", "agent": name, "parent": tool_ctx.agent,
                         **{k: outcome[k] for k in ("status", "stat", "branch") if k in outcome},
                         "files": len(outcome.get("files") or []),
-                        "check_exit": (outcome.get("check") or {}).get("exit")})
+                        "check_exit": (outcome.get("check") or {}).get("exit"),
+                        "checked": bool((outcome.get("check") or {}).get("ran"))})
     ctx.emit("subagent/workspace", {"name": name, **outcome})
     return outcome
 
@@ -188,10 +192,17 @@ def subagent_plugin(config: dict[str, Any] | None = None) -> Plugin:
         counter = {"n": 0}
         counter_lock = threading.Lock()
 
+        used: set[str] = set()
+
         def next_name(prefix: str | None) -> str:
+            # Names are identities (approvals, the board, "main" is the conversation's own agent),
+            # so a chosen name that is reserved or already used gets a number.
             with counter_lock:
                 counter["n"] += 1
-                return prefix or f"child-{counter['n']}"
+                name = prefix if prefix and prefix != "main" and prefix not in used else \
+                    f"{prefix}-{counter['n']}" if prefix else f"child-{counter['n']}"
+                used.add(name)
+                return name
 
         background = {"running": 0}
 
@@ -281,14 +292,17 @@ def subagent_plugin(config: dict[str, Any] | None = None) -> Plugin:
             sections = [
                 f"## {name}\n{result.output}" for (name, *_rest), result in zip(jobs, results)
             ]
+            together_failed = False
             if isolate and default_check and any("applied to the working directory" in r.output for r in results):
                 # Each change passed on its own; check that they also work together.
                 final = isolation.run_check(tool_ctx.cwd, default_check, tool_ctx.approve, ctx.optional("sandbox"),
                                             label="all changes together")
+                together_failed = final["exit"] != 0
                 sections.append(f"## all changes together\ncheck `{default_check}` exit {final['exit']}"
-                                + ("" if final["exit"] == 0 else "\n" + final["output"][-1500:]))
+                                + ("" if not together_failed else "\n" + final["output"][-1500:]))
             any_error = any(result.is_error for result in results)
-            return ToolResult("\n\n".join(sections), is_error=any_error and all(r.is_error for r in results))
+            return ToolResult("\n\n".join(sections),
+                              is_error=together_failed or (any_error and all(r.is_error for r in results)))
 
         register_tools(
             ctx,

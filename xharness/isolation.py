@@ -62,7 +62,7 @@ def repo_root(cwd: str) -> str | None:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
-def _ensure_ignored(root: str) -> None:
+def ensure_ignored(root: str) -> None:
     directory = os.path.join(root, ".xharness")
     os.makedirs(directory, exist_ok=True)
     ignore = os.path.join(directory, ".gitignore")
@@ -108,7 +108,7 @@ def prepare(cwd: str, name: str) -> Workspace:
     root = repo_root(cwd)
     if root is None:
         raise IsolationError("isolate needs a git repository, and the working directory is not in one")
-    _ensure_ignored(root)
+    ensure_ignored(root)
     base = snapshot(root)
     tag = secrets.token_hex(3)
     safe = re.sub(r"[^A-Za-z0-9_-]", "-", name)[:40] or "child"
@@ -133,10 +133,11 @@ def _keep(ws: Workspace, commit: str) -> str:
 
 
 def finish(ws: Workspace, check: str, approve: Callable[[str], bool], sandbox: Any = None,
-           check_timeout: float = DEFAULT_CHECK_TIMEOUT) -> dict[str, Any]:
+           check_timeout: float = DEFAULT_CHECK_TIMEOUT, keep_only: bool = False) -> dict[str, Any]:
     """Commit the child's work, run the check, apply it. Returns what happened, for the parent and the log.
+    keep_only (the child failed): keep the work as a branch and apply nothing.
 
-    status: "no-changes" | "integrated" | "check-failed" | "conflict" | "denied"
+    status: "no-changes" | "integrated" | "check-failed" | "conflict" | "denied" | "kept"
     """
     try:
         _git(["add", "-A", "--", ".", *GENERATED], ws.path)
@@ -147,6 +148,9 @@ def finish(ws: Workspace, check: str, approve: Callable[[str], bool], sandbox: A
         stat = _git(["diff", "--shortstat", ws.base, commit], ws.root).stdout.strip()
         files = _git(["diff", "--name-only", ws.base, commit], ws.root).stdout.split()
         out: dict[str, Any] = {"commit": commit[:12], "stat": stat, "files": files[:50]}
+        if keep_only:
+            out["status"], out["branch"] = "kept", _keep(ws, commit)
+            return out
         if check:
             out["check"] = run_check(ws.path, check, approve, sandbox, check_timeout, ws.name)
             if out["check"]["exit"] != 0:
@@ -216,4 +220,8 @@ def describe(result: dict[str, Any], name: str) -> str:
         return f"[workspace {name}] NOT applied: it no longer applies cleanly (another change touched the same lines).{hint}\n{result.get('detail', '')}"
     if status == "denied":
         return f"[workspace {name}] NOT applied: the person declined.{hint}"
+    if status == "kept":
+        return f"[workspace {name}] NOT applied: the child did not finish, so its partial work was kept.{hint}"
+    if status == "error":
+        return f"[workspace {name}] NOT applied: the workspace could not be collected: {result.get('detail', '')}"
     return f"[workspace {name}] {result}"

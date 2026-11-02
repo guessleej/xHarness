@@ -132,6 +132,7 @@ class Board:
                 db.execute("ROLLBACK")
                 return False, f"task {task_id} failed {row['attempts']} times; leave it for the person"
             attempts = row["attempts"] + (0 if row["claimed_by"] == agent and state == "claimed" else 1)
+            detail = row["detail"]
             db.execute("UPDATE tasks SET status='claimed', claimed_by=?, last_claimed_by=?, claim_until=?, attempts=?, "
                        "updated=? WHERE id=?", (agent, agent, now + minutes * 60, attempts, now, task_id))
             db.execute("COMMIT")
@@ -141,7 +142,8 @@ class Board:
                      f"{row['result'][:200] or 'no reason given'} -- see board_notes for what was tried)"
         elif row["status"] == "claimed" and row["last_claimed_by"] != agent:
             before = f" (previously claimed by {row['last_claimed_by']}, whose claim ran out)"
-        return True, f"claimed task {task_id} for {minutes:g} minutes{before}; renew with board_heartbeat if it takes longer"
+        text = f"claimed task {task_id} for {minutes:g} minutes{before}; renew with board_heartbeat if it takes longer"
+        return True, text + (f"\nTask: {row['title']}\nDetail: {detail}" if detail else "")
 
     def heartbeat(self, task_id: int, agent: str, minutes: float) -> tuple[bool, str]:
         now = time.time()
@@ -159,9 +161,10 @@ class Board:
             return False, "status is done, failed or open"
         with self._db() as db:
             cursor = db.execute("UPDATE tasks SET status=?, claimed_by='', claim_until=0, result=?, updated=? "
-                                "WHERE id=? AND status='claimed' AND claimed_by=?", (new, result, now, task_id, agent))
+                                "WHERE id=? AND status='claimed' AND claimed_by=? AND claim_until >= ?",
+                                (new, result, now, task_id, agent, now))
         if not cursor.rowcount:
-            return False, f"task {task_id} is not claimed by you"
+            return False, f"task {task_id} is not claimed by you (or your claim ran out; claim it again first)"
         return True, f"task {task_id} is {new}"
 
     @staticmethod
@@ -245,7 +248,9 @@ def board_snapshot(cwd: str) -> dict[str, Any]:
 
 
 def board_for(cwd: str) -> Board:
-    return Board(os.path.join(project_root(cwd), ".xharness", "board.db"))
+    root = project_root(cwd)
+    isolation.ensure_ignored(root)      # the board holds task details and command output: never commit it
+    return Board(os.path.join(root, ".xharness", "board.db"))
 
 
 def _identity(ctx: Context, tool_ctx: ToolContext) -> str:
@@ -260,7 +265,8 @@ def _task_line(t: dict[str, Any]) -> str:
              "given-up": f" — failed {t['attempts']} times",
              "done": f" — {t['result'][:120]}" if t["result"] else ""}.get(state, "")
     notes = f" [{t['notes']} notes]" if t["notes"] else ""
-    return f"#{t['id']} [{state}] {t['title']}{extra}{notes}"
+    detail = f"\n    {t['detail'][:300]}" if t.get("detail") else ""
+    return f"#{t['id']} [{state}] {t['title']}{extra}{notes}{detail}"
 
 
 def _note_line(n: dict[str, Any]) -> str:
@@ -316,8 +322,15 @@ def _make_tools(ctx: Context) -> list[Tool]:
         tasks = board.tasks(status)
         if not tasks:
             return ToolResult("the board has no tasks" + (f" that are {status}" if status else ""))
-        shown = tasks[:MAX_LISTED]
-        more = f"\n({len(tasks) - len(shown)} more)" if len(tasks) > len(shown) else ""
+        try:
+            offset = max(0, int(args.get("offset") or 0))
+        except (TypeError, ValueError):
+            return ToolResult("offset must be a number", is_error=True)
+        shown = tasks[offset:offset + MAX_LISTED]
+        if not shown:
+            return ToolResult(f"no tasks past offset {offset} (there are {len(tasks)})")
+        rest = len(tasks) - offset - len(shown)
+        more = f"\n({rest} more; board_list with offset {offset + len(shown)} shows them)" if rest > 0 else ""
         return ToolResult("\n".join(_task_line(t) for t in shown) + more)
 
     def claim(args: dict[str, Any], _tool_ctx: ToolContext, board: Board, me: str) -> ToolResult:
@@ -366,7 +379,8 @@ def _make_tools(ctx: Context) -> list[Tool]:
     return [
         Tool("board_list", "List the tasks on the project's shared board: open, claimed (by whom, minutes left), "
              "done, given-up. Look here before starting work, so you do not redo what another agent is doing.",
-             {"type": "object", "properties": {"status": {"type": "string", "enum": ["open", "claimed", "done", "given-up"]}}},
+             {"type": "object", "properties": {"status": {"type": "string", "enum": ["open", "claimed", "done", "given-up"]},
+                                               "offset": {"type": "integer", "description": f"Skip this many ({MAX_LISTED} are listed at a time)"}}},
              guarded(listing)),
         Tool("board_add", "Post tasks to the shared board for agents to claim. Titles already open are not added twice.",
              {"type": "object", "properties": {"tasks": {"type": "array", "items": {"type": "object", "properties": {

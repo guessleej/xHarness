@@ -108,7 +108,7 @@ def _agent_events(directory: str, session_id: str, start: datetime) -> list[dict
                     continue
                 if stamp.tzinfo is None:
                     stamp = stamp.replace(tzinfo=timezone.utc)
-                if stamp >= start:
+                if stamp >= start and event.get("type") in ("agent-run", "discussion-end", "workspace"):
                     found.append(event)
     except OSError:
         return found
@@ -221,6 +221,8 @@ def collect(
             for event in _agent_events(directory, session_id, start):
                 if event.get("type") == "workspace":
                     status = str(event.get("status") or "error")
+                    if status == "integrated" and event.get("check_exit") is None:
+                        status = "integrated-unchecked"     # applied, but nothing was run first
                     workspaces[status] = workspaces.get(status, 0) + 1
                     continue
                 if event.get("type") == "discussion-end":
