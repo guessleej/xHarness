@@ -63,6 +63,8 @@ class ResolvedConfig:
     routing: dict[str, Any] = field(default_factory=dict)
     #: [board] enabled -- the shared task board, see board.py
     board: dict[str, Any] = field(default_factory=dict)
+    #: [superagent] enabled -- the resident agent (Sources, tickets, workers), see superagent/
+    superagent: dict[str, Any] = field(default_factory=dict)
 
 
 def _find_config_file(explicit_path: str | None) -> str | None:
@@ -156,6 +158,7 @@ def load_config(
         discussion=raw.get("discussion", {}) or {},
         routing=raw.get("routing", {}) or {},
         board=raw.get("board", {}) or {},
+        superagent=raw.get("superagent", {}) or {},
     )
 
 

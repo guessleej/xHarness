@@ -29,6 +29,9 @@ max_turns = 40
 # [board]
 # enabled = false
 
+# [superagent]                 # resident agent: listens to GitHub / Telegram groups (configure on the web page)
+# enabled = false
+
 # [memory]
 # enabled = true
 # dir = "/path/to/memory"   # default ~/.xharness/memory

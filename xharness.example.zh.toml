@@ -28,6 +28,9 @@ max_turns = 40
 # [board]
 # enabled = false
 
+# [superagent]                 # 常駐代理：聽 GitHub／Telegram 群組、自己接工作（設定在網頁「常駐代理」頁）
+# enabled = false
+
 # [memory]
 # enabled = true
 # dir = "/path/to/memory"   # 預設 ~/.xharness/memory

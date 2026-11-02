@@ -1,0 +1,422 @@
+"""The resident agent end to end, with a fake GitHub and fake conversations: an issue that mentions the agent
+becomes a ticket, its worker acknowledges and reports, the main Session replies, and every write waits for approval."""
+
+from __future__ import annotations
+
+import time
+from typing import Any, Callable
+
+import pytest
+
+from xharness.superagent import github as gh
+from xharness.superagent.model import key
+from xharness.superagent.runtime import Superagent
+from xharness.tools import ToolContext
+
+
+class FakeClient(gh.Client):
+    def __init__(self) -> None:
+        super().__init__("https://api.github.com", lambda: "ghp_" + "x" * 36)
+        self.routes: dict[str, Any] = {}
+        self.posts: list[tuple[str, dict]] = []
+
+    def request(self, method: str, path: str, body: Any = None, params: Any = None) -> tuple[Any, dict[str, str]]:
+        if method == "POST":
+            self.posts.append((path, body))
+            return {"id": len(self.posts), "number": 99, "html_url": "https://github.com/acme/app/pull/99"}, {}
+        for prefix, value in self.routes.items():
+            if path.startswith(prefix):
+                return (value(params) if callable(value) else value), {}
+        return [], {}
+
+
+class FakeHandle:
+    def __init__(self, name: str, tools: list, script: Callable[["FakeHandle", str], str]) -> None:
+        self.id = name
+        self.tools = {t.name: t for t in tools}
+        self.script = script
+        self.seen: list[str] = []
+
+    def call(self, name: str, **args: Any) -> str:
+        result = self.tools[name].execute(args, ToolContext(cwd=".", approve=lambda _s: True))
+        assert not result.is_error, result.output
+        return result.output
+
+    def run(self, text: str) -> str:
+        self.seen.append(text)
+        return self.script(self, text)
+
+    def cancel(self) -> None:
+        pass
+
+
+class FakeHost:
+    def __init__(self) -> None:
+        self.approvals: list[str] = []
+        self.allow = True
+        self.handles: dict[str, FakeHandle] = {}
+        self.main_script: Callable[[FakeHandle, str], str] = lambda h, t: "nothing"
+        self.worker_script: Callable[[FakeHandle, str], str] = lambda h, t: "nothing"
+
+    def open_conversation(self, name: str, cwd: str, system: str, tools: list, model: str = "", role: str = "worker") -> FakeHandle:
+        script = self.main_script if name.startswith("resident") else self.worker_script
+        handle = FakeHandle(name, tools, script)
+        self.handles[name] = handle
+        return handle
+
+    def approve(self, summary: str) -> bool:
+        self.approvals.append(summary)
+        return self.allow
+
+    def notify(self, event: str, text: str) -> None:
+        pass
+
+
+def issue(number: int, login: str, body: str) -> dict:
+    return {"number": number, "title": "Typo in README", "body": body, "user": {"login": login, "type": "User"},
+            "created_at": "2099-01-01T00:00:00Z", "html_url": f"https://github.com/acme/app/issues/{number}", "state": "open"}
+
+
+@pytest.fixture()
+def agent(tmp_path, monkeypatch):
+    client = FakeClient()
+    host = FakeHost()
+    monkeypatch.setattr(gh, "Client", lambda api, token: client)
+    sa = Superagent(str(tmp_path), host, token_reader=lambda sid, config: "ghp_" + "y" * 36)
+    sa.save_settings({"sources": {"gh": {"kind": "github", "config": {"repository": "acme/app", "login": "xcloud-agent",
+                                                                       "defaultBranch": "main"}}},
+                      "policy": {"sources": {"gh": {"allowed": [{"id": "alice"}]}}}})
+    monkeypatch.setattr(sa, "prepare_directory", lambda ticket: str(tmp_path / "work"))
+    (tmp_path / "work").mkdir()
+    client.routes = {
+        "notifications": [{"repository": {"full_name": "acme/app"}, "subject": {"url": "https://api.github.com/repos/acme/app/issues/7"}}],
+        "repos/acme/app/issues/7/comments": [],
+        "repos/acme/app/issues/7": issue(7, "alice", "@xcloud-agent please fix the typo in the install section"),
+    }
+    yield sa, client, host
+    sa.stop()
+
+
+def settle(sa: Superagent, rounds: int = 40) -> None:
+    for _ in range(rounds):
+        sa.tick()
+        time.sleep(0.02)
+        while sa.main_busy or any(w.busy or not w.inbox.empty() for w in sa.workers.values()):
+            time.sleep(0.02)
+        for effect in sa.store.effects():
+            if effect["due"] > time.time():
+                sa.store.effect_defer(effect["id"], 0)
+
+
+def test_a_mention_becomes_a_ticket_and_the_result_goes_back_after_approval(agent):
+    sa, client, host = agent
+
+    def main(handle: FakeHandle, text: str) -> str:
+        if "candidate" in text:
+            trigger = sa.store.recent_triggers("", 10)[0]["id"][:12]
+            handle.call("superagent_route", decisions=[{"trigger": trigger, "kind": "accept", "title": "Fix README typo",
+                                                        "name": "readme-typo", "scope": "the install section typo",
+                                                        "acknowledgement": "On it: fixing the typo."}])
+        if "report from" in text and "ready" in text:
+            ticket = sa.store.tickets(limit=1)[0]["id"][:12]
+            handle.call("superagent_reply", purpose="result", ticket=ticket, text="Fixed the typo; PR is up for review.")
+        return "done"
+
+    def worker(handle: FakeHandle, text: str) -> str:
+        if "Assignment:" in text:
+            handle.call("ticket_report", state="ready", summary="Typo fixed and verified.")
+        return "finished"
+
+    host.main_script, host.worker_script = main, worker
+    settle(sa)
+    tickets = sa.store.tickets()
+    assert len(tickets) == 1 and tickets[0]["ended"]["outcome"] == "completed"
+    assert tickets[0]["execution"]["name"] == "readme-typo"
+    bodies = [body["body"] for path, body in client.posts]
+    assert any("On it: fixing the typo." in b for b in bodies)            # the acknowledgement
+    assert any("Fixed the typo" in b for b in bodies)                     # the result
+    assert all("<!-- xharness:" in b for b in bodies)                     # idempotence markers
+    assert len(host.approvals) == 2                                        # every write was approved
+
+
+def test_a_declined_write_is_dropped_and_never_sent(agent):
+    sa, client, host = agent
+    host.allow = False
+
+    def main(handle: FakeHandle, text: str) -> str:
+        if "candidate" in text:
+            trigger = sa.store.recent_triggers("", 10)[0]["id"][:12]
+            handle.call("superagent_route", decisions=[{"trigger": trigger, "kind": "accept", "title": "Fix", "name": "fix",
+                                                        "scope": "typo", "acknowledgement": "On it."}])
+        return "ok"
+
+    host.main_script = main
+    settle(sa)
+    assert client.posts == []
+    message = sa.store.outbox_get(key("ack", sa.store.recent_triggers("", 10)[0]["id"]))
+    assert message["status"] == "dropped" and message["reason"] == "denied"
+
+
+def test_candidates_that_arrive_while_the_main_session_is_busy_go_in_one_turn(agent):
+    sa, client, host = agent
+    turns: list[str] = []
+    host.main_script = lambda handle, text: turns.append(text) or "ok"
+    sa.main_busy = True
+    sa.engine.receive({"id": "a", "source": "gh", "threads": [{"source": "gh", "id": "1"}], "actor": {"source": "gh", "id": "alice"},
+                       "human": True, "addressed": "mention", "at": "2099-01-01T00:00:00Z", "text": "one", "meta": {"row": "comments"}})
+    sa.engine.receive({"id": "b", "source": "gh", "threads": [{"source": "gh", "id": "2"}], "actor": {"source": "gh", "id": "alice"},
+                       "human": True, "addressed": "mention", "at": "2099-01-01T00:00:00Z", "text": "two", "meta": {"row": "comments"}})
+    sa.engine.evaluate_due()
+    sa.run_effects()
+    assert turns == []
+    sa.main_busy = False
+    sa.run_effects()
+    time.sleep(0.1)
+    assert turns[0].startswith("2 new item(s)") and all("still undecided" in t for t in turns[1:])
+
+
+def test_a_long_queue_is_split_across_main_session_turns(agent):
+    sa, client, host = agent
+    turns: list[str] = []
+    host.main_script = lambda handle, text: turns.append(text) or "ok"
+    sa.main_busy = True
+    for n in range(12):
+        sa.engine.receive({"id": f"q{n}", "source": "gh", "threads": [{"source": "gh", "id": str(n)}],
+                           "actor": {"source": "gh", "id": "alice"}, "human": True, "addressed": "mention",
+                           "at": "2099-01-01T00:00:00Z", "text": f"item {n}", "meta": {"row": "comments"}})
+    sa.engine.evaluate_due()
+    sa.main_busy = False
+    for _ in range(2):
+        sa.run_effects()
+        while sa.main_busy:
+            time.sleep(0.02)
+    firsts = [t for t in turns if "new item(s)" in t]
+    assert [t.split(" ", 1)[0] for t in firsts] == ["8", "4"]
+
+
+def test_a_follow_up_that_resumes_a_ticket_opens_the_new_assignment_and_is_not_handed_back_again(agent):
+    sa, client, host = agent
+    turns: list[str] = []
+
+    def worker(handle: FakeHandle, text: str) -> str:
+        turns.append(text)
+        handle.call("ticket_report", state="ready", summary="done")
+        return "finished"
+
+    host.worker_script = worker
+    client.routes.update({"repos/acme/app/issues/5/comments": [], "repos/acme/app/issues/5": issue(5, "alice", "")})
+    message = {"source": "gh", "threads": [{"source": "gh", "id": "5"}], "actor": {"source": "gh", "id": "alice"}, "human": True,
+               "at": "2099-01-01T00:00:00Z", "channel": {"source": "gh", "thread": "gh:5", "address": {"number": "5"}},
+               "meta": {"row": "comments"}}
+    sa.engine.receive({**message, "id": "r", "addressed": "mention", "text": "compile report 2"})
+    sa.engine.evaluate_due()
+    ticket_id = sa.engine.decide("r", {"kind": "accept", "title": "t", "scope": "s", "reason": "asked"})["ticketId"]
+    settle(sa, 10)
+    assert sa.store.ticket(ticket_id)["ended"]
+    sa.engine.receive({**message, "id": "f", "text": "also add the date"})
+    settle(sa, 20)
+    ticket = sa.store.ticket(ticket_id)
+    resumed = [t for t in turns if "new assignment" in t]
+    assert resumed and "also add the date" in resumed[0]
+    assert len(ticket["assignments"]) == 2 and ticket["ended"]
+
+
+def test_a_request_and_a_stop_accepted_together_both_open_the_assignment_in_order(agent):
+    sa, client, host = agent
+    turns: list[str] = []
+    host.worker_script = lambda handle, text: turns.append(text) or "ok"
+    client.routes.update({"repos/acme/app/issues/5/comments": [], "repos/acme/app/issues/5": issue(5, "alice", "")})
+    for tid, text, at in (("r", "please compile report 5", "2099-01-01T00:00:00Z"), ("s", "report 5 is not needed, stop", "2099-01-01T00:00:15Z")):
+        sa.engine.receive({"id": tid, "source": "gh", "threads": [{"source": "gh", "id": "5"}], "actor": {"source": "gh", "id": "alice"},
+                           "human": True, "addressed": "mention", "at": at, "text": text, "meta": {"row": "comments"}})
+    sa.engine.evaluate_due()
+    sa.engine.decide("s", {"kind": "accept", "title": "t", "scope": "s", "reason": "asked"})
+    settle(sa, 5)
+    first = turns[0]
+    assert "oldest first" in first and first.index("compile report 5") < first.index("not needed, stop")
+
+
+def test_polling_a_working_ticket_is_refused_after_two_asks(agent):
+    sa, client, host = agent
+    sa.engine.receive({"id": "r", "source": "gh", "threads": [{"source": "gh", "id": "5"}], "actor": {"source": "gh", "id": "alice"},
+                       "human": True, "addressed": "mention", "at": "2099-01-01T00:00:00Z", "text": "fix it", "meta": {"row": "comments"}})
+    sa.engine.evaluate_due()
+    ticket_id = sa.engine.decide("r", {"kind": "accept", "title": "t", "scope": "s", "reason": "asked"})["ticketId"]
+    tool = next(t for t in sa.main_tools() if t.name == "superagent_ticket")
+    ctx = ToolContext(cwd=".", approve=lambda _s: True)
+    results = [tool.execute({"ticket": ticket_id[:12], "action": "status"}, ctx) for _ in range(3)]
+    assert [r.is_error for r in results] == [False, False, True]
+    assert "do not poll" in results[0].output and "stop polling" in results[2].output
+
+
+def test_the_token_never_appears_in_settings_or_errors(agent, tmp_path):
+    sa, client, host = agent
+    secret = "ghp_" + "z" * 36
+    sa.save_settings({**sa.settings, "sources": {"gh": {"kind": "github", "config": {
+        "repository": "acme/app", "login": "xcloud-agent", "token": secret}}}})
+    assert secret not in str(sa.public_settings()) and sa.public_settings()["sources"]["gh"]["tokenSet"]
+    assert secret not in str(sa.store.kv("settings"))
+    assert gh.scrub(f"failed with {secret}") == "failed with [redacted]"
+
+
+def test_a_ci_failure_on_a_subscribed_pull_request_reaches_its_worker_directly(agent):
+    sa, client, host = agent
+    sa.engine.receive({"id": "r", "source": "gh", "threads": [{"source": "gh", "id": "5"}], "actor": {"source": "gh", "id": "alice"},
+                       "human": True, "addressed": "mention", "at": "2099-01-01T00:00:00Z", "text": "fix it",
+                       "channel": {"source": "gh", "thread": "gh:5", "address": {"number": "5"}}, "meta": {"row": "comments"}})
+    sa.engine.evaluate_due()
+    ticket_id = sa.engine.decide("r", {"kind": "accept", "title": "t", "scope": "s", "reason": "asked"})["ticketId"]
+    source = sa.sources["gh"]
+    client.routes = {"repos/acme/app/issues/5/comments": [], "repos/acme/app/issues/5": {**issue(5, "alice", ""), "pull_request": {"url": "x"}},
+                     "repos/acme/app/pulls/5/comments": [], "repos/acme/app/pulls/5/reviews": [],
+                     "repos/acme/app/pulls/5": {"state": "open", "head": {"sha": "abc123"}, "html_url": "u"},
+                     "repos/acme/app/commits/abc123/check-runs": {"check_runs": [
+                         {"name": "unit", "status": "completed", "conclusion": "failure"}]}}
+    source._subscribed()
+    ticket = sa.store.ticket(ticket_id)
+    ci = [sa.store.trigger(i["triggerId"]) for i in ticket["inputs"] if i["kind"] == "trigger"]
+    assert any("CI failed" in t["text"] for t in ci)
+    source._subscribed()                                    # the same CI result is not stored twice
+    assert len([i for i in sa.store.ticket(ticket_id)["inputs"] if i["kind"] == "trigger"]) == len(ci)
+
+
+def test_a_canary_token_is_nowhere_in_the_database_or_the_api(agent, tmp_path):
+    from xharness.superagent import api
+    sa, client, host = agent
+    canary = "ghp_" + "CANARY" * 6
+    sa.save_settings({**sa.settings, "sources": {"gh": {"kind": "github", "config": {
+        "repository": "acme/app", "login": "xcloud-agent", "token": canary}}}})
+    sa.store.close()
+    with open(sa.store.path, "rb") as handle:
+        assert canary.encode() not in handle.read()
+    sa.store = type(sa.store)(sa.store.path)
+    sa.engine.repo = sa.store
+    for parts in ([], ["settings"], ["tickets"], ["threads"], ["decisions"]):
+        assert canary not in str(api.get(sa, parts, {})[1])
+
+
+def test_a_main_session_that_answers_in_plain_text_is_reminded_to_send_the_result(agent):
+    sa, client, host = agent
+    seen: list[str] = []
+
+    def main(handle: FakeHandle, text: str) -> str:
+        seen.append(text)
+        if "candidate" in text:
+            trigger = sa.store.recent_triggers("", 10)[0]["id"][:12]
+            handle.call("superagent_route", decisions=[{"trigger": trigger, "kind": "accept", "title": "Fix", "name": "fix",
+                                                        "scope": "typo", "acknowledgement": "On it."}])
+        if "reached nobody" in text:
+            ticket = sa.store.tickets(limit=1)[0]["id"][:12]
+            handle.call("superagent_reply", purpose="result", ticket=ticket, text="Fixed.")
+        return "The typo is fixed."                      # plain text the first time: reaches nobody
+
+    def worker(handle: FakeHandle, text: str) -> str:
+        if "Assignment:" in text:
+            handle.call("ticket_report", state="ready", summary="done")
+        return "ok"
+
+    host.main_script, host.worker_script = main, worker
+    settle(sa)
+    assert any("reached nobody" in s for s in seen)
+    assert any("Fixed." in body["body"] for path, body in client.posts)
+
+
+def test_a_candidate_left_undecided_is_named_again_in_the_same_turn(agent):
+    sa, client, host = agent
+    seen: list[str] = []
+
+    def main(handle: FakeHandle, text: str) -> str:
+        seen.append(text)
+        if "still undecided" in text:
+            trigger = sa.store.recent_triggers("", 10)[0]["id"][:12]
+            handle.call("superagent_route", decisions=[{"trigger": trigger, "kind": "ignore", "reason": "chatter"}])
+        return "Hello!"                                    # text only the first time
+
+    host.main_script = main
+    settle(sa, 10)
+    assert any("still undecided" in s for s in seen)
+    assert sa.store.decisions(10)[0]["kind"] == "ignore"
+
+
+def test_a_ticket_works_in_the_repository_its_request_came_from(agent):
+    sa, client, host = agent
+    sa.save_settings({**sa.settings, "sources": {
+        "gh": {"kind": "github", "config": {"repository": "acme/app", "login": "xcloud-agent", "defaultBranch": "main"}},
+        "gh2": {"kind": "github", "config": {"repository": "acme/site", "login": "xcloud-agent", "defaultBranch": "main"}}}})
+    sa.store.save_trigger({"id": "s2", "source": "gh2", "threads": [], "at": "2099-01-01T00:00:00Z", "text": "x"})
+    sa.store.save_trigger({"id": "tg", "source": "tg", "threads": [], "at": "2099-01-01T00:00:00Z", "text": "x"})
+    assert sa.work_source({"origin": {"triggerId": "s2"}}).repo == "acme/site"
+    assert sa.work_source({"origin": {"triggerId": "tg"}}) is None          # not from GitHub and two repositories: ambiguous
+
+
+def test_idle_workers_do_not_all_start_at_once_beyond_the_limit(agent):
+    import queue
+    sa, client, host = agent
+
+    class W:
+        def __init__(self, busy: bool) -> None:
+            self.busy, self.stopped, self.inbox = busy, False, queue.Queue()
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    sa.save_settings({**sa.settings, "executor": {**sa.settings["executor"], "maxWorkers": 1}})
+    sa.workers = {"a": W(True), "b": W(False)}
+    bot = {"id": "b", "inputs": [{"id": "i", "human": False}], "undelivered": ["i"]}
+    person = {"id": "b", "inputs": [{"id": "i", "human": True}], "undelivered": ["i"]}
+    assert sa._full(bot) is True                          # an idle worker takes a slot like a new one
+    assert sa._full(person) is False                      # the reserved slot is a person's
+    assert sa._full({**bot, "id": "a"}) is False          # a working worker just queues
+
+
+def test_an_edited_issue_is_a_new_trigger_and_a_new_comment_on_it_is_not(agent):
+    sa, client, host = agent
+    source = sa.sources["gh"]
+    client.routes = {"repos/acme/app/issues/7/comments": [], "repos/acme/app/issues/7": issue(7, "alice", "fix the typo")}
+    assert source._read_thread(7, "2026-01-01T00:00:00Z") == 1
+    client.routes["repos/acme/app/issues/7"] = {**issue(7, "alice", "fix the typo"), "updated_at": "2099-02-01T00:00:00Z"}
+    assert source._read_thread(7, "2099-01-15T00:00:00Z") == 0              # only updated_at moved
+    client.routes["repos/acme/app/issues/7"] = {**issue(7, "alice", "@xcloud-agent fix the typo and the title"),
+                                                "updated_at": "2099-02-02T00:00:00Z"}
+    assert source._read_thread(7, "2099-01-15T00:00:00Z") == 1
+    client.routes = {"repos/acme/app/issues/8/comments": [], "repos/acme/app/issues/8": issue(8, "alice", "old")}
+    assert source._read_thread(8, "2099-01-15T00:00:00Z") == 0              # an old issue first seen is not a request
+
+
+def test_ci_is_not_passed_while_a_check_run_on_a_later_page_still_runs(agent):
+    sa, client, host = agent
+    done = [{"name": f"c{n}", "status": "completed", "conclusion": "success"} for n in range(100)]
+    pages = {1: done, 2: [{"name": "slow", "status": "in_progress"}]}
+    client.routes = {"repos/acme/app/commits/abc/check-runs": lambda p: {"total_count": 101, "check_runs": pages[p["page"]]}}
+    assert sa.sources["gh"]._checks("abc") == ("", False)
+    pages[2] = [{"name": "slow", "status": "completed", "conclusion": "success"}]
+    assert sa.sources["gh"]._checks("abc")[0].endswith("(101 checks)")
+
+
+def test_a_followed_thread_that_cannot_be_read_shows_as_a_source_problem(agent):
+    sa, client, host = agent
+    sa.engine.receive({"id": "r", "source": "gh", "threads": [{"source": "gh", "id": "5"}], "actor": {"source": "gh", "id": "alice"},
+                       "human": True, "addressed": "mention", "at": "2099-01-01T00:00:00Z", "text": "fix it", "meta": {"row": "comments"}})
+    sa.engine.evaluate_due()
+    sa.engine.decide("r", {"kind": "accept", "title": "t", "scope": "s", "reason": "asked"})
+
+    def boom(_params):
+        raise gh.GitHubError(502, "bad gateway")
+    client.routes = {"repos/acme/app/issues/5": boom}
+    source = sa.sources["gh"]
+    source.poll()
+    assert source.health["state"] == "error" and "#5" in source.health["detail"]
+    assert any("#5" in (p.get("error") or "") for p in sa.overview()["problems"])
+    client.routes = {"repos/acme/app/issues/5/comments": [], "repos/acme/app/issues/5": issue(5, "alice", "")}
+    source.poll()
+    assert source.health["state"] == "ready"
+
+
+def test_disposing_the_web_app_stops_the_resident_agent(agent):
+    from xharness.web import WebApp
+    sa, client, host = agent
+    sa.start()
+    app = WebApp.__new__(WebApp)
+    app.lock, app.conversations, app.telegram, app.superagent = __import__("threading").Lock(), {}, None, sa
+    WebApp.dispose(app)
+    assert not sa._thread.is_alive()

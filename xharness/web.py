@@ -294,6 +294,14 @@ class WebApp:
         #: Recorded for the security self-check, which has to know how we are exposed.
         self.bound_host: str | None = None
         self.has_token = False
+        #: The resident agent, when [superagent] enabled = true (see superagent/webhost.py).
+        self.superagent: Any = None
+
+    def start_superagent(self) -> None:
+        if not (getattr(self.config, "superagent", None) or {}).get("enabled") or self.superagent is not None:
+            return
+        from .superagent.webhost import mount
+        self.superagent = mount(self)
 
     def tick_reminders(self) -> int:
         """Send due reminders to idle conversations; returns how many fired."""
@@ -422,6 +430,7 @@ class WebApp:
         extra_system: str | None = None,
         user: User | None = None,
         provider: str | None = None,
+        cwd: str | None = None,
     ) -> Conversation:
         if resume:
             # A session still open in a live conversation is that conversation: a second
@@ -437,7 +446,7 @@ class WebApp:
         conv_id = secrets.token_hex(6)
         initial = messages_from_events(SessionLog.load(resume, principal_name(user))) if resume else []
         holder: dict[str, Conversation] = {}
-        cwd = workspace.ensure(principal_name(user))
+        cwd = cwd or workspace.ensure(principal_name(user))
         describer = describer_from_config(self.config)
         #: Tool calls run one at a time, so the latest started call is the one
         #: an approval, a change preview or a tool_end belongs to.
@@ -920,7 +929,12 @@ class WebApp:
     def usage_report(self, since: str = "30d") -> dict[str, Any]:
         """The six-block service usage report; admin-only at the route level."""
         nodes = poll_all(list(self.nodes.values())) if self.nodes else []
-        return collect_report(self.config, since=since, users=self.users, nodes=nodes)
+        report = collect_report(self.config, since=since, users=self.users, nodes=nodes)
+        if self.superagent is not None:
+            from datetime import datetime, timezone
+            start = datetime.fromisoformat(report["from"]).astimezone(timezone.utc)
+            report["superagent"] = self.superagent.usage(start.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+        return report
 
     def security_check(self) -> dict[str, Any]:
         return seccheck.run(
@@ -928,10 +942,13 @@ class WebApp:
             bound_host=self.bound_host,
             has_token=self.has_token,
             users=self.users,
+            superagent=self.superagent,
         )
 
     def dispose(self) -> None:
         self._closing = True
+        if self.superagent is not None:
+            self.superagent.stop()
         with self.lock:
             convs = list(self.conversations.values())
         for conv in convs:
@@ -1198,6 +1215,15 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     return
                 self._json(200, app.channel_overview())
                 return
+            if parts[1:2] == ["superagent"]:
+                if not self._admin_only():
+                    return
+                if app.superagent is None:
+                    self._json(404, {"error": "the resident agent is off ([superagent] enabled = false)"})
+                    return
+                from .superagent import api as superagent_api
+                self._json(*superagent_api.get(app.superagent, parts[2:], query))
+                return
             if parts[1:] == ["access-audit"]:
                 if not self._admin_only():
                     return
@@ -1315,6 +1341,19 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                 if not self._admin_only():
                     return
                 self._manage_channel(body)
+                return
+            if parts[1:] == ["superagent"]:
+                if not self._admin_only():
+                    return
+                if app.superagent is None:
+                    self._json(404, {"error": "the resident agent is off ([superagent] enabled = false)"})
+                    return
+                from .superagent import api as superagent_api
+                who = principal_name(self.principal) or "operator"
+                status, payload = superagent_api.post(app.superagent, body, who)
+                app.users.audit(f"superagent-{str(body.get('action') or '')[:20]}", who, status == 200,
+                                str(body.get("ticket") or body.get("trigger") or body.get("thread") or "")[:80])
+                self._json(status, payload)
                 return
             if parts[1:] == ["files"]:
                 name = str(body.get("name") or "")
@@ -1572,6 +1611,7 @@ def start_server(
         app.has_token = bool(token)
         app.start_channels()
         app.start_reminders()
+        app.start_superagent()
     elif bare not in LOOPBACK_HOSTS:
         # A second listener on the same app (the desktop window also serving as a
         # fleet node): the security page must report the exposed binding, not the
@@ -2031,6 +2071,33 @@ button.tile:hover{background:rgba(255,255,255,.12)}
 body:not(.view-chat) .conv,body:not(.view-chat) .review{display:none}
 body:not(.view-fleet) #fleet{display:none}
 body:not(.view-admin) #admin{display:none}
+body:not(.view-agent) #agent{display:none}
+.track{background:var(--surface);border-radius:18px;padding:14px 16px;box-shadow:var(--shadow-sm);margin:4px 0 16px}
+.track .th{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.track .th b{font-size:15px}.track .th span{font-size:13px;color:var(--ink-3)}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.step{border-radius:13px;padding:10px 12px;background:var(--surface-2);display:flex;flex-direction:column;gap:4px;cursor:pointer;border:0;text-align:left;font:inherit;color:inherit}
+.step .sn{font-size:12px;font-weight:700;color:var(--ink-3)}
+.step .st{font-size:14px;font-weight:700}
+.step .sw{font-size:12.5px;color:var(--ink-3);line-height:1.5}
+.step .ss{font-size:12px;font-weight:700}
+.step.done .ss{color:var(--ok,#2e7d32)}.step.now{background:var(--tint)}.step.now .ss{color:var(--brand)}
+.step.blocked .ss,.step.skip .ss{color:var(--ink-3)}
+.agcard{background:var(--surface);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:6px}
+.agcard .hd{display:flex;align-items:center;gap:8px}.agcard h3{margin:0;font-size:15.5px;flex:1;min-width:0}
+.agcard .ln{font-size:13.5px;color:var(--ink-2);word-break:break-word;line-height:1.6}
+.agcard .q{background:var(--tint);border-radius:10px;padding:8px 10px;font-size:14px}
+.agcard .acts{display:flex;gap:6px;flex-wrap:wrap}
+.agrow{display:flex;gap:10px;align-items:flex-start;padding:9px 10px;border-radius:11px}
+.agrow:hover{background:var(--surface-2)}
+.agrow .tx{flex:1;min-width:0;font-size:13.5px;line-height:1.55;word-break:break-word}
+.agrow .tm{font-size:12px;color:var(--ink-3);white-space:nowrap}
+.where{font-size:11.5px;font-weight:700;border-radius:99px;padding:1px 8px;white-space:nowrap;background:var(--surface-2);color:var(--ink-2)}
+.where.ticket{background:var(--tint);color:var(--brand)}
+.agbox{max-height:62vh;overflow-y:auto;background:var(--surface);border-radius:16px;box-shadow:var(--shadow-sm);padding:6px}
+.agthread{padding:6px 4px 10px}.agthread h4{margin:6px 8px;font-size:13.5px;color:var(--ink-2)}
+.rules{display:flex;flex-direction:column;gap:10px}
+.rulebox{background:var(--surface-2);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:6px 0 18px}
 .kpi{background:var(--surface);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow-sm)}
 .kpi.enter,.fc.enter{animation:rise .4s var(--ease) both}
@@ -2223,6 +2290,7 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
   <nav class="tabs" aria-label="主要">
     <button class="tab on" id="nav-chat">工作台</button>
     <button class="tab" id="nav-fleet">艦隊<span class="cnt" id="fleet-cnt" hidden></span></button>
+    <button class="tab" id="nav-agent" hidden>常駐代理<span class="cnt" id="agent-cnt" hidden></span></button>
     <button class="tab" id="nav-admin" hidden>管理</button>
   </nav>
   <span class="grow"></span>
@@ -2362,6 +2430,33 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
           <div id="usage-legend" class="viz-legend"></div>
           <div id="usage-table" class="viz-table" hidden></div>
         </div>
+      </div>
+    </section>
+
+    <section class="page" id="agent">
+      <div class="page-in">
+        <div class="page-head"><div><h1>常駐代理</h1><p>代理自己聽 GitHub 與群組的事件，接下的工作交給各自隔離的工作代理去做；只有要你決定、要你驗收時才叫你。</p></div>
+          <span class="grow"></span>
+          <span class="pill" id="ag-mode"></span>
+          <button class="btn sm" id="ag-pause">暫停</button></div>
+        <div class="track" id="ag-track"></div>
+        <div class="seg admseg" id="ag-seg">
+          <button class="on" data-ag="inbox">待處理<span class="cnt" id="ag-inbox-cnt"></span></button>
+          <button data-ag="tickets">工單</button>
+          <button data-ag="events">事件</button>
+          <button data-ag="settings">設定</button>
+        </div>
+        <div id="ag-inbox"><div class="kpis" id="ag-kpis"></div><div id="ag-person"></div><div id="ag-problems"></div></div>
+        <div id="ag-tickets" hidden>
+          <div class="sect"><h2>工單</h2><span class="m">每張工單是一件被授權的工作；接下時的授權寫死在工單上，訊息內容改不了。</span><span class="grow"></span>
+            <div class="seg admseg" id="ag-tk-seg"><button class="on" data-tk="open">進行中</button><button data-tk="ended">已結束</button></div></div>
+          <div class="agbox" id="ag-tk-list"></div>
+        </div>
+        <div id="ag-events" hidden>
+          <div class="sect"><h2>事件</h2><span class="m">每則訊息去了哪裡：被篩掉、評估後忽略、接成工單，或直接送到已訂閱的工單。</span></div>
+          <div class="agbox" id="ag-ev-list"></div>
+        </div>
+        <div id="ag-settings" hidden><div class="chform" id="ag-form"></div></div>
       </div>
     </section>
 
@@ -3360,14 +3455,17 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
   // ---- views --------------------------------------------------------------------------
   let fleetTimer=null;
   function showView(name){
-    view=name;['chat','fleet','admin'].forEach(k=>{document.body.classList.toggle('view-'+k,k===name);$('#nav-'+k).classList.toggle('on',k===name);});
+    view=name;['chat','fleet','admin','agent'].forEach(k=>{document.body.classList.toggle('view-'+k,k===name);$('#nav-'+k).classList.toggle('on',k===name);});
     if(fleetTimer){clearInterval(fleetTimer);fleetTimer=null;}
     if(name==='fleet'){renderFleet();loadUsage();fleetTimer=setInterval(()=>{if(!document.hidden)renderFleet();},2500);}
     if(name==='admin')admShow('sec');
+    if(agTimer){clearInterval(agTimer);agTimer=null;}
+    if(name==='agent'){agShow(agTab,true);agTimer=setInterval(()=>{if(!document.hidden&&(agTab==='inbox'||agTab==='tickets'))agRefresh();},5000);}
   }
   $('#nav-chat').onclick=()=>showView('chat');
   $('#nav-fleet').onclick=()=>showView('fleet');
   $('#nav-admin').onclick=()=>showView('admin');
+  $('#nav-agent').onclick=()=>showView('agent');
   $('#logo').onclick=e=>{e.preventDefault();showView('chat');};
 
   // ---- fleet --------------------------------------------------------------------------
@@ -3589,6 +3687,7 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
       $('#btn-logout').hidden=false;
     }
     $('#nav-admin').hidden=!admin;
+    if(admin)api('/api/superagent').then(d=>{$('#nav-agent').hidden=false;agBadge(d);}).catch(()=>{});
     refreshQuota();
   }
   async function refreshQuota(){
@@ -3607,6 +3706,185 @@ textarea.field{min-height:64px;resize:vertical;font-family:var(--mono);font-size
 
   // --- admin ------------------------------------------------------
   let repSince='30d';
+
+  // ---- the resident agent ---------------------------------------------------------------
+  let agTimer=null,agTab='inbox',agTk='open',agData=null,agSettings=null,agSig={};
+  const AG_STAGE={answer:'等你回答',review:'待驗收',blocked:'卡住了',failed:'失敗',delivery:'送不進去',queued:'排隊中'};
+  const AG_WHERE={filtered:'篩掉',ignore:'忽略',accept:'接成工單',stop:'停止',unavailable:'未完成評估',ticket:'送到工單',evaluating:'評估中',queued:'排隊中'};
+  const AG_OUT={completed:'完成',merged:'PR 已合併',closed:'PR 已關閉',dropped:'不需處理',stopped:'被停止'};
+  const tpe=t=>t?new Date(t).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false,month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+  function agBadge(d){const n=(d.person||[]).length+(d.problems||[]).length;const c=$('#agent-cnt');c.hidden=!n;c.textContent=n;}
+  function agShow(which,fresh){
+    agTab=which;['inbox','tickets','events','settings'].forEach(k=>{$('#ag-'+k).hidden=(k!==which);});
+    document.querySelectorAll('[data-ag]').forEach(b=>b.classList.toggle('on',b.dataset.ag===which));
+    if(fresh||!agSettings)agLoadSettings();
+    agRefresh();
+  }
+  document.querySelectorAll('[data-ag]').forEach(b=>b.onclick=()=>agShow(b.dataset.ag));
+  document.querySelectorAll('[data-tk]').forEach(b=>b.onclick=()=>{agTk=b.dataset.tk;document.querySelectorAll('[data-tk]').forEach(x=>x.classList.toggle('on',x===b));agSig.tk='';agRefresh();});
+  async function agLoadSettings(){try{agSettings=await api('/api/superagent/settings');agTrack();if(agTab==='settings')agForm();}catch(e){toast(e.message,true);}}
+  // Re-render a block only when its data changed: polling never rebuilds an unchanged page.
+  function agPut(key,data,render){const s=JSON.stringify(data);if(agSig[key]===s)return;agSig[key]=s;render();}
+  async function agRefresh(){
+    try{agData=await api('/api/superagent');}catch(e){return;}
+    agBadge(agData);
+    const m=$('#ag-mode');m.textContent=agData.paused?'已暫停':({off:'不主動',observe:'觀察中',auto:'自動接單'}[agData.mode]||agData.mode);
+    m.className='pill '+(agData.paused?'error':agData.mode==='auto'?'running':'waiting');
+    $('#ag-pause').textContent=agData.paused?'恢復':'暫停';
+    $('#ag-inbox-cnt').textContent=(agData.person.length||'')+'';
+    agTrack();
+    if(agTab==='inbox')agPut('inbox',[agData.person,agData.problems,agData.pendingWrites,agData.counts,agData.workers,agData.working.length],agInbox);
+    if(agTab==='tickets'){const d=await api('/api/superagent/tickets?state='+agTk);agPut('tk',[agTk,d],()=>agTickets(d.tickets));}
+    if(agTab==='events'){const d=await api('/api/superagent/threads');agPut('ev',d,()=>agEvents(d.threads));}
+  }
+  $('#ag-pause').onclick=async()=>{try{await api('/api/superagent',{method:'POST',body:{action:agData&&agData.paused?'resume':'pause'}});agRefresh();}catch(e){toast(e.message,true);}};
+  function agSteps(){
+    const s=agSettings&&agSettings.settings;if(!s)return [];
+    const srcs=Object.entries(s.sources),health=k=>(agData&&agData.sources[k])||{};
+    const ok=srcs.filter(([k,v])=>(v.kind!=='github'||v.tokenSet)&&health(k).state!=='error');
+    const bad=srcs.map(([k])=>health(k)).find(x=>x.state==='error');
+    const allowed=srcs.reduce((n,[k])=>n+((s.policy.sources[k]||{}).allowed||[]).length,0);
+    const rules=s.policy.rules.filter(r=>r.enabled).length,mode=s.eval.mode;
+    return [
+      {t:'接上來源',w:'GitHub 存放庫或 Telegram 群組；代理才收得到事件',done:ok.length>0,bad:bad?bad.detail:''},
+      {t:'設定誰能叫它',w:'名單上的人點名代理，就是明確的要求',done:allowed>0,need:1},
+      {t:'寫主動規則',w:'哪些事不用點名也能做；不寫也能用',done:rules>0,opt:true},
+      {t:'先觀察',w:'只記錄「本來會接」，核對對不對',done:mode!=='off'},
+      {t:'開自動接單',w:'觀察沒問題再開；對外寫入仍要核准',done:mode==='auto',opt:true,need:4},
+    ];
+  }
+  function agTrack(){
+    const steps=agSteps(),box=$('#ag-track');if(!steps.length){box.textContent='';return;}
+    agPut('track',[steps],()=>{
+      box.textContent='';const done=steps.filter(x=>x.done).length,next=steps.findIndex(x=>!x.done&&!x.opt);
+      const th=h('div','th');th.append(h('b',null,done+'/'+steps.length+' 步完成'),h('span',null,next>=0?'下一步：'+(next+1)+'. '+steps[next].t:'基本設定都完成了'));box.appendChild(th);
+      const g=h('div','steps');
+      steps.forEach((x,i)=>{
+        const blocked=x.need&&!steps[x.need-1].done;
+        const b=h('button','step '+(x.done?'done':blocked?'blocked':i===next?'now':x.opt?'skip':''));b.type='button';
+        b.append(h('span','sn','第 '+(i+1)+' 步'),h('span','st',x.t),h('span','sw',x.bad||x.w),
+          h('span','ss',x.done?'已完成':blocked?'要先完成第 '+x.need+' 步':i===next?'現在做這步':x.opt?'可略過':'未完成'));
+        b.onclick=()=>agShow('settings');g.appendChild(b);
+      });
+      box.appendChild(g);
+    });
+  }
+  function agInbox(){
+    const d=agData,k=$('#ag-kpis');k.textContent='';
+    const kpi=(n,l,hot)=>{const b=h('div','kpi'+(hot?' hot':''));b.append(h('div','n',String(n)),h('div','l',l));k.appendChild(b);};
+    kpi(d.person.length,'等你處理',d.person.length>0);kpi(d.working.length,'進行中');
+    kpi(d.counts['trigger.received']||0,'24 小時收到的事件');kpi(d.workers+' / '+d.maxWorkers,'工作代理');
+    const p=$('#ag-person');p.textContent='';
+    if(d.pendingWrites)p.appendChild(h('div','sect')).append(h('h2',null,d.pendingWrites+' 則對外留言等你核准'),h('span','m','在「常駐代理：對外寫入待核准」對話或 Telegram 按核准。'));
+    if(!d.person.length&&!d.pendingWrites){p.appendChild(h('div','empty')).append(h('b',null,'沒有等你處理的事'),document.createTextNode('有結果要驗收、有問題要你決定時，會出現在這裡並通知你。'));}
+    else if(d.person.length){
+      p.appendChild(h('div','sect')).appendChild(h('h2',null,'等你處理'));
+      const g=h('div','chgrid');d.person.forEach(t=>g.appendChild(agCard(t)));p.appendChild(g);
+    }
+    const pr=$('#ag-problems');pr.textContent='';
+    if(d.problems.length){
+      pr.appendChild(h('div','sect')).append(h('h2',null,'系統問題'),h('span','m','來源斷線、寫回失敗、評估逾時。'));
+      d.problems.forEach(x=>{const r=h('div','agrow');r.append(h('span','where','問題'),h('div','tx',x.kind+'：'+(x.error||'')),h('span','tm',tpe(x.at)));
+        if(x.decisionId){const b=h('button','btn sm quiet','知道了');b.onclick=()=>agAct({action:'dismiss',decision:x.decisionId});r.appendChild(b);}
+        else if(!/^source|^stored/.test(x.kind)){const b=h('button','btn sm quiet','清除');b.onclick=()=>agAct({action:'clear-problem',kind:x.kind});r.appendChild(b);}
+        pr.appendChild(r);});
+    }
+  }
+  function agCard(t){
+    const c=h('div','agcard'),hd=h('div','hd');
+    hd.append(h('h3',null,t.title),h('span','pill '+(t.stage.stage==='person'?'waiting':'running'),AG_STAGE[t.stage.action]||(t.ended?AG_OUT[t.ended.outcome]:t.stage.stage==='idle'?'等下一則訊息':'進行中')));
+    c.appendChild(hd);
+    if(t.attention)c.appendChild(h('div','q','問你：'+t.attention.question));
+    else if(t.report&&t.report.summary)c.appendChild(h('div','ln',t.report.summary.slice(0,400)));
+    c.appendChild(h('div','ln','範圍：'+t.scope+(t.origin.actor?'・來自 '+t.origin.actor:'')+'・'+tpe(t.updatedAt)));
+    const a=h('div','acts');
+    if(t.conversation){const b=h('button','btn sm','看工作過程');b.onclick=()=>openConversation({id:t.conversation});a.appendChild(b);}
+    if(t.origin.url){const l=h('a','btn sm quiet','原始訊息');l.href=t.origin.url;l.target='_blank';l.rel='noopener';a.appendChild(l);}
+    if(t.stage.action==='blocked'||t.stage.action==='failed'||t.stage.action==='delivery'){const b=h('button','btn sm','重試');b.onclick=()=>agAct({action:'retry',ticket:t.id});a.appendChild(b);}
+    if(!t.ended){const b=h('button','btn sm quiet','停止');b.onclick=async()=>{if(await askConfirm('停止這張工單？','停止後它不再收任何訊息；要重做得重新點名代理。','停止'))agAct({action:'stop',ticket:t.id});};a.appendChild(b);}
+    c.appendChild(a);return c;
+  }
+  function agTickets(list){
+    const box=$('#ag-tk-list');box.textContent='';
+    if(!list.length){box.appendChild(h('div','empty',agTk==='open'?'目前沒有進行中的工單。':'還沒有結束的工單。'));return;}
+    const g=h('div','chgrid');g.style.padding='8px';list.forEach(t=>g.appendChild(agCard(t)));box.appendChild(g);
+  }
+  function agEvents(threads){
+    const box=$('#ag-ev-list');box.textContent='';
+    if(!threads.length){box.appendChild(h('div','empty',agData&&agData.sources&&Object.keys(agData.sources).length?'還沒有收到事件。':'還沒接上任何來源：先到「設定」接上 GitHub。'));return;}
+    threads.forEach(th=>{
+      const w=h('div','agthread');w.appendChild(h('h4',null,th.key+(th.subscriptions.length?'・'+th.subscriptions.length+' 張工單訂閱':'')+(th.evaluating?'・評估中':'')));
+      th.triggers.forEach(t=>{
+        const r=h('div','agrow');r.appendChild(h('span','where'+(t.where==='ticket'||t.where==='accept'?' ticket':''),AG_WHERE[t.where]||t.where));
+        const tx=h('div','tx');tx.append(h('b',null,(t.actor||'CI')+(t.addressed?'（點名）':'')+'：'),document.createTextNode(t.text.slice(0,200)));
+        if(t.reason)tx.appendChild(h('div','muted',t.reason));r.appendChild(tx);r.appendChild(h('span','tm',tpe(t.at)));
+        if(t.human&&(t.where==='ignore'||t.where==='filtered'||t.where==='unavailable')){const b=h('button','btn sm quiet','重新評估');b.onclick=()=>agAct({action:'requeue',trigger:t.id});r.appendChild(b);}
+        w.appendChild(r);
+      });
+      box.appendChild(w);
+    });
+  }
+  async function agAct(body){try{await api('/api/superagent',{method:'POST',body});toast('已送出');agSig={};agRefresh();}catch(e){toast(e.message,true);}}
+  function agForm(){
+    const f=$('#ag-form');f.textContent='';const s=JSON.parse(JSON.stringify(agSettings.settings));
+    const ghEntry=Object.entries(s.sources).find(([k,v])=>v.kind==='github')||['github',{kind:'github',enabled:true,config:{receive:{}},tokenSet:false}];
+    const sid=ghEntry[0],src=ghEntry[1],cfg=src.config||{};cfg.receive=cfg.receive||{};
+    const part=s.policy.sources[sid]||{allowed:[],bots:[],admission:{}};
+    const form=document.createElement('form');form.autocomplete='off';
+    const sec=t=>form.appendChild(h('h3',null,t));
+    function row(label,input,hint){const r=h('div','chrow'),l=h('label',null,label),w=h('div');if(input.id)l.htmlFor=input.id;w.appendChild(input);if(hint)w.appendChild(h('div','chhint',hint));r.append(l,w);form.appendChild(r);return input;}
+    const field=(tag,props)=>Object.assign(h(tag,'field'),props);
+    sec('1. 接上 GitHub');
+    const repo=row('存放庫',field('input',{id:'agf-repo',value:cfg.repository||'',placeholder:'owner/name',spellcheck:false}),'代理只看這個存放庫。');
+    const login=row('代理帳號',field('input',{id:'agf-login',value:cfg.login||'',placeholder:'留空會用權杖查出來',spellcheck:false}),'建議用專用帳號；有人在留言裡 @ 這個帳號，就是點名代理。');
+    const tok=row('權杖',field('input',{id:'agf-token',type:'password',autocomplete:'new-password',placeholder:src.tokenSet?'已加密保存；留空表示不變':'貼上只限這個存放庫的權杖'}),'權限只給 Issues、Pull requests、Contents。加密保存，本頁不再顯示；工作代理拿不到它。');
+    const recv=h('div','chevents');[['issues','新 Issue'],['pulls','新 PR'],['comments','所有留言'],['ci','預設分支 CI']].forEach(([k,l])=>{const lb=h('label'),cb=document.createElement('input');cb.type='checkbox';cb.dataset.k=k;cb.checked=!!cfg.receive[k];lb.append(cb,document.createTextNode(l));recv.appendChild(lb);});
+    row('全部都收',recv,'不勾也收得到點名代理的訊息與已訂閱的討論；勾了才會評估沒點名的訊息（要配合主動規則）。');
+    const tgEntry=Object.entries(s.sources).find(([k,v])=>v.kind==='telegram')||['telegram',{kind:'telegram',enabled:true,config:{chats:[]}}];
+    const tgid=tgEntry[0],tgcfg=tgEntry[1].config||{chats:[]},tgpart=s.policy.sources[tgid]||{allowed:[],bots:[],admission:{}};
+    const chats=row('Telegram 群組',field('textarea',{id:'agf-chats',value:(tgcfg.chats||[]).map(c=>c.id+(c.all?' *':'')+(c.name?' '+c.name:'')).join('\n'),placeholder:'-1001234567890 * 研發群'}),
+      '一行一個群組 chat id（負數），後面加 * 表示全收、再加名稱。用節點已掛的 Telegram 機器人；要收沒點名的訊息，機器人要關掉隱私模式或設成管理員。');
+    sec('2. 誰能叫它');
+    const allowed=row('名單',field('textarea',{id:'agf-allowed',value:(part.allowed||[]).map(x=>x.id).join('\n'),placeholder:'GitHub 帳號，一行一個'}),'名單上的人點名代理，就是明確的要求；其他人點名預設不理。');
+    const bots=row('可信的機器人',field('textarea',{id:'agf-bots',value:(part.bots||[]).map(x=>x.id).join('\n'),placeholder:'例如 dependabot[bot]'}),'它們的訊息最多只能是「推斷」，要符合主動規則才會接。');
+    const tgAllowed=row('Telegram 名單',field('textarea',{id:'agf-tgallowed',value:(tgpart.allowed||[]).map(x=>x.id+(x.name?' '+x.name:'')).join('\n'),placeholder:'Telegram 使用者 id（數字），一行一個，可加名字'}),
+      '用數字 id，不用顯示名稱（名稱可以改，冒名就擋不住）。不知道 id：先在群組裡講一句話，到「事件」看。');
+    sec('3. 主動規則');
+    const rules=h('div','rules');
+    function ruleBox(r){const b=h('div','rulebox'),hd=h('div','chevents'),lb=h('label'),cb=document.createElement('input');cb.type='checkbox';cb.checked=r.enabled;lb.append(cb,document.createTextNode('啟用'));
+      const nm=field('input',{value:r.name,placeholder:'規則名稱'}),ins=field('textarea',{value:r.instruction,placeholder:'什麼情況下、做到哪裡為止'});
+      const del=h('button','btn sm quiet','刪除');del.type='button';del.onclick=()=>b.remove();hd.append(lb,del);b.append(hd,nm,ins);b.dataset.id=r.id;b._get=()=>({id:r.id,name:nm.value.trim(),enabled:cb.checked,instruction:ins.value.trim()});return b;}
+    s.policy.rules.forEach(r=>rules.appendChild(ruleBox(r)));
+    const add=h('button','btn sm','新增規則');add.type='button';add.onclick=()=>rules.appendChild(ruleBox({id:'rule-'+Date.now().toString(36),name:'',enabled:true,instruction:''}));
+    row('規則',rules,'代理不經點名主動做事，一定要符合其中一條；每條都會被逐一判斷。');form.lastChild.lastChild.appendChild(add);
+    sec('4. 接單模式與寫回');
+    const mode=field('select',{id:'agf-mode'});[['off','不主動：只做被點名的事'],['observe','觀察：只記錄本來會接的'],['auto','自動接單：符合規則就接']].forEach(([v,l])=>{const o=new Option(l,v);o.selected=s.eval.mode===v;mode.appendChild(o);});
+    row('接單模式',mode,'建議先觀察一週，在「事件」核對紀錄再開自動。');
+    const writes=field('select',{id:'agf-writes'});[['approve','每一則都要核准（建議）'],['auto','接下的工作直接留言']].forEach(([v,l])=>{const o=new Option(l,v);o.selected=s.writes===v;writes.appendChild(o);});
+    row('對外寫入',writes,'留言、開 PR 都算；核准在網頁或 Telegram 按。');
+    sec('5. 工作代理');
+    const workers=row('同時幾個',field('input',{id:'agf-workers',type:'number',min:1,max:16,value:s.executor.maxWorkers}),'另外永遠保留一個給人的跟進，新工作擋不住你。');
+    const check=row('開 PR 前檢查',field('input',{id:'agf-check',value:s.executor.check||'',placeholder:'例如 python -m pytest -q',spellcheck:false}),'由系統執行（沙箱內），失敗就不開 PR。');
+    const acts=h('div','acts'),save=h('button','btn primary','儲存');save.type='submit';acts.appendChild(save);form.appendChild(acts);
+    form.onsubmit=async e=>{e.preventDefault();
+      const lines=t=>t.value.split(/\n|,/).map(x=>x.trim()).filter(Boolean).map(id=>({id}));
+      const receive={};recv.querySelectorAll('input').forEach(cb=>receive[cb.dataset.k]=cb.checked);
+      const config={...cfg,repository:repo.value.trim(),login:login.value.trim(),receive};if(tok.value.trim())config.token=tok.value.trim();
+      const chatList=chats.value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const m=l.match(/^(-?\d+)\s*(\*)?\s*(.*)$/);return m?{id:Number(m[1]),all:!!m[2],name:m[3]||''}:null;}).filter(Boolean);
+      const people=t=>t.value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const [id,...rest]=l.split(/\s+/);return {id,name:rest.join(' ')};});
+      const srcs=Object.fromEntries(Object.entries(s.sources).map(([k,v])=>[k,{kind:v.kind,enabled:v.enabled,config:v.config}]));
+      if(repo.value.trim())srcs[sid]={kind:'github',enabled:true,config};else delete srcs[sid];
+      if(chatList.length)srcs[tgid]={kind:'telegram',enabled:true,config:{chats:chatList}};else delete srcs[tgid];
+      const next={...s,sources:srcs,
+        policy:{rules:[...rules.querySelectorAll('.rulebox')].map(b=>b._get()).filter(r=>r.name&&r.instruction),
+          sources:{...s.policy.sources,[sid]:{...part,allowed:lines(allowed),bots:lines(bots)},[tgid]:{...tgpart,allowed:people(tgAllowed)}}},
+        eval:{...s.eval,mode:mode.value},writes:writes.value,executor:{...s.executor,maxWorkers:parseInt(workers.value,10)||3,check:check.value.trim()}};
+      save.disabled=true;
+      try{await api('/api/superagent',{method:'POST',body:{action:'save',settings:next}});toast('已儲存');tok.value='';await agLoadSettings();agSig={};}
+      catch(err){toast(err.message,true);}finally{save.disabled=false;}
+    };
+    f.appendChild(form);
+  }
   function admShow(which){
     ['sec','rep','usr','ch'].forEach(k=>{$('#adm-'+k).hidden=(k!==which);});
     document.querySelectorAll('[data-adm]').forEach(b=>b.classList.toggle('on',b.dataset.adm===which));
