@@ -172,7 +172,7 @@ def test_candidates_that_arrive_while_the_main_session_is_busy_go_in_one_turn(ag
     sa.main_busy = False
     sa.run_effects()
     time.sleep(0.1)
-    assert len(turns) == 1 and turns[0].startswith("2 new item(s)")
+    assert turns[0].startswith("2 new item(s)") and all("still undecided" in t for t in turns[1:])
 
 
 def test_the_token_never_appears_in_settings_or_errors(agent, tmp_path):
@@ -245,3 +245,20 @@ def test_a_main_session_that_answers_in_plain_text_is_reminded_to_send_the_resul
     settle(sa)
     assert any("reached nobody" in s for s in seen)
     assert any("Fixed." in body["body"] for path, body in client.posts)
+
+
+def test_a_candidate_left_undecided_is_named_again_in_the_same_turn(agent):
+    sa, client, host = agent
+    seen: list[str] = []
+
+    def main(handle: FakeHandle, text: str) -> str:
+        seen.append(text)
+        if "still undecided" in text:
+            trigger = sa.store.recent_triggers("", 10)[0]["id"][:12]
+            handle.call("superagent_route", decisions=[{"trigger": trigger, "kind": "ignore", "reason": "chatter"}])
+        return "Hello!"                                    # text only the first time
+
+    host.main_script = main
+    settle(sa, 10)
+    assert any("still undecided" in s for s in seen)
+    assert sa.store.decisions(10)[0]["kind"] == "ignore"

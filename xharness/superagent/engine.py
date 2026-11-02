@@ -843,7 +843,10 @@ class Engine:
                 delivered = item.get("deliveredAt")
                 return (delivered if delivered and delivered > item["at"] else item["at"]) <= until
             return bool(item["readAt"]) and item["readAt"] < until
-        left = self._untaken(ticket, [i["id"] for i in ticket["inputs"] if i["kind"] == "trigger"
+        # A message attached again after a resume arrives as a new Input: once any copy was read, it was read.
+        read = {i["triggerId"] for i in ticket["inputs"] if i["kind"] == "trigger" and i["id"] not in ticket["undelivered"]
+                and read_before(i)}
+        left = self._untaken(ticket, [i["id"] for i in ticket["inputs"] if i["kind"] == "trigger" and i["triggerId"] not in read
                                       and (not read_before(i) or i["id"] in ticket["undelivered"])])
         ticket["ended"] = {"at": at, "by": by, "outcome": outcome, **({"reason": reason} if reason and reason != outcome else {})}
         ticket["undelivered"] = []

@@ -323,3 +323,29 @@ def test_without_direct_delivery_a_follow_up_goes_through_the_main_session(world
     assert ports.requests[-1]["triggers"][0]["id"] == "t2"           # a candidate for the main Session
     engine.attach(ticket_id, "t2")
     assert any(i.get("triggerId") == "t2" for i in store.ticket(ticket_id)["inputs"])
+
+
+def test_a_follow_up_read_after_a_resume_does_not_come_back_forever(world):
+    """Live run on granite: a follow-up attached just before a ready report came back after every later end."""
+    engine, ports, _, store, _ = world
+    engine.receive(trig("t1"))
+    engine.evaluate_due()
+    ticket_id = accept(engine, "t1")["ticketId"]
+    first = store.ticket(ticket_id)["assignments"][0]["id"]
+    engine.assignment_started(ticket_id, first)
+    engine.receive(trig("f1", addressed=None, text="add the date too"))
+    follow = next(i["id"] for i in store.ticket(ticket_id)["inputs"] if i.get("triggerId") == "f1")
+    engine.inputs_delivered(ticket_id, first, [follow])         # delivered, never read: the worker's turn was ending
+    engine.report(ticket_id, {"state": "ready", "summary": "done"})
+    assert "f1" in store.thread("gh:issue-1")["pending"]       # unread, so it goes back for routing
+    engine.evaluate_due()
+    engine.attach(ticket_id, "f1")                              # the main Session routes it back; the ticket resumes
+    ticket = store.ticket(ticket_id)
+    running = ticket["assignments"][-1]["id"]
+    engine.assignment_started(ticket_id, running)
+    ids = list(store.ticket(ticket_id)["undelivered"])
+    engine.inputs_delivered(ticket_id, running, ids)
+    engine.inputs_read(ticket_id, ids)
+    engine.report(ticket_id, {"state": "ready", "summary": "date added"})
+    assert store.ticket(ticket_id)["ended"]["outcome"] == "completed"
+    assert "f1" not in store.thread("gh:issue-1")["pending"]

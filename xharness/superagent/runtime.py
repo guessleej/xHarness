@@ -475,7 +475,7 @@ class Superagent:
     def _relay(self, effects: list[Doc]) -> None:
         if self.main_busy:
             return
-        items, live_effects, owed = [], [], []
+        items, live_effects, owed, asked = [], [], [], []
         for effect in effects:
             payload = effect["payload"]
             if payload["kind"] == "candidate":
@@ -485,6 +485,7 @@ class Superagent:
                     self.store.effect_done(effect["id"])
                     continue
                 items.append(prompts.card(candidate, ticket_stage, self.settings["eval"]["mode"]))
+                asked.append((trigger_id, candidate["strength"]))
             else:
                 items.append(self._relay_text(payload))
                 report = payload.get("report") or {}
@@ -499,7 +500,7 @@ class Superagent:
                 self.engine.candidate_delivered(effect["payload"]["evalId"])
         text = f"{len(items)} new item(s):\n\n" + "\n\n---\n\n".join(items)
         self.main_busy = True
-        threading.Thread(target=self._main_turn, args=(text, owed), name="superagent-main", daemon=True).start()
+        threading.Thread(target=self._main_turn, args=(text, owed, asked), name="superagent-main", daemon=True).start()
 
     def _relay_text(self, payload: Doc) -> str:
         kind = payload["kind"]
@@ -522,7 +523,7 @@ class Superagent:
                    f"outcome={payload.get('outcome', '')}"
         return str(payload)
 
-    def _main_turn(self, text: str, owed: list[str] | None = None) -> None:
+    def _main_turn(self, text: str, owed: list[str] | None = None, asked: list[tuple[str, str]] | None = None) -> None:
         begun = time.time()
         try:
             if self.main is None:
@@ -543,6 +544,13 @@ class Superagent:
                 self.main_last = self.main.run(
                     "Your answer above reached nobody: people only see what superagent_reply sends. Send it now:\n"
                     + "\n".join(lines)) or ""
+            # A candidate is decided only by a tool call; one left undecided waits until its Eval expires.
+            undecided = [(t, s) for t, s in asked or [] if self.engine.candidate(t)]
+            if undecided:
+                self.main_last = self.main.run(
+                    "These candidates are still undecided; text does not decide them. Decide each now: explicit ones with "
+                    "superagent_route (accept, attach, stop or ignore), inferred ones with superagent_assess or a route ignore.\n"
+                    + "\n".join(f"- trigger {t[:12]} ({s})" for t, s in undecided)) or ""
         except Exception as error:  # noqa: BLE001
             self.store.set_kv("problem:main", {"at": now_iso(), "error": gh.scrub(str(error))[:500]})
         finally:
