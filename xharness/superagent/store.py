@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS effect (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TE
   due REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', created REAL NOT NULL,
   UNIQUE (kind, key));
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS event_at ON event (at);
 """
 
 
@@ -250,9 +252,32 @@ class Store:
     def effect_done(self, effect_id: int) -> None:
         self._run("DELETE FROM effect WHERE id = ?", (effect_id,))
 
+    def effect_drop(self, kind: str, key: str) -> None:
+        self._run("DELETE FROM effect WHERE kind = ? AND key = ?", (kind, key))
+
+    def effect_defer(self, effect_id: int, delay: float) -> None:
+        """Not a failure: the work waits for a free slot or an idle Session."""
+        self._run("UPDATE effect SET due = ? WHERE id = ?", (time.time() + delay, effect_id))
+
     def effect_failed(self, effect_id: int, error: str, delay: float) -> None:
         self._run("UPDATE effect SET attempts = attempts + 1, error = ?, due = ? WHERE id = ?",
                   (error[:500], time.time() + delay, effect_id))
+
+    # The audit trail of domain events
+
+    def log_event(self, kind: str, at: str, data: Doc) -> None:
+        self._run("INSERT INTO event (at, type, data) VALUES (?,?,?)", (at, kind, _dump(data)))
+
+    def events(self, since: str = "", limit: int = 200) -> list[Doc]:
+        with self._lock:
+            rows = self._db.execute("SELECT at, type, data FROM event WHERE at >= ? ORDER BY id DESC LIMIT ?",
+                                    (since, limit)).fetchall()
+        return [{"at": r[0], "type": r[1], "data": json.loads(r[2])} for r in rows]
+
+    def event_counts(self, since: str) -> dict[str, int]:
+        with self._lock:
+            rows = self._db.execute("SELECT type, COUNT(*) FROM event WHERE at >= ? GROUP BY type", (since,)).fetchall()
+        return {r[0]: r[1] for r in rows}
 
     # Small records
 
