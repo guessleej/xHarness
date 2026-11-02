@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from .context import Context, Plugin
-from .subagent import DEFAULT_CHILD_MAX_TURNS, DEFAULT_MAX_WORKERS, run_child
+from .subagent import CHECK_HELP, DEFAULT_CHILD_MAX_TURNS, DEFAULT_MAX_WORKERS, ISOLATE_HELP, run_child
 from .tools import Tool, ToolContext, ToolResult, register_tools
 
 MAX_STEPS = 12
@@ -87,7 +87,9 @@ def workflow_plugin(config: dict[str, Any] | None = None) -> Plugin:
                                                           "\n\n".join(handoff)) if part)
                 return step_id, run_child(ctx, tool_ctx, str(step["task"]).strip(), f"step-{step_id}",
                                           context=context, max_turns=child_turns, approve_lock=approve_lock,
-                                          role=str(step.get("agent") or "") or None, kind="workflow")
+                                          role=str(step.get("agent") or "") or None, kind="workflow",
+                                          isolate=bool(step.get("isolate", args.get("isolate"))),
+                                          check=str(step.get("check") or args.get("check") or "").strip())
 
             for wave in waves:
                 runnable = []
@@ -125,8 +127,13 @@ def workflow_plugin(config: dict[str, Any] | None = None) -> Plugin:
                     "id": {"type": "string"}, "task": {"type": "string"},
                     "depends_on": {"type": "array", "items": {"type": "string"}},
                     "agent": {"type": "string", "description": "Optional agent role for this step"},
+                    "isolate": {"type": "boolean", "description": "Override the workflow's isolate for this step"},
+                    "check": {"type": "string", "description": "This step's own check command"},
                     "context": {"type": "string"}}, "required": ["id", "task"]}},
                 "context": {"type": "string", "description": "Shared context every step receives"},
+                "isolate": {"type": "boolean", "description": ISOLATE_HELP + " A step starts from the working "
+                            "directory as it is then, so it sees the changes of the steps it depends on."},
+                "check": {"type": "string", "description": CHECK_HELP},
             }, "required": ["steps"]},
             execute=run,
             mutating=True,

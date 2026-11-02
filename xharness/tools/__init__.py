@@ -36,6 +36,9 @@ class Tool:
     execute: Callable[[dict[str, Any], ToolContext], ToolResult]
     #: Marks tools with side effects, for documentation and policy surfaces.
     mutating: bool = False
+    #: Ask the person on every call, even under approval mode "auto" (the desktop
+    #: tools: the person's own screen). Only a conversation's main agent gets these.
+    always_ask: bool = False
 
 
 class ToolRegistry:

@@ -61,11 +61,12 @@ XHARNESS_BASE_URL=http://localhost:8080/v1 XHARNESS_MODEL=your-model ./.venv/bin
 | 類別 | 工具 |
 |---|---|
 | 檔案與指令 | `read` `write` `edit` `glob` `grep` `bash` `terminal` `powershell` `job_*` |
-| 代理 | `subagent` `subagent_batch` `ralph` `workflow` `discussion` `list_agents` `send_message` `report` |
+| 代理 | `subagent` `subagent_batch` `ralph` `workflow`（皆可 `isolate` 獨立工作區＋`check` 整合閘門）`discussion` `list_agents` `send_message` `report` |
+| 任務板（`[board]`） | `board_list` `board_add` `board_claim` `board_heartbeat` `board_release` `board_note` `board_notes` |
 | 記憶與對話 | `memory_*` `session_search` `session_read` `todo_write` `skill` `schedule_*` |
 | 與人互動 | `ask_user` `goal_done` |
 | 程式碼 | `lsp` `security_scan` |
-| 設定後才有 | `web_search` `browser_open` `webfetch` 與 MCP 工具 |
+| 設定後才有 | `web_search` `browser_open` `webfetch` `desktop_look` `desktop_act`（操作這台電腦，macOS，每次都問人）與 MCP 工具 |
 
 ## 更多
 

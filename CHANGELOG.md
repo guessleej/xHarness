@@ -2,7 +2,47 @@
 
 中文 | English below
 
-## 未發布
+## 1.18.0 — 2026-10-29
+
+操作這台電腦：模型可以看畫面、用滑鼠和鍵盤（macOS）。`[tools] desktop_control = true` 開啟，預設關閉。
+
+- **`desktop_look`**：列出前景程式（或指定程式）的視窗與畫面上的按鈕、欄位、選單、文字，每個帶編號、名稱、內容與位置。資料從「輔助使用」介面讀，不靠看圖，純文字模型也能用；只走看得到的部分，長聊天紀錄的視窗也在一兩秒內讀完（原本用 osascript 走完整棵樹要 107 秒）。`screenshot: true` 會另外截圖交給 `[vision] provider` 描述，截圖用完即刪、不留在磁碟。
+- **`desktop_act`**：點擊、雙擊、右鍵（用畫面編號或座標）、輸入文字、按鍵組合（如 `cmd+s`）、捲動、把程式叫到前面。做完自動再看一次畫面並回傳，模型看得到動作的結果。文字一律用剪貼簿貼上再還原原本的剪貼簿內容，因為逐鍵輸入會經過輸入法，注音模式下打 abc 會變成「ㄇ」。
+- **每次都問人**：看畫面與每個動作都要人按核准，審批模式設成 auto 也一樣；核准卡寫出要點的是哪個元素（例如「click AXButton「傳送」 in LINE」）。沒有人在就不做。`desktop_approval = false` 可改回一般審批策略，機密防護檢查頁會對此亮警告。
+- **核准後先把目標程式叫回前景**：在瀏覽器或桌面視窗按核准，那個視窗會跑到前景，按鍵就會打錯地方。現在核准後會先把動作的目標程式叫回前景並檢查，叫不回來就什麼都不送。
+- **直接拒絕的動作**：在密碼欄位輸入（貼上與會打出字元的按鍵都擋，請本人輸入），以及清空垃圾桶的按鍵組合。畫面編號在換了前景程式或超過 5 分鐘後失效，要重新看；核准後送出前會再讀一次畫面，元素移動或換掉就不送。
+- **一次一個操作者**：只有對話的主代理拿得到這兩個工具，子代理與討論參與者沒有（子代理的審批會轉給上層策略，自動模式下可能不問人就放行）；整台電腦一把鎖，同時只會有一個動作。其他代理照樣可以平行處理檔案、指令與網頁。
+- 讀畫面與送出輸入在獨立的子行程執行，macOS 介面 API 出錯或某個程式卡住都不會拖垮 xHarness，逾時 30 秒。
+- 需要在「系統設定 > 隱私權與安全性 > 輔助使用」開啟執行 xharness 的程式，截圖另需「螢幕錄製」；沒開時工具會說明要去哪裡開。Windows 與 Linux 尚未支援。
+- 服務使用報告的功能清單與機密防護檢查頁各加一項。
+
+Use this computer: the model can see the screen and use the mouse and keyboard (macOS). Off by default; `[tools] desktop_control = true` turns it on.
+
+- **`desktop_look`** lists the window and the buttons, fields, menus and text of the app in front (or a named app) as numbered elements with label, value and position, read through the Accessibility API rather than from pixels, so a text-only model can use it. Only what is visible is walked: a window with a long chat history reads in a second or two (walking the whole tree through osascript took 107 seconds). `screenshot: true` adds a screenshot described by `[vision] provider`; the picture is deleted right after.
+- **`desktop_act`**: click, double-click, right-click (an element number or a point), type, key combinations (`cmd+s`), scroll, bring an app to the front; then it looks again and returns the new screen. Text is pasted through the clipboard, which is put back afterwards: typed keys go through the input method, and with Zhuyin "abc" arrives as "ㄇ".
+- **Asks every time**: every look and every action needs the person's approval, approval mode "auto" included; the card names the element. Nobody there means no. `desktop_approval = false` puts the tools under the normal policy; the security check page warns about it.
+- **The target app comes back first**: approving in a browser or the desktop window brings that window to the front, where the keys would land. After approval the app the action is for is brought back and checked; if it will not come, nothing is sent.
+- **Refused outright**: typing into a password field (pastes and character keys alike), and the key combinations that empty the Trash. Element numbers expire when another app comes to the front or after 5 minutes, and after the approval the screen is read again: an element that moved or changed is not clicked.
+- **One operator at a time**: only a conversation's main agent gets the tools (a child's approvals go to its parent's policy, which may approve silently in auto mode); one lock for the screen. Other agents keep working on files, commands and the web in parallel.
+- Screen reading and input run in a separate process with a 30-second timeout, so a failing Accessibility call or a hung app cannot take xHarness down.
+- Needs Accessibility for the app that runs xharness, and Screen Recording for screenshots; the tools say where to turn them on. Windows and Linux are not supported yet.
+- The usage report's feature list and the security check page each gain an item.
+
+多代理協作：代理分工之後，成果能安全地合回來，也知道誰在做什麼、什麼已經被驗證過。參考 microsoft/Agensh 的做法，但寫成 xHarness 的插件、不需要另外架服務。
+
+- **獨立工作區＋整合閘門**：`subagent`、`subagent_batch`、`workflow` 加 `isolate: true`，每個代理在自己的 git worktree 改程式。工作區從工作目錄「現在的樣子」建立（含未 commit 與未追蹤的檔案，用暫存索引做快照，不動使用者的索引）。代理做完，系統在它的工作區跑 `check` 指令（照 bash 的審批與沙箱），通過、`git apply --check` 確認沒有衝突、使用者同意後，才把改動套回工作目錄（不 commit，留給人在 `git status` 檢視）。沒過、衝突或不同意的改動保留成分支 `xharness/<名稱>-<代號>`，回報裡附查看指令。`subagent_batch` 全部套回後，再用同一個檢查跑一次整體。整體檢查沒過、改動沒套回（不同意、出錯）都算這個代理失敗，工作流程不會接著往下跑；代理中途出錯時，做到一半的改動只保留成分支、不套回。子代理名稱不可用 `main`，同名會自動加編號。
+- **共享任務板**（`[board] enabled = true`）：`board_add` 貼任務（同名未完成的不重複貼）、`board_claim` 認領（預設 30 分鐘，`board_heartbeat` 續約，逾時自動釋放；跨行程也只會有一個代理領到）、`board_release` 結束（完成／失敗／還回去；失敗可由其他代理重試，最多 3 次，之後留給人處理）、`board_list` 看全貌（一次 60 筆，`offset` 翻下一批）。認領時會附上任務說明；認領逾時後不能再結束該任務，要重新認領。
+- **發現與驗證紀錄**：`board_note` 記錄發現、成功、失敗，附證據與適用版本（`git describe`）。帶 `verify` 指令的紀錄由系統實際執行、記下結束碼，標成「系統驗證」；沒帶的標成「代理自述」。Agensh 的看板只檢查文字、不執行指令；這裡分得出兩者。`board_notes` 依任務、種類、關鍵字查。
+- 任務板存在專案頂層的 `.xharness/board.db`（0600，自動加進 `.xharness/.gitignore`），在 worktree 裡的子代理與上層共用同一塊；目前只限同一台機器。
+- 網頁「代理」分頁顯示任務板與最近的驗證紀錄；服務使用報告與 Word 月報統計獨立工作區的結果（套回、檢查沒過、衝突、不同意）；機密防護檢查頁加一項。
+
+Multi-agent collaboration: work split across agents comes back together safely, and agents can see who is doing what and what has actually been verified. Modelled on microsoft/Agensh, written as xHarness plugins with no extra services.
+
+- **Separate workspaces and an integration gate**: `isolate: true` on `subagent`, `subagent_batch` and `workflow` gives each agent a git worktree of its own, made from the working directory as it is now (uncommitted and untracked files included, snapshotted through a scratch index so the person's index is untouched). When the agent finishes, the system runs `check` in its worktree (approved and sandboxed like bash); the change is applied to the working directory, uncommitted, only if the check passes, `git apply --check` shows no conflict and the person approves. Otherwise it is kept as branch `xharness/<name>-<id>`. After a `subagent_batch` the same check runs once more on everything together. A failed combined check, or a change that was not applied (declined, error), counts as a failure, so a workflow does not go on without it; a child that crashes has its partial work kept as a branch, never applied. Children cannot be named `main`, and a repeated name gets a number.
+- **Shared task board** (`[board] enabled = true`): `board_add`, `board_claim` (30 minutes by default, renewed with `board_heartbeat`, released when it runs out; one winner across processes too), `board_release` (done / failed, retried by another agent up to 3 attempts / open), `board_list` (60 at a time, `offset` for the next). A claim returns the task's detail; a claim that ran out cannot be released, only claimed again.
+- **Findings and verification**: `board_note` records findings, successes and failures with evidence and the version they apply to. A note with `verify` gets the command run by the system and its exit code recorded ("verified by the system"); without it the note is "the agent's own report". Agensh's board checks text only and never runs the command. `board_notes` searches by task, kind and text.
+- The board lives in `.xharness/board.db` (0600) at the top of the project, shared by children in worktrees; one machine for now.
+- The Web UI's agents tab shows the board and recent verifications; the usage report and the Word report count workspace outcomes; the security check page gains an item.
 
 通知頻道：管理者在網頁上設定 Telegram、LINE、Microsoft Teams，任務完成、失敗或等人核准時發訊息。
 

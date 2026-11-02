@@ -20,6 +20,13 @@ max_turns = 40
 # max_workers = 4   # subagent_batch 平行上限
 # max_turns = 20    # 每個子代理回合上限
 # ralph_rounds = 5  # ralph 每次最多幾輪（上限 10）
+# 子代理、subagent_batch、workflow 都可以帶 isolate = true：每個代理在自己的 git worktree 改程式，
+# 做完由系統跑 check 指令，通過且沒有衝突才套回工作目錄（不 commit），否則保留成分支 xharness/<名稱>-<代號>。
+
+# 共享任務板：代理認領任務（有期限、可續約、逾時自動釋放、失敗可重試三次）並記錄發現；
+# 紀錄帶 verify 指令時由系統實際執行、記下結束碼。存在專案頂層的 .xharness/board.db，只在這台機器上。
+# [board]
+# enabled = false
 
 # [memory]
 # enabled = true
@@ -58,6 +65,9 @@ model = "your-model-id"
 # webfetch = false       # true 啟用 webfetch 工具（對外連線，走審批）
 # browser = "http://127.0.0.1:9377"   # 地端 camofox 位址；設了就多 web_search／browser_open 兩個工具
 # browser_approval = true              # false 讓這兩個工具不走審批（瀏覽器已在節點自己的機器上）
+# desktop_control = false              # true 讓模型看這台電腦的畫面、操作滑鼠鍵盤（desktop_look／desktop_act，目前只支援 macOS）
+#                                      # 要在「系統設定 > 隱私權與安全性」開「輔助使用」，截圖另需「螢幕錄製」；截圖描述用 [vision] provider
+# desktop_approval = true              # 每次看畫面與操作都問人（自動模式也問）；false 改走一般審批策略
 
 # Telegram 通道（隨 `xharness web` 啟動）：手機下任務、按鈕審批、接收 /api/notify 推播。
 # 建議改在網頁「管理 > 通知頻道」設定（Telegram、LINE、Teams 都在那裡，金鑰加密保存）；

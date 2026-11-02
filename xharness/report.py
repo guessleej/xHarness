@@ -90,13 +90,13 @@ def _count_events(directory: str, session_id: str, kinds: tuple[str, ...]) -> di
 
 
 def _agent_events(directory: str, session_id: str, start: datetime) -> list[dict[str, Any]]:
-    """agent-run and discussion-end records logged since `start`."""
+    """agent-run, discussion-end and workspace records logged since `start`."""
     path = os.path.join(directory, f"{session_id}.jsonl")
     found: list[dict[str, Any]] = []
     try:
         with open(path, encoding="utf-8") as handle:
             for line in handle:
-                if '"agent-run"' not in line and '"discussion-end"' not in line:
+                if '"agent-run"' not in line and '"discussion-end"' not in line and '"workspace"' not in line:
                     continue
                 try:
                     event = json.loads(line)
@@ -108,7 +108,7 @@ def _agent_events(directory: str, session_id: str, start: datetime) -> list[dict
                     continue
                 if stamp.tzinfo is None:
                     stamp = stamp.replace(tzinfo=timezone.utc)
-                if stamp >= start:
+                if stamp >= start and event.get("type") in ("agent-run", "discussion-end", "workspace"):
                     found.append(event)
     except OSError:
         return found
@@ -158,6 +158,7 @@ def collect(
     feedback: dict[str, Any] = {"up": 0, "down": 0, "notes": []}
     roles: dict[str, dict[str, Any]] = {}
     discussions = {"count": 0, "turns": 0, "tokens": 0}
+    workspaces: dict[str, int] = {}    # separate worktrees by outcome: integrated, check-failed, conflict, ...
     routing: dict[str, Any] = {"decisions": 0, "by_model": {}, "by_where": {}, "kept_off_external": 0,
                                "fallbacks": 0, "refused": 0}
 
@@ -218,6 +219,12 @@ def collect(
                 if any(item.get("why") in ("sensitive", "files") for item in event.get("excluded") or []):
                     routing["kept_off_external"] += 1
             for event in _agent_events(directory, session_id, start):
+                if event.get("type") == "workspace":
+                    status = str(event.get("status") or "error")
+                    if status == "integrated" and event.get("check_exit") is None:
+                        status = "integrated-unchecked"     # applied, but nothing was run first
+                    workspaces[status] = workspaces.get(status, 0) + 1
+                    continue
                 if event.get("type") == "discussion-end":
                     discussions["count"] += 1
                     discussions["turns"] += int(event.get("turns") or 0)
@@ -290,6 +297,7 @@ def collect(
             "tokens": sum(item["tokens"] for item in roles.values()),
             "by_role": sorted(roles.values(), key=lambda item: item["tokens"], reverse=True)[:TOP_N],
             "discussions": discussions,
+            "workspaces": workspaces,
         },
         "outbound": outbound,
         "health": {
@@ -339,6 +347,11 @@ def _outbound_posture(config: Any, users: UserStore | None) -> dict[str, Any]:
          "detail": "每次抓取都走審批", "safe": True},
         {"name": "真瀏覽器搜尋", "state": "on" if getattr(config, "browser", None) else "off",
          "detail": "地端 camofox，不經第三方搜尋 API", "safe": True},
+        {"name": "共享任務板", "state": "on" if (getattr(config, "board", None) or {}).get("enabled") else "off",
+         "detail": "只在這台機器上，標明哪些驗證是系統實際跑過的", "safe": True},
+        {"name": "操作桌面", "state": "on" if getattr(config, "desktop_control", False) else "off",
+         "detail": "每次看畫面與操作都要人核准" if getattr(config, "desktop_approval", True) else "走一般審批策略",
+         "safe": bool(getattr(config, "desktop_approval", True))},
         {"name": "MCP 外部工具", "state": "on" if getattr(config, "mcp_servers", None) else "off",
          "detail": f"{len(getattr(config, 'mcp_servers', None) or {})} 個 server，未標唯讀者一律走審批", "safe": True},
         _channels_row(config),

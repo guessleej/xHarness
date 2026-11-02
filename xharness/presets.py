@@ -39,6 +39,9 @@ from .tools.security import security_tool_plugin
 from .tools.todo import todo_tool_plugin
 from .tools.webfetch import webfetch_tool_plugin
 from .tools.browser import browser_tools_plugin
+from .tools.desktop_control import desktop_control_plugin
+from .board import board_plugin
+from .vision import describer_from_config
 from .tools.ask import ask_tool_plugin
 
 
@@ -93,6 +96,8 @@ def build_harness(
     if (getattr(config, "discussion", None) or {}).get("enabled", True):
         harness.use("discussion", discussion_plugin(config.discussion))
     harness.use("schedule", schedule_plugin())
+    if (getattr(config, "board", None) or {}).get("enabled"):
+        harness.use("board", board_plugin())
     if (getattr(config, "lsp", None) or {}).get("enabled", True):
         harness.use("lsp", lsp_plugin(config.lsp))
     if config.memory.get("enabled", True):
@@ -101,6 +106,8 @@ def build_harness(
         harness.use("tool-webfetch", webfetch_tool_plugin)
     if config.browser:
         harness.use("tool-browser", browser_tools_plugin(config.browser, config.browser_approval))
+    if getattr(config, "desktop_control", False):
+        harness.use("tool-desktop", desktop_control_plugin(config.desktop_approval, describer_from_config(config)))
     if config.mcp_servers:
         harness.use("mcp", mcp_plugin(config.mcp_servers))
     if not no_session:

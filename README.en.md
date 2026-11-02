@@ -61,11 +61,12 @@ When a task finishes, fails or waits for an approval, a message goes to Telegram
 | Group | Tools |
 |---|---|
 | Files and commands | `read` `write` `edit` `glob` `grep` `bash` `terminal` `powershell` `job_*` |
-| Agents | `subagent` `subagent_batch` `ralph` `workflow` `discussion` `list_agents` `send_message` `report` |
+| Agents | `subagent` `subagent_batch` `ralph` `workflow` (all with `isolate` workspaces and a `check` gate) `discussion` `list_agents` `send_message` `report` |
+| Task board (`[board]`) | `board_list` `board_add` `board_claim` `board_heartbeat` `board_release` `board_note` `board_notes` |
 | Memory and history | `memory_*` `session_search` `session_read` `todo_write` `skill` `schedule_*` |
 | Talking to people | `ask_user` `goal_done` |
 | Code | `lsp` `security_scan` |
-| Once configured | `web_search` `browser_open` `webfetch` and MCP tools |
+| Once configured | `web_search` `browser_open` `webfetch` `desktop_look` `desktop_act` (use this computer, macOS, asks every time) and MCP tools |
 
 ## More
 
