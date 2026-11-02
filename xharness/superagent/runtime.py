@@ -41,6 +41,9 @@ from .watchdog import Watchdog, open_problems
 
 TICK_SECONDS = 2.0
 RETRY_FIRST, RETRY_MAX = 2.0, 60.0
+#: Items per main-Session turn. Measured on granite-4.2-30b: batches of about 5 were all decided, batches of
+#: about 20 left most undecided even after the reminder, so the rest wait for the next turn.
+MAX_BATCH = 8
 SECRET_FIELDS = ("token",)
 NAME_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789-"
 
@@ -132,6 +135,7 @@ class Superagent:
         self.main: Handle | None = None
         self.main_busy = False
         self.main_last = ""
+        self.status_polls = 0                              # unanswered status asks in this main turn
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._polled: dict[str, float] = {}
@@ -400,8 +404,14 @@ class Superagent:
             ticket["execution"] = {**(ticket.get("execution") or {}), "directory": cwd, "conversation": handle.id}
             self.store.save_ticket(ticket)
         if assignment["state"] == "pending":
-            self.workers[ticket["id"]].enqueue(self.start_text(self.store.ticket(ticket["id"])), [])
+            # Waiting messages open the turn with it: delivered later, they would land after a ready report.
+            ticket = self.store.ticket(ticket["id"])
+            ids = list(ticket["undelivered"])
+            text = self.start_text(ticket) + (f"\n\n{self.inputs_text(ticket, ids)}" if ids else "")
             self.engine.assignment_started(ticket["id"], assignment["id"])
+            if ids:
+                self.engine.inputs_delivered(ticket["id"], assignment["id"], ids)
+            self.workers[ticket["id"]].enqueue(text, ids)
         elif payload.get("reopen") and ticket["undelivered"]:
             self.store.effect_add("deliver", ticket["id"], {"ticketId": ticket["id"], "assignmentId": assignment["id"]})
         return True
@@ -477,6 +487,8 @@ class Superagent:
             return
         items, live_effects, owed, asked = [], [], [], []
         for effect in effects:
+            if len(items) >= MAX_BATCH:
+                break                                      # left due: the next turn takes them
             payload = effect["payload"]
             if payload["kind"] == "candidate":
                 trigger_id = payload["triggerIds"][0] if payload["triggerIds"] else ""
@@ -500,6 +512,7 @@ class Superagent:
                 self.engine.candidate_delivered(effect["payload"]["evalId"])
         text = f"{len(items)} new item(s):\n\n" + "\n\n---\n\n".join(items)
         self.main_busy = True
+        self.status_polls = 0
         threading.Thread(target=self._main_turn, args=(text, owed, asked), name="superagent-main", daemon=True).start()
 
     def _relay_text(self, payload: Doc) -> str:
@@ -798,7 +811,14 @@ class Superagent:
                 target = sa._find_ticket(str(args.get("ticket", "")))
                 action = args.get("action")
                 if action == "status":
-                    return "asked" if sa.engine.request_status(target["id"]) else "not waiting; nothing asked"
+                    if sa.engine.request_status(target["id"]):
+                        return "asked; the answer reaches you as a new item"
+                    # Measured on granite: told only "not waiting", the main Session asked again 17 times in one turn.
+                    sa.status_polls += 1
+                    if sa.status_polls > 2:
+                        raise ValueError("stop polling: reports reach you as new items by themselves; end this turn")
+                    return (f"not asked: the ticket is {ticket_stage(target)}, not waiting on a question. Its report "
+                            "reaches you as a new item by itself; do not poll, end this turn")
                 if action == "retry":
                     sa.engine.retry_ticket(target["id"])
                     return "retried"

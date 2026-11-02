@@ -175,6 +175,65 @@ def test_candidates_that_arrive_while_the_main_session_is_busy_go_in_one_turn(ag
     assert turns[0].startswith("2 new item(s)") and all("still undecided" in t for t in turns[1:])
 
 
+def test_a_long_queue_is_split_across_main_session_turns(agent):
+    sa, client, host = agent
+    turns: list[str] = []
+    host.main_script = lambda handle, text: turns.append(text) or "ok"
+    sa.main_busy = True
+    for n in range(12):
+        sa.engine.receive({"id": f"q{n}", "source": "gh", "threads": [{"source": "gh", "id": str(n)}],
+                           "actor": {"source": "gh", "id": "alice"}, "human": True, "addressed": "mention",
+                           "at": "2099-01-01T00:00:00Z", "text": f"item {n}", "meta": {"row": "comments"}})
+    sa.engine.evaluate_due()
+    sa.main_busy = False
+    for _ in range(2):
+        sa.run_effects()
+        while sa.main_busy:
+            time.sleep(0.02)
+    firsts = [t for t in turns if "new item(s)" in t]
+    assert [t.split(" ", 1)[0] for t in firsts] == ["8", "4"]
+
+
+def test_a_follow_up_that_resumes_a_ticket_opens_the_new_assignment_and_is_not_handed_back_again(agent):
+    sa, client, host = agent
+    turns: list[str] = []
+
+    def worker(handle: FakeHandle, text: str) -> str:
+        turns.append(text)
+        handle.call("ticket_report", state="ready", summary="done")
+        return "finished"
+
+    host.worker_script = worker
+    client.routes.update({"repos/acme/app/issues/5/comments": [], "repos/acme/app/issues/5": issue(5, "alice", "")})
+    message = {"source": "gh", "threads": [{"source": "gh", "id": "5"}], "actor": {"source": "gh", "id": "alice"}, "human": True,
+               "at": "2099-01-01T00:00:00Z", "channel": {"source": "gh", "thread": "gh:5", "address": {"number": "5"}},
+               "meta": {"row": "comments"}}
+    sa.engine.receive({**message, "id": "r", "addressed": "mention", "text": "compile report 2"})
+    sa.engine.evaluate_due()
+    ticket_id = sa.engine.decide("r", {"kind": "accept", "title": "t", "scope": "s", "reason": "asked"})["ticketId"]
+    settle(sa, 10)
+    assert sa.store.ticket(ticket_id)["ended"]
+    sa.engine.receive({**message, "id": "f", "text": "also add the date"})
+    settle(sa, 20)
+    ticket = sa.store.ticket(ticket_id)
+    resumed = [t for t in turns if "new assignment" in t]
+    assert resumed and "also add the date" in resumed[0]
+    assert len(ticket["assignments"]) == 2 and ticket["ended"]
+
+
+def test_polling_a_working_ticket_is_refused_after_two_asks(agent):
+    sa, client, host = agent
+    sa.engine.receive({"id": "r", "source": "gh", "threads": [{"source": "gh", "id": "5"}], "actor": {"source": "gh", "id": "alice"},
+                       "human": True, "addressed": "mention", "at": "2099-01-01T00:00:00Z", "text": "fix it", "meta": {"row": "comments"}})
+    sa.engine.evaluate_due()
+    ticket_id = sa.engine.decide("r", {"kind": "accept", "title": "t", "scope": "s", "reason": "asked"})["ticketId"]
+    tool = next(t for t in sa.main_tools() if t.name == "superagent_ticket")
+    ctx = ToolContext(cwd=".", approve=lambda _s: True)
+    results = [tool.execute({"ticket": ticket_id[:12], "action": "status"}, ctx) for _ in range(3)]
+    assert [r.is_error for r in results] == [False, False, True]
+    assert "do not poll" in results[0].output and "stop polling" in results[2].output
+
+
 def test_the_token_never_appears_in_settings_or_errors(agent, tmp_path):
     sa, client, host = agent
     secret = "ghp_" + "z" * 36
