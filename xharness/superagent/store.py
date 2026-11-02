@@ -220,6 +220,12 @@ class Store:
         current.update(extra)
         self._run("UPDATE outbox SET status = ?, doc = ?, updated = ? WHERE id = ?", (status, _dump(current), time.time(), message_id))
 
+    def replies_for(self, ticket_id: str, since: float) -> int:
+        """Messages queued for a ticket since a moment (acknowledgements excluded)."""
+        with self._lock:
+            rows = self._db.execute("SELECT doc FROM outbox WHERE ticket = ? AND created >= ?", (ticket_id, since)).fetchall()
+        return sum(1 for r in rows if json.loads(r[0]).get("kind") != "acknowledgement")
+
     def outbox(self, status: str = "", limit: int = 100) -> list[Doc]:
         with self._lock:
             if status:

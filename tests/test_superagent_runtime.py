@@ -219,3 +219,29 @@ def test_a_canary_token_is_nowhere_in_the_database_or_the_api(agent, tmp_path):
     sa.engine.repo = sa.store
     for parts in ([], ["settings"], ["tickets"], ["threads"], ["decisions"]):
         assert canary not in str(api.get(sa, parts, {})[1])
+
+
+def test_a_main_session_that_answers_in_plain_text_is_reminded_to_send_the_result(agent):
+    sa, client, host = agent
+    seen: list[str] = []
+
+    def main(handle: FakeHandle, text: str) -> str:
+        seen.append(text)
+        if "candidate" in text:
+            trigger = sa.store.recent_triggers("", 10)[0]["id"][:12]
+            handle.call("superagent_route", decisions=[{"trigger": trigger, "kind": "accept", "title": "Fix", "name": "fix",
+                                                        "scope": "typo", "acknowledgement": "On it."}])
+        if "reached nobody" in text:
+            ticket = sa.store.tickets(limit=1)[0]["id"][:12]
+            handle.call("superagent_reply", purpose="result", ticket=ticket, text="Fixed.")
+        return "The typo is fixed."                      # plain text the first time: reaches nobody
+
+    def worker(handle: FakeHandle, text: str) -> str:
+        if "Assignment:" in text:
+            handle.call("ticket_report", state="ready", summary="done")
+        return "ok"
+
+    host.main_script, host.worker_script = main, worker
+    settle(sa)
+    assert any("reached nobody" in s for s in seen)
+    assert any("Fixed." in body["body"] for path, body in client.posts)

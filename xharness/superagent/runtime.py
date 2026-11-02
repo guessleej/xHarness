@@ -475,7 +475,7 @@ class Superagent:
     def _relay(self, effects: list[Doc]) -> None:
         if self.main_busy:
             return
-        items, live_effects = [], []
+        items, live_effects, owed = [], [], []
         for effect in effects:
             payload = effect["payload"]
             if payload["kind"] == "candidate":
@@ -487,6 +487,9 @@ class Superagent:
                 items.append(prompts.card(candidate, ticket_stage, self.settings["eval"]["mode"]))
             else:
                 items.append(self._relay_text(payload))
+                report = payload.get("report") or {}
+                if payload["kind"] == "report" and (report.get("state") == "ready" or report.get("question")):
+                    owed.append(payload["ticketId"])
             live_effects.append(effect)
         if not items:
             return
@@ -496,7 +499,7 @@ class Superagent:
                 self.engine.candidate_delivered(effect["payload"]["evalId"])
         text = f"{len(items)} new item(s):\n\n" + "\n\n---\n\n".join(items)
         self.main_busy = True
-        threading.Thread(target=self._main_turn, args=(text,), name="superagent-main", daemon=True).start()
+        threading.Thread(target=self._main_turn, args=(text, owed), name="superagent-main", daemon=True).start()
 
     def _relay_text(self, payload: Doc) -> str:
         kind = payload["kind"]
@@ -519,13 +522,27 @@ class Superagent:
                    f"outcome={payload.get('outcome', '')}"
         return str(payload)
 
-    def _main_turn(self, text: str) -> None:
+    def _main_turn(self, text: str, owed: list[str] | None = None) -> None:
+        begun = time.time()
         try:
             if self.main is None:
                 self.main = self.host.open_conversation("resident agent (main Session)", self.home,
                                                         prompts.orchestrator_prompt(self.settings), self.main_tools(),
                                                         self.settings["eval"]["model"], role="main")
             self.main_last = self.main.run(text) or ""
+            # A plain-text answer reaches nobody: a ready result or a question must go out through superagent_reply.
+            missing = [t for t in owed or [] if not self.store.replies_for(t, begun)]
+            if missing:
+                lines = []
+                for ticket_id in missing:
+                    ticket = self.store.ticket(ticket_id) or {}
+                    question = (ticket.get("attention") or {}).get("question")
+                    lines.append(f"- ticket {ticket_id[:12]}: " + (
+                        f'superagent_reply purpose=attention ticket={ticket_id[:12]} question="{question}"' if question
+                        else f"superagent_reply purpose=result ticket={ticket_id[:12]}"))
+                self.main_last = self.main.run(
+                    "Your answer above reached nobody: people only see what superagent_reply sends. Send it now:\n"
+                    + "\n".join(lines)) or ""
         except Exception as error:  # noqa: BLE001
             self.store.set_kv("problem:main", {"at": now_iso(), "error": gh.scrub(str(error))[:500]})
         finally:
