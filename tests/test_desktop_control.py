@@ -20,7 +20,7 @@ class FakeBackend:
         op = request.get("op")
         if op == "look":
             return {"screen": [1800, 1169], "app": self.front["app"], "pid": self.front["pid"], "front": True,
-                    "apps": ["Finder", "TextEdit"], "window": "t.txt", "windows": ["t.txt"], "truncated": False,
+                    "apps": ["Finder", "TextEdit"], "window": self.front.get("window", "t.txt"), "windows": ["t.txt"], "truncated": False,
                     "elements": [
                         {"role": "AXGroup", "subrole": "", "label": "", "value": "", "rect": [0, 0, 900, 900], "enabled": True, "focused": False},
                         {"role": "AXButton", "subrole": "", "label": "儲存", "value": "", "rect": list(self.button), "enabled": True, "focused": False},
@@ -29,7 +29,7 @@ class FakeBackend:
         if op == "focus":
             return dict(self.front)
         if request.get("action") == "activate" and self.obeys:
-            self.front = {"app": "TextEdit", "pid": request["pid"], "secure": self.front["secure"]}
+            self.front = {**self.front, "app": "TextEdit", "pid": request["pid"]}
         return {}
 
     def actions(self):
@@ -191,10 +191,79 @@ def test_the_app_is_put_back_in_front_after_approval_and_nothing_is_sent_if_it_w
 
     ctx = ToolContext(cwd=".", approve=approve_in_browser)
     assert not act.execute({"action": "key", "keys": "cmd+s"}, ctx).is_error
-    assert {"action": "activate", "pid": 7} in backend.calls
-    assert backend.actions() == [{"action": "key", "code": 1, "flags": 0x100000}]
+    assert {"action": "activate", "pid": 7} in backend.calls or any(c.get("action") == "activate" and c["pid"] == 7 for c in backend.calls)
+    assert backend.actions() == [{"action": "key", "code": 1, "flags": 0x100000, "mods": ["cmd"], "key": "s"}]
     backend.calls.clear()
     backend.front, backend.obeys = {"app": "TextEdit", "pid": 7, "secure": False}, False
     result = act.execute({"action": "key", "keys": "cmd+s"}, ctx)
     assert result.is_error and "nothing was sent" in result.output
     assert backend.actions() == []
+
+
+def test_windows_refuses_deleting_past_the_recycle_bin_and_sends_keys_by_name():
+    backend = FakeBackend()
+    look, act = _make_tools(Desktop(backend, settle=0), True, platform="win32")
+    asked = []
+    ctx = ToolContext(cwd=".", approve=lambda s: asked.append(s) or True)
+    result = act.execute({"action": "key", "keys": "shift+delete"}, ctx)
+    assert result.is_error and "Recycle Bin" in result.output and asked == []
+    assert not act.execute({"action": "key", "keys": "ctrl+shift+s"}, ctx).is_error
+    step = backend.actions()[-1]
+    assert step["mods"] == ["ctrl", "shift"] and step["key"] == "s"
+    look2, act2 = _make_tools(Desktop(FakeBackend(), settle=0), True, platform="darwin")
+    assert not act2.execute({"action": "key", "keys": "shift+delete"}, ctx).is_error   # harmless on macOS
+
+
+def test_an_app_running_as_administrator_gets_nothing(rig):
+    backend, look, act, ctx, _asked = rig
+    backend.front = {"app": "regedit", "pid": 7, "secure": False, "elevated": True}
+    result = act.execute({"action": "key", "keys": "ctrl+s"}, ctx)
+    assert result.is_error and "administrator" in result.output and backend.actions() == []
+
+
+def test_the_packaged_app_runs_the_backend_through_itself(monkeypatch):
+    import sys
+    from xharness.tools import desktop_control as dc
+    assert dc.backend_argv("desktop_win")[1:3] == ["-I", dc.os.path.join(dc.HERE, "desktop_win.py")]
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert dc.backend_argv("desktop_win")[1:] == ["--desktop-backend", "desktop_win"]
+
+
+def test_the_windows_screenshot_is_a_png_with_the_colours_in_order(tmp_path):
+    import zlib
+    from xharness.tools import desktop_win
+    path = tmp_path / "s.png"
+    desktop_win._png(str(path), 2, 1, bytes([1, 2, 3, 0, 4, 5, 6, 0]))     # two pixels, blue-green-red-pad
+    data = path.read_bytes()
+    assert data.startswith(b"\x89PNG") and zlib.decompress(data[data.index(b"IDAT") + 4:-16]) == bytes([0, 3, 2, 1, 6, 5, 4])
+
+
+def test_a_backend_that_dies_without_output_is_reported_as_such(monkeypatch):
+    import subprocess
+    from xharness.tools import desktop_control as dc
+    monkeypatch.setattr(dc.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0xC0000005, "", ""))
+    with pytest.raises(RuntimeError, match="screen reader stopped"):
+        dc.ScriptBackend("desktop_win").call({"op": "look"})
+
+
+def test_another_document_in_the_same_app_is_a_changed_screen(rig):
+    backend, look, act, ctx, asked = rig
+    backend.front = {"app": "Notepad", "pid": 7, "secure": False, "window": "xh-test.txt - 記事本"}
+    look.execute({}, ctx)
+    assert "Notepad「xh-test.txt - 記事本」" in act.execute({"action": "key", "keys": "ctrl+s"}, ctx).output
+    backend.front = {**backend.front, "window": "*xh-test.txt - 記事本"}         # an unsaved edit: same window
+    assert not act.execute({"action": "key", "keys": "ctrl+s"}, ctx).is_error
+    look.execute({}, ctx)
+    backend.front = {**backend.front, "window": "hwinfo_report.ps1 - 記事本"}   # another tab came forward
+    backend.calls.clear()
+    result = act.execute({"action": "click", "element": 1}, ctx)
+    assert result.is_error and "look again" in result.output and backend.actions() == []
+
+
+def test_typing_says_whether_the_field_now_holds_the_text(rig):
+    backend, look, act, ctx, _asked = rig
+    look.execute({}, ctx)
+    out = act.execute({"action": "type", "element": 2, "text": "舊內容", "replace": True}, ctx).output
+    assert "holds exactly that text. Do not type it again" in out
+    out = act.execute({"action": "type", "text": "別的字", "replace": True}, ctx).output
+    assert "which is not that text" in out

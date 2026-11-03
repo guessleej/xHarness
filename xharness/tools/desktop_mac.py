@@ -316,7 +316,7 @@ def main() -> None:
         result = handler(request)
     except (RuntimeError, OSError, subprocess.SubprocessError, ValueError, KeyError) as error:
         result = {"error": str(error)[:400]}
-    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+    sys.stdout.write(json.dumps(result))      # ASCII only: the pipe's encoding differs by system locale
 
 
 if __name__ == "__main__":

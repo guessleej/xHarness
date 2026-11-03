@@ -1,5 +1,5 @@
 """Desktop tools: `desktop_look` and `desktop_act` -- see the screen and use the
-mouse and keyboard, on the machine xharness runs on (macOS).
+mouse and keyboard, on the machine xharness runs on (macOS and Windows).
 
 `desktop_look` lists what is on screen as numbered elements (role, label,
 value, position), read through the Accessibility API, so a model that cannot
@@ -21,9 +21,16 @@ do not), so the approvals cannot be skipped through a child whose approvals
 are forwarded.
 
 Refused outright, approval or not: typing into a password field (the person
-types passwords), and the key combinations that empty the Trash.
+types passwords), the key combinations that empty the Trash (macOS) or delete
+past the Recycle Bin (Windows), and, on Windows, an app that runs as
+administrator (Windows drops input sent to it without saying so).
 
-Enabled by `[tools] desktop_control = true`; macOS only for now.
+Each platform has its own backend script, run once per request in its own
+process: desktop_mac.py (Accessibility API, Quartz events) and desktop_win.py
+(UI Automation, SendInput). Keys travel by name ("cmd", "s"); on Windows "cmd"
+means ctrl, so a model can use the same words on both.
+
+Enabled by `[tools] desktop_control = true`.
 """
 
 from __future__ import annotations
@@ -41,7 +48,9 @@ from typing import Any, Callable
 from ..context import Context, Plugin
 from . import Tool, ToolContext, ToolResult, register_tools
 
-BACKEND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "desktop_mac.py")
+HERE = os.path.dirname(os.path.abspath(__file__))
+#: sys.platform -> the backend module next to this file
+BACKENDS = {"darwin": "desktop_mac", "win32": "desktop_win"}
 BACKEND_TIMEOUT = 30
 SETTLE_SECONDS = 0.7
 STALE_SECONDS = 300
@@ -50,10 +59,11 @@ MAX_TEXT = 2000
 MAX_CLICKS = 3
 MAX_SCROLL = 30
 #: Containers that carry no label of their own are walked but not listed.
-QUIET_ROLES = {"AXGroup", "AXScrollArea", "AXSplitGroup", "AXLayoutArea", "AXUnknown", "AXSplitter", "AXLayoutItem"}
+QUIET_ROLES = {"AXGroup", "AXScrollArea", "AXSplitGroup", "AXLayoutArea", "AXUnknown", "AXSplitter", "AXLayoutItem",
+               "Pane", "Group", "Custom", "Separator", "Thumb"}
 
 MODIFIERS = {"cmd": 0x100000, "command": 0x100000, "shift": 0x20000, "alt": 0x80000, "option": 0x80000,
-             "opt": 0x80000, "ctrl": 0x40000, "control": 0x40000}
+             "opt": 0x80000, "ctrl": 0x40000, "control": 0x40000, "win": 0x100000, "windows": 0x100000}
 KEYCODES = {
     **dict(zip("asdfhgzxcvbqweryt", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17])),
     "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23, "=": 24, "9": 25, "7": 26, "-": 27, "8": 28, "0": 29,
@@ -64,10 +74,17 @@ KEYCODES = {
     "left": 123, "right": 124, "down": 125, "up": 126,
     **{f"f{n}": code for n, code in zip(range(1, 13), [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111])},
 }
-#: Irreversible, so never sent: empty the Trash (with or without its confirmation).
+#: Irreversible, so never sent: empty the Trash (with or without its confirmation), and on Windows delete a file
+#: past the Recycle Bin.
 REFUSED_COMBOS = {
-    frozenset({"cmd", "shift", "delete"}): "empties the Trash",
-    frozenset({"cmd", "alt", "shift", "delete"}): "empties the Trash without asking",
+    "darwin": {
+        frozenset({"cmd", "shift", "delete"}): "empties the Trash",
+        frozenset({"cmd", "alt", "shift", "delete"}): "empties the Trash without asking",
+    },
+    "win32": {
+        frozenset({"shift", "delete"}): "deletes for good, skipping the Recycle Bin",
+        frozenset({"shift", "forward_delete"}): "deletes for good, skipping the Recycle Bin",
+    },
 }
 PERMISSION_HELP = {
     "no-accessibility": ("macOS has not allowed this app to control the computer. The person needs to open "
@@ -76,11 +93,15 @@ PERMISSION_HELP = {
     "no-screen-recording": ("macOS has not allowed screenshots. The person needs to turn on the app that runs xharness "
                             "under System Settings > Privacy & Security > Screen Recording, then restart it. "
                             "desktop_look without a screenshot still works."),
+    "no-desktop": ("There is no desktop to work on: the screen is locked or signed out, or xharness was started outside "
+                   "the person's sign-in (as a service, or over SSH). Start it from the person's own desktop session."),
+    "elevated": ("The app in front runs as administrator, and Windows drops input that a normal program sends to it. "
+                 "Ask the person to do this step themselves, or to start xharness as administrator."),
 }
 
 
 def parse_combo(text: str) -> tuple[int, int, frozenset[str]]:
-    """"cmd+shift+s" -> (keycode, modifier flags, canonical names). Raises ValueError."""
+    """"cmd+shift+s" -> (macOS keycode, macOS modifier flags, canonical names). Raises ValueError."""
     parts = [p.strip().lower() for p in str(text).replace(" ", "").split("+") if p.strip()]
     if not parts:
         raise ValueError("keys is required, e.g. \"cmd+s\" or \"return\"")
@@ -92,25 +113,53 @@ def parse_combo(text: str) -> tuple[int, int, frozenset[str]]:
     flags, names = 0, set()
     for mod in mods:
         if mod not in MODIFIERS:
-            raise ValueError(f"unknown modifier: {mod}; use cmd, shift, alt or ctrl")
+            raise ValueError(f"unknown modifier: {mod}; use cmd (ctrl on Windows), shift, alt, ctrl or win")
         flags |= MODIFIERS[mod]
-        names.add({"command": "cmd", "option": "alt", "opt": "alt", "control": "ctrl"}.get(mod, mod))
-    return KEYCODES[key], flags, frozenset(names | {"delete" if key in ("delete", "backspace") else key})
+        names.add({"command": "cmd", "option": "alt", "opt": "alt", "control": "ctrl", "windows": "win"}.get(mod, mod))
+    return KEYCODES[key], flags, frozenset(names | {canonical_key(key)})
 
 
-class MacBackend:
-    """Runs desktop_mac.py once per request in its own process."""
+def canonical_key(key: str) -> str:
+    return {"backspace": "delete", "enter": "return", "esc": "escape"}.get(key, key)
+
+
+def key_step(text: str) -> dict[str, Any]:
+    """One key action for any backend: macOS reads code and flags, the others read the names."""
+    code, flags, names = parse_combo(text)
+    *mods, key = [p.strip().lower() for p in str(text).replace(" ", "").split("+") if p.strip()]
+    mods = [{"command": "cmd", "option": "alt", "opt": "alt", "control": "ctrl", "windows": "win"}.get(m, m) for m in mods]
+    key = canonical_key({"del": "delete", "pageup": "page_up", "pagedown": "page_down"}.get(key, key))
+    return {"action": "key", "code": code, "flags": flags, "mods": mods, "key": key}
+
+
+def backend_argv(module: str) -> list[str]:
+    """How to run a backend script: from source with this Python, or through the packaged app's own executable."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--desktop-backend", module]
+    return [sys.executable, "-I", os.path.join(HERE, f"{module}.py")]
+
+
+class ScriptBackend:
+    """Runs this platform's backend script once per request in its own process."""
+
+    def __init__(self, module: str | None = None) -> None:
+        self.module = module or BACKENDS[sys.platform]
+        self.image_suffix = ".png" if self.module == "desktop_win" else ".jpg"
 
     def call(self, request: dict[str, Any], timeout: float = BACKEND_TIMEOUT) -> dict[str, Any]:
         try:
             done = subprocess.run(  # nosec B603 - our own script, fixed argv, the request is one JSON argument
-                [sys.executable, "-I", BACKEND, json.dumps(request, ensure_ascii=False)],
-                capture_output=True, text=True, timeout=timeout,
+                [*backend_argv(self.module), json.dumps(request)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
             )
         except subprocess.TimeoutExpired as error:
             raise RuntimeError(f"the screen did not answer within {timeout:g} seconds (an app may be busy)") from error
+        if not (done.stdout or "").strip():
+            # A crash inside the screen APIs ends the process without a word on stdout.
+            raise RuntimeError(f"the screen reader stopped (exit {done.returncode:#x}); try again: an app may have been "
+                               "opening or closing" + (f": {done.stderr.strip()[-200:]}" if done.stderr.strip() else ""))
         try:
-            result = json.loads(done.stdout or "{}")
+            result = json.loads(done.stdout)
         except json.JSONDecodeError as error:
             raise RuntimeError(f"desktop backend failed: {(done.stderr or done.stdout).strip()[:300]}") from error
         if result.get("error"):
@@ -125,6 +174,7 @@ class Snapshot:
     taken: float
     screen: list[int]
     elements: list[dict[str, Any]] = field(default_factory=list)
+    window: str = ""
 
 
 def element_line(index: int, element: dict[str, Any]) -> str:
@@ -160,7 +210,7 @@ def describe_element(snapshot: Snapshot | None, index: int) -> str:
 class Desktop:
     def __init__(self, backend: Any = None, describer: tuple[str, Callable[[str, str], str]] | None = None,
                  settle: float = SETTLE_SECONDS) -> None:
-        self.backend = backend or MacBackend()
+        self.backend = backend or ScriptBackend()
         self.describer = describer
         self.settle = settle
         # ponytail: one lock for the whole screen -- there is one mouse; nothing finer is possible.
@@ -169,7 +219,8 @@ class Desktop:
 
     def look(self, agent: str, app: str = "", apps: bool = True) -> tuple[Snapshot, str]:
         raw = self.backend.call({"op": "look", "app": app, "limit": MAX_ELEMENTS * 2})
-        snapshot = Snapshot(raw["app"], int(raw["pid"]), time.monotonic(), list(raw["screen"]), listed(raw["elements"])[:MAX_ELEMENTS])
+        snapshot = Snapshot(raw["app"], int(raw["pid"]), time.monotonic(), list(raw["screen"]), listed(raw["elements"])[:MAX_ELEMENTS],
+                            raw.get("window") or "")
         self.snapshots[agent] = snapshot
         lines = [f"Screen {raw['screen'][0]}x{raw['screen'][1]} points. "
                  + (f"App: {raw['app']}" + ("" if raw.get("front") else " (not in front; desktop_act open_app brings it forward)"))
@@ -191,7 +242,7 @@ class Desktop:
         if self.describer is None:
             return "No screenshot: no image-describing model is set ([vision] provider)."
         name, describe = self.describer
-        handle, path = tempfile.mkstemp(prefix="xh-screen-", suffix=".jpg")
+        handle, path = tempfile.mkstemp(prefix="xh-screen-", suffix=getattr(self.backend, "image_suffix", ".jpg"))
         os.close(handle)
         try:
             self.backend.call({"op": "screenshot", "path": path, "width": snapshot.screen[0]})
@@ -203,6 +254,31 @@ class Desktop:
         return f"Screenshot, as described by {name}:\n{text.strip()}"
 
 
+def typed_check(snapshot: Snapshot, text: str, replace: bool) -> str:
+    """Say plainly whether the focused field now holds the text: a local model that only gets the screen back
+    tends to type the same thing again and again (measured: granite six times over, never saving)."""
+    field = next((e for e in snapshot.elements if e.get("focused") and e.get("value")), None)
+    if field is None:
+        return ""
+    flat = lambda t: " ".join(t.replace("\r", "\n").split())  # noqa: E731
+    value, want = flat(field["value"]), flat(text)
+    if (value == want) if replace else (want in value):
+        return "Checked: the field now holds exactly that text. Do not type it again; go on with the next step.\n"
+    if len(field["value"]) >= 120 and want[:60] in value:
+        return "Checked: the field starts with that text. Do not type it again; go on with the next step.\n"
+    return f"Checked: the field now reads 「{field['value'][:120]}」, which is not that text; look before trying again.\n"
+
+
+def same_window(a: str | None, b: str | None) -> bool:
+    """Same window title, or one side does not know it; an unsaved-changes mark ("*") does not count."""
+    return not a or not b or a.lstrip("*") == b.lstrip("*")
+
+
+def where_in(front: dict[str, Any]) -> str:
+    """The app, and the window when the backend knows it: one Notepad window can hold several documents."""
+    return f"{front.get('app')}" + (f"「{front['window'][:60]}」" if front.get("window") else "")
+
+
 def _still_there(desktop: Desktop, target: dict[str, Any]) -> bool:
     """The element the person approved is still where it was: same role, text and place."""
     raw = desktop.backend.call({"op": "look", "app": "", "limit": MAX_ELEMENTS * 2})
@@ -211,7 +287,10 @@ def _still_there(desktop: Desktop, target: dict[str, Any]) -> bool:
     return int(raw.get("pid", -1)) == target["pid"] and any(same(e) for e in listed(raw.get("elements") or []))
 
 
-def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
+def _make_tools(desktop: Desktop, always_ask: bool, platform: str | None = None) -> list[Tool]:
+    platform = platform or sys.platform
+    refused = REFUSED_COMBOS.get(platform, {})
+
     def run_look(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         app = str(args.get("app") or "").strip()
         shot = bool(args.get("screenshot"))
@@ -233,19 +312,20 @@ def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
             index = int(args["element"])
             if snapshot is None:
                 raise ValueError("call desktop_look first: element numbers come from it")
-            if time.monotonic() - snapshot.taken > STALE_SECONDS or front.get("pid") != snapshot.pid:
+            if time.monotonic() - snapshot.taken > STALE_SECONDS or front.get("pid") != snapshot.pid \
+                    or not same_window(front.get("window"), snapshot.window):
                 raise ValueError(f"the screen changed since desktop_look ({front.get('app')} is in front now); look again")
             if not 1 <= index <= len(snapshot.elements):
                 raise ValueError(f"no element {index}; the last look listed 1-{len(snapshot.elements)}")
             x, y, w, h = snapshot.elements[index - 1]["rect"]
             front["element"] = snapshot.elements[index - 1]     # checked again after the approval
-            return x + w // 2, y + h // 2, f"{describe_element(snapshot, index)} in {snapshot.app}"
+            return x + w // 2, y + h // 2, f"{describe_element(snapshot, index)} in {where_in(front)}"
         if args.get("x") is None or args.get("y") is None:
             raise ValueError("give element (a number from desktop_look) or x and y")
         x, y = int(args["x"]), int(args["y"])
         if snapshot and not (0 <= x < snapshot.screen[0] * 3 and -snapshot.screen[1] * 2 <= y < snapshot.screen[1] * 3):
             raise ValueError(f"({x},{y}) is far outside the screen ({snapshot.screen[0]}x{snapshot.screen[1]})")
-        return x, y, f"({x},{y}) in {front.get('app')}"
+        return x, y, f"({x},{y}) in {where_in(front)}"
 
     def plan(args: dict[str, Any], ctx: ToolContext) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None]:
         """(approval summary, backend requests, the app they are for) for one action.
@@ -268,27 +348,27 @@ def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
                 raise ValueError("text is required for type")
             if len(text) > MAX_TEXT:
                 raise ValueError(f"text is limited to {MAX_TEXT} characters per call")
-            steps, where = [], f"the focused field in {front.get('app')}"
+            steps, where = [], f"the focused field in {where_in(front)}"
             if args.get("element") is not None or args.get("x") is not None:
                 x, y, where = point(args, ctx, front)
                 steps.append({"action": "click", "x": x, "y": y, "button": "left", "count": 1})
             if args.get("replace"):
-                steps.append({"action": "key", "code": KEYCODES["a"], "flags": MODIFIERS["cmd"]})
+                steps.append(key_step("cmd+a"))
             steps.append({"action": "paste", "text": text})
             if args.get("submit"):
-                steps.append({"action": "key", "code": KEYCODES["return"], "flags": 0})
+                steps.append(key_step("return"))
             shown = text if len(text) <= 120 else text[:120] + "…"
             return (f"desktop type into {where}{', replacing what is there' if args.get('replace') else ''}: 「{shown}」"
                     + (" then press return" if args.get("submit") else "")), steps, front
         if action == "key":
-            code, flags, names = parse_combo(str(args.get("keys") or ""))
-            if names in REFUSED_COMBOS:
-                raise PermissionError(f"refused: {args.get('keys')} {REFUSED_COMBOS[names]}, which cannot be undone; "
+            _code, _flags, names = parse_combo(str(args.get("keys") or ""))
+            if names in refused:
+                raise PermissionError(f"refused: {args.get('keys')} {refused[names]}, which cannot be undone; "
                                       "ask the person to do it themselves")
             # A key that types a character is typing, and a password field refuses it like a paste.
-            typing = not names & {"cmd", "ctrl"} and any(len(n) == 1 or n == "space" for n in names)
-            return (f"desktop key: {args.get('keys')} in {front.get('app')}",
-                    [{"action": "key", "code": code, "flags": flags, "typing": typing}], front)
+            typing = not names & {"cmd", "ctrl", "win"} and any(len(n) == 1 or n == "space" for n in names)
+            return (f"desktop key: {args.get('keys')} in {where_in(front)}",
+                    [{**key_step(str(args.get("keys"))), "typing": typing}], front)
         if action == "scroll":
             direction = str(args.get("direction") or "down")
             if direction not in ("up", "down"):
@@ -298,7 +378,7 @@ def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
             if args.get("element") is not None or args.get("x") is not None:
                 x, y, where = point(args, ctx, front)
             elif snapshot:
-                x, y, where = snapshot.screen[0] // 2, snapshot.screen[1] // 2, f"the middle of the screen in {front.get('app')}"
+                x, y, where = snapshot.screen[0] // 2, snapshot.screen[1] // 2, f"the middle of the screen in {where_in(front)}"
             else:
                 raise ValueError("call desktop_look first, or give x and y")
             return (f"desktop scroll {direction} {amount}: {where}",
@@ -321,10 +401,12 @@ def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
                 if target is not None:
                     # Approving in a browser or the desktop window brings that to the front, and the
                     # keys would land there: put the app the action is for back in front, and check.
-                    desktop.backend.call({"action": "activate", "pid": target["pid"]})
+                    desktop.backend.call({"action": "activate", "pid": target["pid"], **({"window": target["window"]} if target.get("window") else {})})
                     time.sleep(desktop.settle / 2)
                     now = desktop.backend.call({"op": "focus"})
-                    if now.get("pid") != target["pid"]:
+                    if now.get("elevated"):
+                        return ToolResult(f"nothing was sent: {PERMISSION_HELP['elevated']}", is_error=True)
+                    if now.get("pid") != target["pid"] or not same_window(now.get("window"), target.get("window")):
                         return ToolResult(f"nothing was sent: {target['app']} could not be brought back to the front "
                                           f"({now.get('app')} is in front); look again", is_error=True)
                     if target.get("element") is not None and not _still_there(desktop, target):
@@ -337,10 +419,11 @@ def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
                                           "the password themselves.", is_error=True)
                     desktop.backend.call(step)
                 time.sleep(desktop.settle)
-                _snapshot, after = desktop.look(ctx.agent, "", apps=False)
+                snapshot, after = desktop.look(ctx.agent, "", apps=False)
             except (RuntimeError, OSError) as error:
                 return ToolResult(f"desktop_act failed: {error}", is_error=True)
-        return ToolResult(f"Done: {summary.removeprefix('desktop ')}\n\nThe screen now:\n{after}")
+        check = typed_check(snapshot, str(args.get("text") or ""), bool(args.get("replace"))) if args.get("action") == "type" else ""
+        return ToolResult(f"Done: {summary.removeprefix('desktop ')}\n{check}\nThe screen now:\n{after}")
 
     return [
         Tool(
@@ -367,7 +450,8 @@ def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
                 "action: click / double_click / right_click (element number from desktop_look, or x and y), "
                 "type (pastes text at the cursor of the focused field, adding to what is there; replace=true selects all of "
                 "the field first so the text replaces it; with element it clicks the element first; submit=true presses return), "
-                "key (keys like \"cmd+s\", \"return\", \"tab\", \"cmd+shift+4\"), scroll (direction up/down, amount), "
+                "key (keys like \"cmd+s\", \"return\", \"tab\", \"cmd+shift+4\"; cmd means ctrl on Windows, win is the "
+                "Windows key), scroll (direction up/down, amount), "
                 "open_app (app name). Each action is approved by the person. Never type passwords."
             ),
             mutating=True,
@@ -398,8 +482,8 @@ def _make_tools(desktop: Desktop, always_ask: bool) -> list[Tool]:
 def desktop_control_plugin(always_ask: bool = True, describer: tuple[str, Callable[[str, str], str]] | None = None,
                            desktop: Desktop | None = None) -> Plugin:
     def _apply(ctx: Context, _config: Any) -> None:
-        if desktop is None and sys.platform != "darwin":
-            print("xharness: [tools] desktop_control is macOS only for now; the desktop tools are off", file=sys.stderr)
+        if desktop is None and sys.platform not in BACKENDS:
+            print("xharness: [tools] desktop_control works on macOS and Windows; the desktop tools are off", file=sys.stderr)
             return
         register_tools(ctx, _make_tools(desktop or Desktop(describer=describer), always_ask))
 
