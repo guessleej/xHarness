@@ -255,8 +255,8 @@ class Desktop:
 
 
 def typed_check(snapshot: Snapshot, text: str, replace: bool) -> str:
-    """Say plainly whether the focused field now holds the text: a local model that only gets the screen back
-    tends to type the same thing again and again (measured: granite six times over, never saving)."""
+    """Say plainly whether the focused field now holds the text, so the model need not work it out from the
+    element list (when the text landed wrong, granite kept retyping rather than say so)."""
     field = next((e for e in snapshot.elements if e.get("focused") and e.get("value")), None)
     if field is None:
         return ""

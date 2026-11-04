@@ -18,6 +18,17 @@
 - **看門狗**：在代理之外定時檢查來源、待辦、死掉、卡住或繞圈的工作代理。能自癒的自癒，其餘每小時最多通知一次；可選另開一段沒有工具的對話，判斷工單有沒有實質進展。
 - **網頁「常駐代理」頁**：上方是設定順序軸（接上來源、設名單、寫規則、先觀察、開自動，狀態由實際資料算出），分頁依序是待處理、工單、事件（每則訊息去了哪裡）、設定。服務使用報告加入常駐代理的事件數、判斷、工單結果與對外寫入數。
 
+操作這台電腦也支援 Windows（1.18.0 只有 macOS），同樣是 `[tools] desktop_control = true`，同樣每次都問人。
+
+- **讀畫面用 UI Automation**：按鈕、欄位、選單、文字各有編號、類型、名稱、內容與位置；只走視窗內看得到的部分，每一層最多 200 個子項目，檔案很多的資料夾也不會讀很久。Windows 11 實機（2880x1800）讀記事本 0.22 秒、33 個元素。
+- **輸入用 SendInput**：文字和 macOS 一樣用剪貼簿貼上，貼完還原剪貼簿原本的內容；貼上的資料標成不進剪貼簿歷程（Win+V）、不雲端同步。逐字送會被輸入法與程式自己的建議干擾：實測記事本在全形冒號後把換行的 Enter 吃掉，Enter 與 Unicode 字元混著送時順序也會亂。按鍵用名稱，Windows 上 `cmd` 等於 ctrl，另有 `win` 鍵。程式宣告 DPI 感知，縮放 125%、150% 的螢幕上讀到的位置、點擊位置與截圖一致。截圖自己用 GDI 截、編成 PNG，不需要額外套件。
+- **Windows 另外拒絕**：shift+delete（跳過資源回收筒直接刪除）；前景程式以系統管理員身分執行時不送任何輸入（Windows 會默默丟掉，改請本人操作）；螢幕鎖定或 xHarness 不是在登入者桌面啟動（服務、SSH）時，直接講明原因。
+- **核准卡寫出視窗標題**：例如「in Notepad「xh-test.txt - 記事本」」。Windows 11 的記事本一個視窗放好幾份文件，所以換了分頁、畫面編號就失效，核准後叫回前景的也必須是同一份文件，否則什麼都不送。這兩點 macOS 也一起套用。
+- **打完字明講結果**：打字之後回報「欄位現在就是這段文字，別再打」或「欄位內容不是這段文字，先看再試」，模型不用自己從畫面清單判斷字有沒有打進去。
+- **叫回前景不動鍵盤狀態**：已在前景就不切換；需要切換時用位移 0 的滑鼠移動取得切換權。原本用的 Alt 鍵在記事本會把焦點移到選單列，接著的全選與貼上全打到選單上。
+- **實測（Windows 11 筆電，注音，任務：把記事本測試檔改成三行並存檔）**：筆電本機 xGemable-12B（Q6_K，生成每秒 9 個 token）3 次全成功，39～59 秒、3～4 步；.70 的 granite-4.2-30b 2 次全成功，45～52 秒、3 步。修正上面兩個輸入問題之前，granite 3 次都失敗。筆電本機跑 granite-4.2-30b（Q4_K_M）載得進去，但讀提示每秒只有 39 個 token，一步要將近 1 分鐘，不實用。
+- 打包版（`xHarness.exe`／`.app`）改由自己的執行檔帶起畫面後端；原本 macOS 打包版也找不到另一個 Python 可以跑後端。後端與主程式之間只傳 ASCII 的 JSON，因為 Windows 管線的編碼隨地區設定改變，曾讀到空白結果。
+
 Resident agent: an agent that stays up on the node, listens to a GitHub repository and Telegram groups, hands the work it accepts to workers in isolated directories, and answers where it was asked; people are called only for decisions and reviews. The design follows DeepSeek's "Exploring Super-agent Design" and its open prototype dsh-superagent (MIT): the same domain model and rules, rewritten with the Python standard library, keeping xHarness's approvals, sandbox and audit trail. Off by default; `[superagent] enabled = true` turns it on.
 
 - **Two layers**: a resident main Session routes, replies and coordinates; it has no shell and reads no code. Each ticket has a worker in its own git worktree. Events that arrive while the main Session is busy go into its next turn together.
@@ -31,6 +42,17 @@ Resident agent: an agent that stays up on the node, listens to a GitHub reposito
 - **Reliability**: work after a decision is stored first and retried (2 s doubling to a minute); after a restart, running assignments start again with a recovery note.
 - **Watchdog**: a control loop outside the agents checks Sources, stored work and dead, stalled or looping workers, heals what it can and tells a person at most once an hour; optionally a tool-less conversation judges whether a stalled ticket still progresses.
 - **"常駐代理" page**: a setup track computed from real data, then inbox, tickets, events (where each message went) and settings. The usage report gains the resident agent's numbers.
+
+Using this computer now works on Windows too (1.18.0 was macOS only): the same `[tools] desktop_control = true`, the same approval for every step.
+
+- **The screen through UI Automation**: buttons, fields, menus and text with number, control type, name, value and position; only what is on screen inside the window is walked, at most 200 children per element. On a Windows 11 machine (2880x1800) Notepad reads in 0.22 s, 33 elements.
+- **Input through SendInput**: text is pasted, as on macOS, and the clipboard is put back afterwards; the pasted data is marked to stay out of the clipboard history (Win+V) and the cloud clipboard. Characters sent one by one meet the input method and the app's own suggestions: Notepad swallowed the Enter of a line break after a full-width colon, and Enter mixed with Unicode characters arrived out of order. Keys by name; on Windows `cmd` means ctrl, and `win` is the Windows key. The process is DPI aware, so positions, clicks and screenshots agree on a 125% or 150% screen. Screenshots are taken with GDI and written as PNG, with no extra package.
+- **Also refused on Windows**: shift+delete (deletes past the Recycle Bin); any input to an app running as administrator (Windows drops it silently, so the person is asked instead); a locked screen, or xHarness started outside the person's sign-in (a service, SSH), is said plainly.
+- **Approval cards name the window**, e.g. "in Notepad「xh-test.txt - 記事本」". Windows 11 Notepad holds several documents in one window, so element numbers expire when another tab comes forward, and the window brought back after approval must be the same document or nothing is sent. Both apply on macOS too.
+- **Typing reports its result**: "the field now holds exactly that text; do not type it again" or "the field reads ..., which is not that text", so the model need not work it out from the element list.
+- **Bringing the app back leaves the keyboard alone**: nothing is switched when the app is already in front; otherwise a zero mouse move earns the right to switch. The ALT tap used before moved Notepad's focus to its menu bar, where the next select-all and paste went.
+- **Measured (Windows 11 laptop, Zhuyin; task: make a Notepad scratch file three lines and save it)**: xGemable-12B on the laptop itself (Q6_K, 9 tokens/s) 3 of 3, 39-59 s, 3-4 steps; granite-4.2-30b on .70 2 of 2, 45-52 s, 3 steps. Before the two input fixes above granite failed all 3 runs. granite-4.2-30b (Q4_K_M) loads on the laptop but reads prompts at 39 tokens/s, close to a minute a step: not practical.
+- The packaged app (`xHarness.exe` / `.app`) starts the screen backend through its own executable; the macOS package had no separate Python to run it with either. Backend and host exchange ASCII-only JSON: a Windows pipe's encoding follows the system locale, and a read once came back empty.
 
 ## 1.18.0 — 2026-10-29
 

@@ -34,7 +34,7 @@ class ResolvedConfig:
     files: dict[str, Any] = field(default_factory=dict)
     browser: str | None = None
     browser_approval: bool = True
-    #: [tools] desktop_control: desktop_look / desktop_act on this machine's screen (macOS);
+    #: [tools] desktop_control: desktop_look / desktop_act on this machine's screen (macOS, Windows);
     #: desktop_approval = false puts them under the normal approval policy instead of asking every time
     desktop_control: bool = False
     desktop_approval: bool = True

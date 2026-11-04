@@ -13,10 +13,13 @@ that cannot see can still say what to click. Only what is on screen inside the
 window is walked, and at most 200 children of any one element, which keeps a
 folder with thousands of files from taking minutes.
 
-Input goes through SendInput. Text is sent as Unicode characters
-(KEYEVENTF_UNICODE): they do not go through the input method, so Zhuyin being
-on does not turn "abc" into "ㄇ", and the clipboard is never touched. Keys
-arrive by name; "cmd" means ctrl here.
+Input goes through SendInput. Text is pasted, as on macOS: typed keys go
+through the input method (Zhuyin turns "abc" into "ㄇ"), and even Unicode
+characters sent one by one meet an app's own suggestions (measured: after a
+full-width colon Notepad swallowed the Enter of the line break). The clipboard
+is saved first and put back after, and the pasted text is marked to stay out
+of the clipboard history and cloud clipboard. Keys arrive by name; "cmd" means
+ctrl here.
 
 Positions are physical pixels: the process declares itself per-monitor DPI
 aware, so UI Automation rectangles, the mouse and screenshots agree on a
@@ -447,13 +450,91 @@ def press(mods: list[str], key: str) -> None:
 
 
 def type_text(text: str) -> None:
-    """Unicode characters straight to the focused field: no input method, no clipboard."""
+    """Unicode characters straight to the focused field: the fallback when the clipboard cannot be opened.
+
+    A line break has to be the Enter key (Notepad ignores a Unicode carriage return), and an app handles a key and
+    a Unicode character on different paths: sent in one burst they arrive out of order (measured in Notepad,
+    "待辦：⏎- 買牛奶⏎- 寄出" came out as "待辦：- 買牛奶⏎ 寄-出"). So characters go in short bursts and the Enter
+    key waits for what came before it."""
     for line_no, line in enumerate(text.replace("\r\n", "\n").split("\n")):
         if line_no:
+            time.sleep(0.08)
             _send(_key(VK["return"]), _key(VK["return"], up=True))
-        units = struct.unpack(f"<{len(line.encode('utf-16-le')) // 2}H", line.encode("utf-16-le"))
-        for start in range(0, len(units), 64):
-            _send(*[k for unit in units[start:start + 64] for k in (_key(char=unit), _key(char=unit, up=True))])
+            time.sleep(0.08)
+        data = line.encode("utf-16-le")
+        units = struct.unpack(f"<{len(data) // 2}H", data)
+        for start in range(0, len(units), 16):
+            _send(*[k for unit in units[start:start + 16] for k in (_key(char=unit), _key(char=unit, up=True))])
+            time.sleep(0.02)
+
+
+CF_UNICODETEXT, GMEM_MOVEABLE = 13, 0x0002
+
+
+def _clipboard_api() -> None:
+    for name, res, args in (("OpenClipboard", W.BOOL, [W.HWND]), ("CloseClipboard", W.BOOL, []), ("EmptyClipboard", W.BOOL, []),
+                            ("EnumClipboardFormats", W.UINT, [W.UINT]), ("GetClipboardData", W.HANDLE, [W.UINT]),
+                            ("SetClipboardData", W.HANDLE, [W.UINT, W.HANDLE]), ("RegisterClipboardFormatW", W.UINT, [W.LPCWSTR])):
+        getattr(user32, name).restype, getattr(user32, name).argtypes = res, args
+    for name, res, args in (("GlobalAlloc", W.HGLOBAL, [W.UINT, ctypes.c_size_t]), ("GlobalLock", PTR, [W.HGLOBAL]),
+                            ("GlobalUnlock", W.BOOL, [W.HGLOBAL]), ("GlobalSize", ctypes.c_size_t, [W.HGLOBAL])):
+        getattr(kernel32, name).restype, getattr(kernel32, name).argtypes = res, args
+
+
+def _open_clipboard() -> bool:
+    for _ in range(20):                     # another program may hold it for a moment
+        if user32.OpenClipboard(None):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _global(data: bytes) -> int:
+    handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, max(1, len(data)))
+    pointer = kernel32.GlobalLock(handle)
+    ctypes.memmove(pointer, data, len(data))
+    kernel32.GlobalUnlock(handle)
+    return handle
+
+
+def _clipboard_save() -> list[tuple[int, bytes]]:
+    """Every format held in memory blocks (text, rich text, HTML, DIB images, file lists); handle-only formats
+    such as CF_BITMAP are skipped, and Windows makes them again from the DIB."""
+    saved, fmt = [], user32.EnumClipboardFormats(0)
+    while fmt:
+        handle = user32.GetClipboardData(fmt)
+        size = kernel32.GlobalSize(handle) if handle and fmt not in (2, 3, 9, 14) else 0   # BITMAP, METAFILEPICT, PALETTE, ENHMETAFILE
+        if size:
+            pointer = kernel32.GlobalLock(handle)
+            if pointer:
+                saved.append((fmt, ctypes.string_at(pointer, size)))
+                kernel32.GlobalUnlock(handle)
+        fmt = user32.EnumClipboardFormats(fmt)
+    return saved
+
+
+def paste(text: str) -> None:
+    _clipboard_api()
+    if not _open_clipboard():
+        type_text(text)                     # the clipboard is held elsewhere: send the characters instead
+        return
+    try:
+        saved = _clipboard_save()
+        user32.EmptyClipboard()
+        user32.SetClipboardData(CF_UNICODETEXT, _global(text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-16-le") + b"\0\0"))
+        for name in ("ExcludeClipboardContentFromMonitorProcessing", "CanIncludeInClipboardHistory", "CanUploadToCloudClipboard"):
+            user32.SetClipboardData(user32.RegisterClipboardFormatW(name), _global(b"\0\0\0\0"))
+    finally:
+        user32.CloseClipboard()
+    press(["ctrl"], "v")
+    time.sleep(0.4)
+    if _open_clipboard():
+        try:
+            user32.EmptyClipboard()
+            for fmt, data in saved:
+                user32.SetClipboardData(fmt, _global(data))
+        finally:
+            user32.CloseClipboard()
 
 
 def activate(pid: int, title: str = "") -> None:
@@ -462,10 +543,15 @@ def activate(pid: int, title: str = "") -> None:
     if window is None:
         raise RuntimeError("that app has no open window")
     hwnd = window["hwnd"]
+    front = _front()
+    if front and front["hwnd"] == hwnd and not user32.IsIconic(hwnd):
+        return                                                  # already there: nothing to disturb
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, 9)                              # SW_RESTORE
-    # Windows lets only the program with the last input change the front window; one ALT tap makes it ours.
-    _send(_key(MOD_VK["alt"]), _key(MOD_VK["alt"], up=True))
+    # Windows lets only the program with the last input change the front window. A mouse move of zero makes
+    # that input ours; an ALT tap would too, but in Notepad it moves the keyboard focus to the menu bar
+    # (measured: the next paste and ctrl+a went to the menu, not the document).
+    _send(_mouse(0x0001))                                       # MOUSEEVENTF_MOVE, dx = dy = 0
     user32.SetForegroundWindow(hwnd)
 
 
@@ -503,7 +589,7 @@ def act(request: dict[str, Any]) -> dict[str, Any]:
     elif action == "key":
         press(list(request.get("mods") or []), str(request["key"]))
     elif action == "paste":
-        type_text(str(request["text"]))
+        paste(str(request["text"]))
     elif action == "scroll":
         _move_to(request["x"], request["y"])
         _send(_mouse(WHEEL, int(request["lines"]) * 120))
