@@ -39,6 +39,8 @@ class ResolvedConfig:
     python_memory_mb: int = 2048
     #: [mcp_serve] tools: what `xharness mcp-serve` offers (see mcp_serve.py)
     mcp_serve: dict[str, Any] = field(default_factory=dict)
+    #: [a2a] port, token_file, approval -- see a2a.py
+    a2a: dict[str, Any] = field(default_factory=dict)
     #: [tools] desktop_control: desktop_look / desktop_act on this machine's screen (macOS, Windows);
     #: desktop_approval = false puts them under the normal approval policy instead of asking every time
     desktop_control: bool = False
@@ -151,6 +153,7 @@ def load_config(
         python=(str(raw.get("tools", {}).get("python") or "") or None),
         python_memory_mb=int(raw.get("tools", {}).get("python_memory_mb", 2048)),
         mcp_serve=raw.get("mcp_serve", {}) or {},
+        a2a=raw.get("a2a", {}) or {},
         desktop_control=bool(raw.get("tools", {}).get("desktop_control", False)),
         desktop_approval=bool(raw.get("tools", {}).get("desktop_approval", True)),
         skills=raw.get("skills", {}) or {},

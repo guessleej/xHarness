@@ -265,3 +265,9 @@ model = "your-model-id"
 # `xharness mcp-serve` offers these tools to an MCP client (default: browser, python_run, desktop, webfetch)
 # [mcp_serve]
 # tools = ["web_search", "browser_view", "browser_click", "python_run"]
+
+# `xharness a2a-serve` takes tasks from other agent platforms (A2A 0.3, loopback only)
+# [a2a]
+# port = 3090
+# token_file = "/run/secrets/xharness_a2a_token"   # default $XHARNESS_HOME/a2a-token
+# approval = "prompt"                              # approvals become input-required
