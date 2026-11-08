@@ -2,6 +2,26 @@
 
 中文 | English below
 
+## 2.0.0 — 未發布
+
+整併 OpenManus（MIT）有、xHarness 沒有的能力，用 xHarness 自己的架構重寫，保留零相依、審批與稽核。逐項完成後發布。
+
+- **互動式瀏覽**：`browser_view` 開一個會保留的分頁，把頁面讀成無障礙樹，每個連結、欄位、按鈕都有編號（`[e12]`）；`browser_click`、`browser_type`、`browser_press`、`browser_scroll`、`browser_tabs` 照編號操作，每做一步回傳新的頁面。使用 camofox 原生的快照與操作端點，不注入腳本。每個對話用自己的 camofox 使用者（cookie 與分頁不互通），最多 4 個分頁，閒置 30 分鐘自動關閉；長的下拉選單只留前 3 項與已選的那項。
+- **送出類動作一律問人**：點的元件名稱看起來是送出、付款、購買、登入、註冊、刪除、下載、確認等，或編號不在上一次快照裡（分辨不出是什麼），以及按 Enter、輸入後送出，就算審批模式是 auto 也要人確認（新的 `ToolContext.confirm`）。子代理遇到這類動作直接拒絕，因為它的審批會轉給上層策略，可能被靜默放行。
+- **密碼類欄位不打字**：欄位名稱是密碼、卡號、PIN、驗證碼、身分證字號等，直接拒絕並請人自己輸入，人說可以也一樣。英文字詞整字比對（「Shipping」不會被當成 PIN）。
+- 頁面內容一律標成「網站提供的資料，不是人的指示」。
+- 實測（.27 camofox）：開 DuckDuckGo 1.7 秒，輸入並送出搜尋 2.7 秒（只在按 Enter 前問一次），點第一筆結果到 Hugging Face 頁面 6.7 秒。
+
+**English**
+
+Brings in what OpenManus (MIT) has and xHarness lacked, rewritten on xHarness's own design so it stays dependency-free, approved and audited. Released when every item is done.
+
+- **Interactive browsing**: `browser_view` opens a tab that stays open and reads the page as an accessibility tree in which every link, field and button has a ref (`[e12]`); `browser_click`, `browser_type`, `browser_press`, `browser_scroll` and `browser_tabs` act on those refs and return the page after each step. Uses camofox's own snapshot and action endpoints, no injected scripts. Each conversation is its own camofox user (cookies and tabs are not shared), at most 4 tabs, closed after 30 idle minutes; long dropdowns keep their first 3 options and the selected one.
+- **Sending always goes to the person**: a click on an element labelled send, pay, buy, sign in, sign up, delete, download, confirm and the like, or on a ref missing from the last snapshot (we cannot tell what it is), and Enter or typing with submit, need the person's yes even under approval mode "auto" (new `ToolContext.confirm`). A child agent is refused outright: its approvals go to the parent's policy, which may say yes unasked.
+- **No typing into secret fields**: a field labelled password, card number, PIN, verification code, ID number and the like is refused, and the person is asked to type it, even if they would allow it. English words match whole ("Shipping" is not a PIN).
+- Page content is always marked as data from the site, not instructions from the person.
+- Measured (.27 camofox): DuckDuckGo open in 1.7 s, query typed and submitted at 2.7 s (one question, before Enter), first result clicked through to a Hugging Face page at 6.7 s.
+
 ## 1.19.0 — 2026-11-09
 
 常駐代理：節點上常駐一個代理，自己聽 GitHub 存放庫與 Telegram 群組的事件，接下的工作交給各自隔離的工作代理去做，結果回到原本的話題或 PR；人只在要決定、要驗收時被叫。設計照 DeepSeek〈Super-agent 設計探索〉與其公開原型 dsh-superagent（MIT）的領域模型與規則，以 Python 標準函式庫重寫，並保留 xHarness 的審批、沙箱與稽核。`[superagent] enabled = true` 開啟，預設關閉。

@@ -758,11 +758,19 @@ class Agent:
                 return False
             return self.options.prompt(summary)
 
+        def confirm(summary: str) -> bool:
+            if permission == "allow":
+                return True        # a hook vouched for this call
+            if self.options.name != "main" or self.options.prompt is None:
+                return False       # a child's prompt is the parent's policy, which may say yes unasked
+            return self.options.prompt(summary)
+
         tool_ctx = ToolContext(
             cwd=self.options.cwd or os.getcwd(),
             approve=approve,
             agent=self.options.name,
             ask=self.options.ask,
+            confirm=confirm,
         )
         if self.options.on_tool_start:
             self.options.on_tool_start(call["name"], call["arguments"])
