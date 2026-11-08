@@ -18,11 +18,13 @@ def test_mode_off_and_unknown_mode():
 
 def test_mode_require_without_backend(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setattr(sys, "platform", "linux")      # Windows has a backend of its own (test_winlow.py)
     with pytest.raises(RuntimeError, match="sandbox required"):
         resolve_sandbox({"mode": "require"})
     assert resolve_sandbox({"mode": "auto"}) is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Seatbelt and bwrap paths are POSIX")
 def test_wrappers_build_expected_argv(tmp_path):
     cwd = str(tmp_path)
     seatbelt = _seatbelt_wrap(allow_network=False)(["bash", "-c", "true"], cwd)

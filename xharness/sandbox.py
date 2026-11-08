@@ -4,6 +4,12 @@ macOS uses sandbox-exec (Seatbelt), Linux uses bubblewrap (bwrap) when present.
 Writes are confined to the working directory, temp dirs, and /dev; network can
 be cut with `allow_network = false`. Mode "auto" falls back to bare execution
 when no backend exists; mode "require" refuses to start instead.
+
+Windows (mode "require" only -- the personal app runs on the person's own
+computer unconfined): commands start at Low integrity in a job object, so they
+can write to the working directory and nothing the person owns (winlow.py).
+Windows cannot cut one process's network that way, so `allow_network = false`
+is refused there.
 """
 
 from __future__ import annotations
@@ -104,6 +110,24 @@ def _probe_bwrap() -> bool:
     )
 
 
+def _winlow_wrap() -> Wrap:
+    from .winlow import launcher_argv
+
+    def wrap(argv: list[str], cwd: str) -> list[str]:
+        return launcher_argv(os.path.realpath(cwd)) + argv
+
+    return wrap
+
+
+def _probe_winlow() -> bool:
+    from .winlow import launcher_argv
+    probe_dir = tempfile.mkdtemp(prefix="xh-sbx-")
+    try:
+        return _probe(launcher_argv(probe_dir) + ["cmd.exe", "/c", "exit", "0"])
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
+
+
 def resolve_sandbox(config: dict[str, Any] | None) -> Sandbox | None:
     config = config or {}
     mode = str(config.get("mode", "auto"))
@@ -121,8 +145,15 @@ def resolve_sandbox(config: dict[str, Any] | None) -> Sandbox | None:
         if _probe_bwrap():
             return Sandbox("bwrap", _bwrap_wrap(allow_network))
         broken.append("bwrap (installed but probe failed, e.g. user namespaces disabled)")
+    if sys.platform == "win32" and mode == "require":
+        if not allow_network:
+            raise RuntimeError("sandbox: Windows cannot cut a command's network (allow_network = false); "
+                               "use the firewall, or run the node on Linux")
+        if _probe_winlow():
+            return Sandbox("Windows Low integrity", _winlow_wrap())
+        broken.append("Windows Low integrity (probe failed)")
     if mode == "require":
-        detail = "; ".join(broken) if broken else "need sandbox-exec (macOS) or bwrap (Linux)"
+        detail = "; ".join(broken) if broken else "need sandbox-exec (macOS), bwrap (Linux) or Windows"
         raise RuntimeError(f"sandbox required but no working backend: {detail}")
     return None
 
