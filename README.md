@@ -74,6 +74,10 @@ XHARNESS_BASE_URL=http://localhost:8080/v1 XHARNESS_MODEL=your-model ./.venv/bin
 claude mcp add xharness -- xharness mcp-serve
 ```
 
+## 接受其他代理平台交辦（A2A）
+
+`xharness a2a-serve` 以 A2A 0.3 協定接受其他代理平台的工作：代理名片在 `/.well-known/agent-card.json`，要 Bearer 權杖（`$XHARNESS_HOME/a2a-token`）。需要核准時任務會停在 `input-required`，回「允許」才繼續；要人親自做的動作（桌面、送出表單）在這裡一律不給。只聽本機，要從別台連請放在 TLS 前端後面。
+
 ## 內建工具
 
 | 類別 | 工具 |

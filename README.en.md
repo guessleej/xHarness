@@ -74,6 +74,10 @@ An agent that stays up on the node (`[superagent] enabled = true`). It listens t
 claude mcp add xharness -- xharness mcp-serve
 ```
 
+## Taking work from other agent platforms (A2A)
+
+`xharness a2a-serve` takes tasks over A2A 0.3: the agent card is at `/.well-known/agent-card.json`, calls need the Bearer token in `$XHARNESS_HOME/a2a-token`. An approval stops the task at `input-required` until the caller answers 允許 / allow; what needs a person (the desktop, sending a form) is never offered here. Loopback only; put it behind a TLS front end to reach it from another machine.
+
 ## Built-in tools
 
 | Group | Tools |
