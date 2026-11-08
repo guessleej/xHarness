@@ -2,7 +2,7 @@
 
 中文 | English below
 
-## 1.19.0 — 未發布
+## 1.19.0 — 2026-11-09
 
 常駐代理：節點上常駐一個代理，自己聽 GitHub 存放庫與 Telegram 群組的事件，接下的工作交給各自隔離的工作代理去做，結果回到原本的話題或 PR；人只在要決定、要驗收時被叫。設計照 DeepSeek〈Super-agent 設計探索〉與其公開原型 dsh-superagent（MIT）的領域模型與規則，以 Python 標準函式庫重寫，並保留 xHarness 的審批、沙箱與稽核。`[superagent] enabled = true` 開啟，預設關閉。
 
