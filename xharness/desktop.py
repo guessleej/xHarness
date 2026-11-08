@@ -20,6 +20,7 @@ between an app its teachers can use and a fleet its administrators can see.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import secrets
 import sys
@@ -81,6 +82,16 @@ def node_token(settings: dict[str, Any]) -> str:
     return token
 
 
+def personal_defaults(config: ResolvedConfig) -> ResolvedConfig:
+    """The desktop app is a personal assistant on the person's own computer: its
+    commands act on that computer (move a file out of Downloads, open an app)
+    instead of being confined to the working directory. A [sandbox] mode written
+    in the config still wins; schools and companies set mode = "require"."""
+    if "mode" in (config.sandbox or {}):
+        return config
+    return dataclasses.replace(config, sandbox={**(config.sandbox or {}), "mode": "off"})
+
+
 def run_desktop(
     config_path: str | None = None,
     approval_mode: str | None = None,
@@ -105,7 +116,7 @@ def run_desktop(
 
     server = app = None
     try:
-        config: ResolvedConfig = load_config(config_path)
+        config: ResolvedConfig = personal_defaults(load_config(config_path))
         server, app, url = start_server(
             config, host="127.0.0.1", port=0, token=None, approval_mode=approval_mode or config.approval
         )

@@ -59,7 +59,8 @@ model = "your-model-id"
 # temperature = 0.6
 # max_tokens = 8192
 
-# Sandbox for the bash tool: sandbox-exec on macOS, bwrap on Linux.
+# Sandbox for the bash tool: sandbox-exec on macOS, bwrap on Linux; on Windows only with mode = "require"
+# (Low integrity + job object; network cannot be cut there). The desktop app defaults to "off".
 # [sandbox]
 # mode = "auto"          # auto (default) | require | off
 # allow_network = true   # false also cuts the network inside bash commands
