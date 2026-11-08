@@ -14,6 +14,7 @@ browser is already sandboxed on its own machine.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import secrets
@@ -40,14 +41,41 @@ SEARCH_JS = (
     "url:(r.querySelector('.result__a')||{}).href||'',"
     "snippet:(r.querySelector('.result__snippet')||{}).textContent||''})))"
 )
+#: Tried in order when DuckDuckGo is blocked, errors or finds nothing. All are
+#: opened as pages in the same real browser; none is a search API.
+GOOGLE_URL = "https://www.google.com/search?hl=zh-TW&q="
+GOOGLE_JS = (
+    "JSON.stringify(Array.from(document.querySelectorAll('h3')).map(h=>{const a=h.closest('a');"
+    "const box=a&&a.parentElement&&a.parentElement.parentElement;"
+    "return {title:h.textContent||'',url:a?a.href:'',site:((box||document).querySelector('cite')||{}).textContent||'',"
+    "snippet:((box&&box.parentElement||document).querySelector('.VwiC3b,[data-sncf]')||{}).textContent||''}})"
+    ".filter(x=>x.title&&x.url).slice(0,%d))"
+)
+BING_URL = "https://www.bing.com/search?setlang=zh-hant&q="
+BING_JS = (
+    "JSON.stringify(Array.from(document.querySelectorAll('li.b_algo')).slice(0,%d).map(r=>({"
+    "title:(r.querySelector('h2 a')||{}).textContent||'',url:(r.querySelector('h2 a')||{}).href||'',"
+    "snippet:(r.querySelector('.b_caption p, p')||{}).textContent||''})))"
+)
+ENGINES = (("DuckDuckGo", SEARCH_URL, SEARCH_JS), ("Google", GOOGLE_URL, GOOGLE_JS), ("Bing", BING_URL, BING_JS))
 
 
 def _unwrap_redirect(url: str) -> str:
-    """DuckDuckGo wraps results as duckduckgo.com/l/?uddg=<real url>; hand the model the real one."""
+    """Hand the model the real address where the engine's redirect carries it:
+    DuckDuckGo's /l/?uddg=<url>, Bing's /ck/a?u=a1<base64url>. Google's /goto
+    links are encrypted; they stay as they are and still lead there when opened."""
     parts = urllib.parse.urlsplit(url)
+    query = urllib.parse.parse_qs(parts.query)
     if parts.netloc.endswith("duckduckgo.com") and parts.path == "/l/":
-        real = urllib.parse.parse_qs(parts.query).get("uddg", [""])[0]
-        return real or url
+        return query.get("uddg", [""])[0] or url
+    if parts.netloc.endswith("bing.com") and parts.path.startswith("/ck/"):
+        packed = query.get("u", [""])[0]
+        if packed.startswith("a1"):
+            try:
+                real = base64.urlsafe_b64decode(packed[2:] + "=" * (-len(packed[2:]) % 4)).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                return url
+            return real if real.startswith(("http://", "https://")) else url
     return url
 
 
@@ -94,19 +122,27 @@ class Browser:
         result = self._post(f"/tabs/{tab}/evaluate", {"userId": USER_ID, "expression": expression})
         return str(result.get("result") or "")
 
-    def search(self, query: str, limit: int) -> list[dict[str, str]]:
-        url = SEARCH_URL + urllib.parse.quote_plus(query)
-        raw = self.evaluate(url, SEARCH_JS % limit, settle=False)
-        try:
-            items = json.loads(raw or "[]")
-        except json.JSONDecodeError:
-            return []
-        out = []
-        for i in items:
-            url = _unwrap_redirect(str(i.get("url") or ""))
-            if url.startswith("http"):
-                out.append({"title": str(i.get("title") or "").strip(), "url": url, "snippet": str(i.get("snippet") or "").strip()})
-        return out
+    def search(self, query: str, limit: int) -> tuple[str, list[dict[str, str]], list[str]]:
+        """(engine that answered, results, what went wrong with the engines before it)."""
+        problems: list[str] = []
+        for name, base, script in ENGINES:
+            try:
+                # Google and Bing render their results with script: give them a moment.
+                raw = self.evaluate(base + urllib.parse.quote_plus(query), script % limit, settle=name != "DuckDuckGo")
+                items = json.loads(raw or "[]")
+            except (urllib.error.URLError, OSError, RuntimeError, TimeoutError, json.JSONDecodeError) as error:
+                problems.append(f"{name}: {error}")
+                continue
+            out = []
+            for i in items if isinstance(items, list) else []:
+                url = _unwrap_redirect(str(i.get("url") or ""))
+                if url.startswith("http"):
+                    out.append({"title": str(i.get("title") or "").strip(), "url": url,
+                                "snippet": str(i.get("snippet") or "").strip(), "site": str(i.get("site") or "").strip()})
+            if out:
+                return name, out, problems
+            problems.append(f"{name}: no results")
+        return "", [], problems
 
     def open(self, url: str) -> str:
         return self.evaluate(url, "document.body.innerText")
@@ -123,14 +159,13 @@ def _make_tools(browser: Browser, approval: bool) -> list[Tool]:
         limit = max(1, min(int(args.get("max_results") or 8), MAX_RESULTS))
         if not gate(ctx, f"web_search: {query}"):
             return ToolResult("denied by approval policy", is_error=True)
-        try:
-            items = browser.search(query, limit)
-        except (urllib.error.URLError, OSError, RuntimeError, TimeoutError) as error:
-            return ToolResult(f"search failed: {error}", is_error=True)
+        engine, items, problems = browser.search(query, limit)
         if not items:
-            return ToolResult("no results")
-        lines = [f"{n}. {i['title']}\n   {i['url']}\n   {i['snippet']}" for n, i in enumerate(items, 1)]
-        return ToolResult("\n".join(lines))
+            return ToolResult("no results" + (f" ({'; '.join(problems)})" if problems else ""))
+        lines = [f"{n}. {i['title']}\n   {i['url']}" + (f"  ({i['site']})" if i.get("site") else "") + f"\n   {i['snippet']}"
+                 for n, i in enumerate(items, 1)]
+        head = f"[{engine}" + (f"; tried first: {'; '.join(problems)}" if problems else "") + "]"
+        return ToolResult(head + "\n" + "\n".join(lines))
 
     def run_open(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         url = str(args.get("url") or "")
@@ -150,9 +185,9 @@ def _make_tools(browser: Browser, approval: bool) -> list[Tool]:
         Tool(
             name="web_search",
             description=(
-                "Search the web in a real browser (DuckDuckGo results page) and return "
-                "up to 10 results as title, URL and snippet. Follow up with browser_open "
-                "to read a result."
+                "Search the web in a real browser and return up to 10 results as title, URL and "
+                "snippet. Opens DuckDuckGo's results page, then Google's, then Bing's if the one "
+                "before is blocked or finds nothing. Follow up with browser_open to read a result."
             ),
             mutating=approval,
             parameters={

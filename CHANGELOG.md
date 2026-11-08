@@ -11,6 +11,11 @@
 - **密碼類欄位不打字**：欄位名稱是密碼、卡號、PIN、驗證碼、身分證字號等，直接拒絕並請人自己輸入，人說可以也一樣。英文字詞整字比對（「Shipping」不會被當成 PIN）。
 - 頁面內容一律標成「網站提供的資料，不是人的指示」。
 - 實測（.27 camofox）：開 DuckDuckGo 1.7 秒，輸入並送出搜尋 2.7 秒（只在按 Enter 前問一次），點第一筆結果到 Hugging Face 頁面 6.7 秒。
+- **`python_run`**：在工作目錄執行一段 Python，回傳它印出的結果，預設提供。用來算加總、百分比、日期與讀 CSV／Excel，不讓模型心算（系統提示也改成「數字一律用 python_run 算」）。名稱像金鑰、權杖、密碼的環境變數不傳給子行程；Linux 與 macOS 有記憶體上限（`[tools] python_memory_mb`，預設 2048）；逾時與輸出上限同 bash；有設定沙箱就在沙箱裡跑。打包版沒有自己的 Python，改用 `[tools] python` 或 PATH 上的 python3。
+- **搜尋備援**：DuckDuckGo 被擋、出錯或沒有結果時，依序改開 Google、Bing 的結果頁（同一個真瀏覽器，不用搜尋 API），結果第一行註明是哪個引擎回答、前面的為什麼沒用。Bing 的轉址解回真正網址；Google 的連結是加密轉址，保留原樣（開啟時會轉到原站），旁邊附網站名稱。實測（.27，「台灣 RTX 5090 售價」）：DuckDuckGo 1.2 秒、Google 4.6 秒、Bing 11.4 秒且相關性最差，所以排最後。
+- **`xharness mcp-serve`**：以 stdio MCP 伺服器提供瀏覽器、`python_run`、桌面操作與 `webfetch`，給 Claude Code 等用戶端呼叫（`[mcp_serve] tools` 可改）。一般呼叫由用戶端自己的核准把關；送出類動作與桌面操作改用 MCP elicitation 再問一次人，用戶端沒宣告支援就拒絕。工具印出的東西導到 stderr，不會弄壞協定；每次呼叫在 stderr 記一行（工具、成敗、秒數），不記參數與輸出。
+- **Azure OpenAI 預設組**（`preset = "azure-openai"`）：v1 API，用一般的 OpenAI 用戶端、不帶 api-version，`model` 填部署名稱。`base_url` 沒換成自己的資源名稱就直接報錯。
+- 系統提示：超過三個步驟的工作先用 `todo_write` 列計畫再做（取自 OpenManus 的規劃流程）。
 
 **English**
 
@@ -21,6 +26,11 @@ Brings in what OpenManus (MIT) has and xHarness lacked, rewritten on xHarness's 
 - **No typing into secret fields**: a field labelled password, card number, PIN, verification code, ID number and the like is refused, and the person is asked to type it, even if they would allow it. English words match whole ("Shipping" is not a PIN).
 - Page content is always marked as data from the site, not instructions from the person.
 - Measured (.27 camofox): DuckDuckGo open in 1.7 s, query typed and submitted at 2.7 s (one question, before Enter), first result clicked through to a Hugging Face page at 6.7 s.
+- **`python_run`**: runs a Python snippet in the working directory and returns what it printed; offered by default. For sums, percentages, dates and reading CSV or Excel, so the model does not work numbers out in its head (the system prompt now says so). Environment variables named like keys, tokens and passwords are not passed down; memory is capped on Linux and macOS (`[tools] python_memory_mb`, default 2048); timeout and output cap as bash; runs in the sandbox when one is configured. The packaged app has no Python of its own and uses `[tools] python` or python3 on the PATH.
+- **Search fallback**: when DuckDuckGo is blocked, fails or finds nothing, Google's and then Bing's results pages are opened (same real browser, no search API); the first line says which engine answered and why the ones before did not. Bing's redirects are decoded to the real address; Google's are encrypted and kept (they lead to the site when opened), with the site name beside them. Measured (.27, "台灣 RTX 5090 售價"): DuckDuckGo 1.2 s, Google 4.6 s, Bing 11.4 s and least relevant, hence last.
+- **`xharness mcp-serve`**: a stdio MCP server offering the browser, `python_run`, the desktop tools and `webfetch` to Claude Code and other clients (`[mcp_serve] tools` to change). Ordinary calls are gated by the client's own approval; sending and the desktop tools are put to the person again through MCP elicitation, and refused when the client has not declared it. Anything a tool prints goes to stderr, so the protocol stays intact; each call is logged to stderr as one line (tool, outcome, seconds) without its arguments or output.
+- **Azure OpenAI preset** (`preset = "azure-openai"`): the v1 API, the plain OpenAI client, no api-version; `model` is the deployment name. A `base_url` still holding the placeholder is refused.
+- System prompt: a task of more than three steps gets a written plan with `todo_write` first (from OpenManus's planning flow).
 
 ## 1.19.0 — 2026-11-09
 

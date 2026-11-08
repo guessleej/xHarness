@@ -66,11 +66,19 @@ XHARNESS_BASE_URL=http://localhost:8080/v1 XHARNESS_MODEL=your-model ./.venv/bin
 - **對外寫入預設每一則都要核准**，在網頁或 Telegram 按。群組回覆上限 100 字。
 - 網頁「常駐代理」頁上方是設定步驟，下面依序是待處理、工單、事件（每則訊息去了哪裡）與設定；看門狗在代理之外盯著卡住或繞圈的工作。
 
+## 把工具開給其他 agent（MCP）
+
+`xharness mcp-serve` 以 stdio 的 MCP 伺服器提供瀏覽器、`python_run` 與桌面操作工具，Claude Code 等 MCP 用戶端可以直接呼叫。一般動作由用戶端自己的核准把關；送出、付款這類動作與桌面操作，會用 MCP 的 elicitation 再問一次人，用戶端不支援就拒絕。`[mcp_serve] tools = [...]` 可改要提供哪些工具。
+
+```bash
+claude mcp add xharness -- xharness mcp-serve
+```
+
 ## 內建工具
 
 | 類別 | 工具 |
 |---|---|
-| 檔案與指令 | `read` `write` `edit` `glob` `grep` `bash` `terminal` `powershell` `job_*` |
+| 檔案與指令 | `read` `write` `edit` `glob` `grep` `bash` `python_run`（算數字用程式算，不帶機密環境變數）`terminal` `powershell` `job_*` |
 | 代理 | `subagent` `subagent_batch` `ralph` `workflow`（皆可 `isolate` 獨立工作區＋`check` 整合閘門）`discussion` `list_agents` `send_message` `report` |
 | 任務板（`[board]`） | `board_list` `board_add` `board_claim` `board_heartbeat` `board_release` `board_note` `board_notes` |
 | 記憶與對話 | `memory_*` `session_search` `session_read` `todo_write` `skill` `schedule_*` |

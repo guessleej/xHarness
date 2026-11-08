@@ -104,3 +104,14 @@ def test_extra_body_from_toml_reaches_the_request(tmp_path, monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     OpenAIAdapter(**load_config().provider).stream([{"role": "user", "content": "hi"}], [])
     assert captured["body"]["reasoning_budget_tokens"] == 1024
+
+
+def test_azure_openai_preset_needs_your_resource():
+    import pytest
+    from xharness.providers import apply_preset
+    with pytest.raises(ValueError, match="your own resource"):
+        apply_preset({"preset": "azure-openai", "model": "gpt-4o-deploy"})
+    merged = apply_preset({"preset": "azure-openai", "model": "gpt-4o-deploy",
+                           "base_url": "https://xcloud.openai.azure.com/openai/v1"})
+    assert merged == {"base_url": "https://xcloud.openai.azure.com/openai/v1", "api_key_env": "AZURE_OPENAI_API_KEY",
+                      "model": "gpt-4o-deploy"}

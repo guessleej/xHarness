@@ -34,6 +34,11 @@ class ResolvedConfig:
     files: dict[str, Any] = field(default_factory=dict)
     browser: str | None = None
     browser_approval: bool = True
+    #: [tools] python (interpreter for python_run; default this one), python_memory_mb
+    python: str | None = None
+    python_memory_mb: int = 2048
+    #: [mcp_serve] tools: what `xharness mcp-serve` offers (see mcp_serve.py)
+    mcp_serve: dict[str, Any] = field(default_factory=dict)
     #: [tools] desktop_control: desktop_look / desktop_act on this machine's screen (macOS, Windows);
     #: desktop_approval = false puts them under the normal approval policy instead of asking every time
     desktop_control: bool = False
@@ -143,6 +148,9 @@ def load_config(
         files=raw.get("files", {}) or {},
         browser=_browser_url(raw.get("tools", {}).get("browser")),
         browser_approval=bool(raw.get("tools", {}).get("browser_approval", True)),
+        python=(str(raw.get("tools", {}).get("python") or "") or None),
+        python_memory_mb=int(raw.get("tools", {}).get("python_memory_mb", 2048)),
+        mcp_serve=raw.get("mcp_serve", {}) or {},
         desktop_control=bool(raw.get("tools", {}).get("desktop_control", False)),
         desktop_approval=bool(raw.get("tools", {}).get("desktop_approval", True)),
         skills=raw.get("skills", {}) or {},

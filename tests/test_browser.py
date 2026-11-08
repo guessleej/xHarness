@@ -88,3 +88,54 @@ def test_config_mounts_browser_tools_only_when_set(tmp_path):
     assert off.ctx.get("tools").get("web_search") is None
     on = build_harness(ResolvedConfig(**{**base.__dict__, "browser": "http://127.0.0.1:9"}), no_session=True)
     assert on.ctx.get("tools").get("web_search") is not None and on.ctx.get("tools").get("browser_open") is not None
+
+
+class EngineCamofox(BaseHTTPRequestHandler):
+    """DuckDuckGo finds nothing, Google fails or answers, Bing answers: per test."""
+    answers = {}
+    opened = []
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/tabs/open":
+            EngineCamofox.opened.append(body["url"])
+            out = {"tabId": "t1"}
+        else:
+            engine = next(k for k in ("duckduckgo", "google", "bing") if k in EngineCamofox.opened[-1])
+            answer = EngineCamofox.answers.get(engine, [])
+            if answer == "boom" and "innerText" not in body["expression"]:
+                self.send_response(500); self.end_headers(); return
+            out = {"result": "x" * 500 if "innerText" in body["expression"] else json.dumps(answer)}
+        data = json.dumps(out).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(data)
+
+    def do_DELETE(self):
+        self.send_response(200); self.end_headers()
+
+    def log_message(self, *_):
+        pass
+
+
+@pytest.fixture()
+def engines():
+    server = HTTPServer(("127.0.0.1", 0), EngineCamofox)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    EngineCamofox.opened.clear()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+def test_search_falls_back_to_google_then_bing_and_says_which_answered(engines, tmp_path):
+    bing = "https://www.bing.com/ck/a?!&&p=abc&u=a1aHR0cHM6Ly93d3cuc2Fib24uY29tLnR3Lw&ntb=1"
+    google = [{"title": "云碩科技", "url": "https://www.google.com/goto?url=CAES", "site": "https://www.cloudinfo.com.tw", "snippet": "地端 AI"}]
+    ctx = ToolContext(cwd=str(tmp_path), approve=lambda _s: True)
+    EngineCamofox.answers = {"duckduckgo": [], "google": google}
+    out = tools_with(engines).get("web_search").execute({"query": "云碩"}, ctx).output
+    assert out.startswith("[Google; tried first: DuckDuckGo: no results]") and "(https://www.cloudinfo.com.tw)" in out
+    EngineCamofox.answers = {"duckduckgo": [], "google": "boom", "bing": [{"title": "SABON", "url": bing, "snippet": ""}]}
+    out = tools_with(engines).get("web_search").execute({"query": "云碩"}, ctx).output
+    assert out.startswith("[Bing; tried first: DuckDuckGo: no results; Google:") and "https://www.sabon.com.tw/" in out
+    assert [u.split("/search")[0].split("/html")[0] for u in EngineCamofox.opened[-3:]] == [
+        "https://duckduckgo.com", "https://www.google.com", "https://www.bing.com"]
+    EngineCamofox.answers = {}
+    assert tools_with(engines).get("web_search").execute({"query": "云碩"}, ctx).output.startswith("no results (DuckDuckGo")
