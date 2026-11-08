@@ -67,8 +67,10 @@ model = "your-model-id"
 # Optional built-in tools.
 # [tools]
 # webfetch = false       # true enables the webfetch tool (network egress, approval-gated)
-# browser = "http://127.0.0.1:9377"   # local camofox service; adds web_search / browser_open
-# browser_approval = true              # false waives approval for those two (the browser is on the node's own machine)
+# browser = "http://127.0.0.1:9377"   # local camofox service; adds web_search, browser_open and the interactive browser_* tools
+# browser_approval = true              # false waives approval for reading and ordinary clicks (sending, paying, signing in still ask)
+# python = "python3"                   # interpreter for python_run; default: the one running xHarness
+# python_memory_mb = 2048              # python_run memory ceiling (Linux, macOS)
 # desktop_control = false              # true lets the model see this computer's screen and use its mouse and keyboard
 #                                      # (desktop_look / desktop_act, macOS and Windows; macOS needs Accessibility, and
 #                                      # Screen Recording for screenshots, which [vision] provider describes; on Windows
@@ -259,3 +261,7 @@ model = "your-model-id"
 # turn_minutes = 15            # how long to wait for a remote spokesperson
 # [web]
 # public_url = "http://192.168.10.70:3080"   # an address other machines can reach (for hall invites)
+
+# `xharness mcp-serve` offers these tools to an MCP client (default: browser, python_run, desktop, webfetch)
+# [mcp_serve]
+# tools = ["web_search", "browser_view", "browser_click", "python_run"]

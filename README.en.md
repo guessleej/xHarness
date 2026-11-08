@@ -66,11 +66,19 @@ An agent that stays up on the node (`[superagent] enabled = true`). It listens t
 - **Every outside write waits for approval** by default, on the page or Telegram. Chat replies stay under 100 words.
 - The "常駐代理" page shows the setup steps, then inbox, tickets, events (where each message went) and settings; a watchdog outside the agents watches for stalled or looping work.
 
+## Offering the tools to other agents (MCP)
+
+`xharness mcp-serve` is a stdio MCP server for the browser, `python_run` and the desktop tools, so Claude Code and other MCP clients can call them. Ordinary calls are gated by the client's own approval; sending, paying and the desktop tools are put to the person again through MCP elicitation, and refused when the client does not support it. `[mcp_serve] tools = [...]` picks what is offered.
+
+```bash
+claude mcp add xharness -- xharness mcp-serve
+```
+
 ## Built-in tools
 
 | Group | Tools |
 |---|---|
-| Files and commands | `read` `write` `edit` `glob` `grep` `bash` `terminal` `powershell` `job_*` |
+| Files and commands | `read` `write` `edit` `glob` `grep` `bash` `python_run` (numbers are computed by code; secret environment variables are left out) `terminal` `powershell` `job_*` |
 | Agents | `subagent` `subagent_batch` `ralph` `workflow` (all with `isolate` workspaces and a `check` gate) `discussion` `list_agents` `send_message` `report` |
 | Task board (`[board]`) | `board_list` `board_add` `board_claim` `board_heartbeat` `board_release` `board_note` `board_notes` |
 | Memory and history | `memory_*` `session_search` `session_read` `todo_write` `skill` `schedule_*` |

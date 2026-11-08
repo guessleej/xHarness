@@ -191,6 +191,13 @@ def default_system_prompt(cwd: str, model: str | None = None) -> str:
             f"Working directory: {cwd}",
             "Use the available tools to inspect and change files and to run commands.",
             "Prefer small verified steps: read before you edit, run checks after you change.",
+            # Taken from OpenManus's planning flow: a long task with a written
+            # plan is easier for the person to follow and for a small model to finish.
+            "For a task with more than three steps, write the plan with todo_write first, then work "
+            "through it and keep the list current.",
+            # Local models get sums, percentages and dates wrong; code does not.
+            "Work out numbers -- sums, percentages, averages, dates -- with python_run when it is "
+            "available, not in your head, and say that the figures were computed.",
             # Measured: granite mistyped a long absolute working directory and
             # concluded that existing files were missing.
             "Use paths relative to the working directory; do not retype its absolute path.",

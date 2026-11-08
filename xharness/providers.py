@@ -15,6 +15,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+AZURE_PLACEHOLDER = "YOUR-RESOURCE"
+
 PRESETS: dict[str, dict[str, Any]] = {
     "llama-cpp": {"base_url": "http://127.0.0.1:8080/v1", "local": True, "notes": "llama-server --port 8080 (add --jinja for tool calls)"},
     "ollama": {"base_url": "http://127.0.0.1:11434/v1", "local": True, "notes": "Ollama's OpenAI-compatible endpoint"},
@@ -26,6 +28,10 @@ PRESETS: dict[str, dict[str, Any]] = {
     "groq": {"base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY", "local": False},
     "mistral": {"base_url": "https://api.mistral.ai/v1", "api_key_env": "MISTRAL_API_KEY", "local": False},
     "together": {"base_url": "https://api.together.xyz/v1", "api_key_env": "TOGETHER_API_KEY", "local": False},
+    # Azure OpenAI's v1 API takes the plain OpenAI client and no api-version; model is the
+    # deployment name. The placeholder must be replaced (apply_preset refuses it).
+    "azure-openai": {"base_url": f"https://{AZURE_PLACEHOLDER}.openai.azure.com/openai/v1", "api_key_env": "AZURE_OPENAI_API_KEY",
+                     "local": False, "notes": "set base_url to your resource (https://<resource>.openai.azure.com/openai/v1); model = your deployment name"},
 }
 
 #: Every OpenAIAdapter keyword a provider table may set; anything else is dropped.
@@ -43,6 +49,9 @@ def apply_preset(provider: dict[str, Any]) -> dict[str, Any]:
         raise KeyError(f"unknown provider preset: {name} (available: {', '.join(sorted(PRESETS))})")
     merged = {key: value for key, value in preset.items() if key in PROVIDER_KEYS}
     merged.update({key: value for key, value in provider.items() if key in PROVIDER_KEYS})
+    if AZURE_PLACEHOLDER in str(merged.get("base_url") or ""):
+        raise ValueError(f"provider preset {name}: set base_url to your own resource, "
+                         "e.g. https://my-resource.openai.azure.com/openai/v1")
     return merged
 
 
