@@ -26,6 +26,11 @@ class ToolContext:
     #: or None if nobody answered. None as the channel itself means no person is
     #: attached (headless run, eval, sub-task) -- see tools/ask.py.
     ask: Callable[[str, list[dict[str, str]]], str | None] | None = None
+    #: Asks the person even under approval mode "auto", for one call that cannot be
+    #: undone (a browser click on "送出" or "付款"). A child agent gets a refusal:
+    #: its approvals go to the parent's policy, which may approve silently.
+    #: None means nobody can be asked, which is a refusal too.
+    confirm: Callable[[str], bool] | None = None
 
 
 @dataclass

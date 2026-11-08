@@ -76,7 +76,7 @@ An agent that stays up on the node (`[superagent] enabled = true`). It listens t
 | Memory and history | `memory_*` `session_search` `session_read` `todo_write` `skill` `schedule_*` |
 | Talking to people | `ask_user` `goal_done` |
 | Code | `lsp` `security_scan` |
-| Once configured | `web_search` `browser_open` `webfetch` `desktop_look` `desktop_act` (use this computer, macOS and Windows, asks every time) and MCP tools |
+| Once configured | `web_search` `browser_open` `browser_view` `browser_click` `browser_type` `browser_press` `browser_scroll` `browser_tabs` (click, fill in and submit in a background browser; sending, paying, signing in, deleting and downloading always go to the person first) `webfetch` `desktop_look` `desktop_act` (use this computer, macOS and Windows, asks every time) and MCP tools |
 
 ## More
 
