@@ -39,7 +39,7 @@ class FakeBackend:
 @pytest.fixture()
 def rig():
     backend = FakeBackend()
-    look, act = _make_tools(Desktop(backend, settle=0), True)
+    look, act = _make_tools(Desktop(backend, settle=0), True, platform="darwin")
     asked = []
     ctx = ToolContext(cwd=".", approve=lambda s: asked.append(s) or True)
     return backend, look, act, ctx, asked
