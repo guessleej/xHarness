@@ -78,7 +78,7 @@ claude mcp add xharness -- xharness mcp-serve
 
 | 類別 | 工具 |
 |---|---|
-| 檔案與指令 | `read` `write` `edit` `glob` `grep` `bash` `python_run`（算數字用程式算，不帶機密環境變數）`terminal` `powershell` `job_*` |
+| 檔案與指令 | `read` `write` `edit` `glob` `grep` `bash` `python_run`（算數字用程式算，不帶機密環境變數）`chart`（長條、橫條、折線圖，公司色盤）`terminal` `powershell` `job_*` |
 | 代理 | `subagent` `subagent_batch` `ralph` `workflow`（皆可 `isolate` 獨立工作區＋`check` 整合閘門）`discussion` `list_agents` `send_message` `report` |
 | 任務板（`[board]`） | `board_list` `board_add` `board_claim` `board_heartbeat` `board_release` `board_note` `board_notes` |
 | 記憶與對話 | `memory_*` `session_search` `session_read` `todo_write` `skill` `schedule_*` |

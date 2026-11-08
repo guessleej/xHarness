@@ -78,7 +78,7 @@ claude mcp add xharness -- xharness mcp-serve
 
 | Group | Tools |
 |---|---|
-| Files and commands | `read` `write` `edit` `glob` `grep` `bash` `python_run` (numbers are computed by code; secret environment variables are left out) `terminal` `powershell` `job_*` |
+| Files and commands | `read` `write` `edit` `glob` `grep` `bash` `python_run` (numbers are computed by code; secret environment variables are left out) `chart` (bar, horizontal bar, line, company palette) `terminal` `powershell` `job_*` |
 | Agents | `subagent` `subagent_batch` `ralph` `workflow` (all with `isolate` workspaces and a `check` gate) `discussion` `list_agents` `send_message` `report` |
 | Task board (`[board]`) | `board_list` `board_add` `board_claim` `board_heartbeat` `board_release` `board_note` `board_notes` |
 | Memory and history | `memory_*` `session_search` `session_read` `todo_write` `skill` `schedule_*` |

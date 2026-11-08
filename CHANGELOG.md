@@ -16,6 +16,8 @@
 - **`xharness mcp-serve`**：以 stdio MCP 伺服器提供瀏覽器、`python_run`、桌面操作與 `webfetch`，給 Claude Code 等用戶端呼叫（`[mcp_serve] tools` 可改）。一般呼叫由用戶端自己的核准把關；送出類動作與桌面操作改用 MCP elicitation 再問一次人，用戶端沒宣告支援就拒絕。工具印出的東西導到 stderr，不會弄壞協定；每次呼叫在 stderr 記一行（工具、成敗、秒數），不記參數與輸出。
 - **Azure OpenAI 預設組**（`preset = "azure-openai"`）：v1 API，用一般的 OpenAI 用戶端、不帶 api-version，`model` 填部署名稱。`base_url` 沒換成自己的資源名稱就直接報錯。
 - 系統提示：超過三個步驟的工作先用 `todo_write` 列計畫再做（取自 OpenManus 的規劃流程）。
+- **`chart`**：把已經算好的數字畫成長條圖、橫條圖（排名）或折線圖，存成 .svg（只用標準函式庫）或 .png（用 rsvg-convert 或 cairosvg 轉），並一起回傳資料表。照公司色盤與報告的畫圖規則：只有一個 y 軸、細線、資料端 4 px 圓角、長條之間 2 px 間隔、文字一律用文字色而不用系列色、兩個系列以上一定有圖例並選擇性直接標值、最多 5 個系列（第 6 個起要併成「其他」）、字一律 15 px 以上、折線終點標籤自動錯開。類別色依序為 CIS 紅、青、琥珀、紫、綠，已用色盲模擬驗證過；不提供圓餅圖與雙 y 軸。
+- **內建角色 `data-analyst`**（取自 OpenManus 的資料分析代理）：先看欄位與樣本再算，數字一律來自 `python_run`，交代空白與異常值怎麼處理，用 `chart` 出圖，寫進 Excel 時附公式並另存，不覆蓋原檔。各目錄裡同名的角色會取代它。
 
 **English**
 
@@ -31,6 +33,8 @@ Brings in what OpenManus (MIT) has and xHarness lacked, rewritten on xHarness's 
 - **`xharness mcp-serve`**: a stdio MCP server offering the browser, `python_run`, the desktop tools and `webfetch` to Claude Code and other clients (`[mcp_serve] tools` to change). Ordinary calls are gated by the client's own approval; sending and the desktop tools are put to the person again through MCP elicitation, and refused when the client has not declared it. Anything a tool prints goes to stderr, so the protocol stays intact; each call is logged to stderr as one line (tool, outcome, seconds) without its arguments or output.
 - **Azure OpenAI preset** (`preset = "azure-openai"`): the v1 API, the plain OpenAI client, no api-version; `model` is the deployment name. A `base_url` still holding the placeholder is refused.
 - System prompt: a task of more than three steps gets a written plan with `todo_write` first (from OpenManus's planning flow).
+- **`chart`**: draws numbers already computed as a bar, horizontal-bar (rankings) or line chart, saved as .svg (standard library only) or .png (via rsvg-convert or cairosvg), and returns the data as a table too. Company palette and the reports' charting rules: one y-axis, thin marks with 4 px rounded data ends, a 2 px gap between bars, text in ink rather than series colours, a legend for two or more series plus selective direct labels, at most 5 series (fold the rest into 其他), all text 15 px or larger, and line end labels pushed apart. Categorical order CIS red, cyan, amber, purple, green, checked under colour-blindness simulation; no pie and no second y-axis.
+- **Built-in role `data-analyst`** (from OpenManus's data-analysis agent): looks at the columns and sample rows first, takes every number from `python_run`, says how blanks and odd values were handled, draws with `chart`, and writes formulas into a new Excel file rather than overwriting. A role of the same name in any directory replaces it.
 
 ## 1.19.0 — 2026-11-09
 

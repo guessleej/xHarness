@@ -34,6 +34,7 @@ from .telemetry import telemetry_plugin
 from .tools import tools_plugin
 from .tools.bash import bash_tool_plugin
 from .tools.python_run import python_run_plugin
+from .tools.chart import chart_tool_plugin
 from .tools.fs import fs_tools_plugin
 from .tools.search import search_tools_plugin
 from .tools.security import security_tool_plugin
@@ -74,6 +75,7 @@ def build_harness(
     harness.use("tool-search", search_tools_plugin)
     harness.use("tool-bash", bash_tool_plugin)
     harness.use("tool-python", python_run_plugin(getattr(config, "python", None), getattr(config, "python_memory_mb", 2048)))
+    harness.use("tool-chart", chart_tool_plugin)
     harness.use("tool-powershell", powershell_plugin())
     if getattr(config, "terminal", True):
         harness.use("terminal", terminal_plugin())

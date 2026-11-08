@@ -450,7 +450,7 @@ def test_web_lists_agents_stops_them_with_the_conversation(tmp_path, monkeypatch
 
     app = WebApp(ResolvedConfig(provider={"base_url": "http://x/v1", "model": "fake"}, provider_name="fake"),
                  approval_mode="auto", harness_factory=factory)
-    assert [r["name"] for r in app.roles(None)] == ["analyst"]
+    assert [r["name"] for r in app.roles(None) if r["source"] != "內建"] == ["analyst"]
     conv = app.create()
     app.send(conv, "go")
     deadline = time.time() + 5
@@ -633,7 +633,7 @@ def test_the_home_page_offers_a_discussion_and_the_example_roles_parse():
     assert "代理討論" in INDEX_HTML and "setSelectionRange" in INDEX_HTML      # fills the box, does not send
     here = os.path.join(os.path.dirname(__file__), "..", "examples", "agents")
     roles = RoleStore({"dirs": [here]}, site_dir=here).discover(None)
-    assert {r.name for r in roles} == {"查資料員", "審查員", "正方", "反方"}
+    assert {r.name for r in roles if r.source != "內建"} == {"查資料員", "審查員", "正方", "反方"}
     assert all(r.description and r.prompt and r.tools for r in roles)
 
 
@@ -811,3 +811,15 @@ def test_the_closing_summary_keeps_a_reserve(tmp_path):
     end = log.of("discussion-end")[0]
     assert end["reason"] == "budget" and end["summary"] == "結論"
     assert end["turns"] == 9            # participants stop at 9,000 (10,000 less a tenth), 1,000 a turn
+
+
+def test_the_data_analyst_ships_built_in_and_a_local_role_can_replace_it(tmp_path):
+    from xharness.roles import RoleStore
+    catalog = RoleStore(site_dir=str(tmp_path / "site"))
+    analyst = catalog.get("data-analyst", cwd=str(tmp_path))
+    assert analyst.source == "內建" and "python_run" in analyst.tools and "chart" in analyst.tools
+    assert "never" in analyst.prompt.lower() and analyst.max_turns == 30
+    own = tmp_path / ".xharness" / "agents"
+    own.mkdir(parents=True)
+    (own / "data-analyst.md").write_text("---\nname: data-analyst\ndescription: 我們自己的\n---\n照我們的方式算", encoding="utf-8")
+    assert catalog.get("data-analyst", cwd=str(tmp_path)).description == "我們自己的"
