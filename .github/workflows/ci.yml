@@ -5,7 +5,8 @@ on:
   pull_request:
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # 同一儲存庫的 PR、push、排程走 .50 自建 runner；來自 fork 的 PR 一律留在 GitHub 代管機器，外人的程式不進公司內網
+    runs-on: ${{ fromJSON(github.event.pull_request.head.repo.fork && '"ubuntu-latest"' || '["self-hosted","xharness"]') }}
     strategy:
       matrix:
         python: ["3.11", "3.12", "3.13"]
@@ -14,5 +15,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      # 自建 runner 會重複使用 Python 工具快取：套件一律裝進這次新建的虛擬環境，用完隨暫存目錄清掉。
+      # venv 內附的 pip 是 Python 出廠的舊版（pip-audit 會抓到它的弱點），建好先升級
+      - run: |
+          python -m venv "$RUNNER_TEMP/venv" && echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install -q --disable-pip-version-check --upgrade pip
       - run: python -m pip install -e ".[dev]"
       - run: python -m pytest -q

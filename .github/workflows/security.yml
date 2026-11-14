@@ -8,27 +8,40 @@ on:
 jobs:
   sast:
     name: SAST (bandit)
-    runs-on: ubuntu-latest
+    # 同一儲存庫的 PR、push、排程走 .50 自建 runner；來自 fork 的 PR 一律留在 GitHub 代管機器，外人的程式不進公司內網
+    runs-on: ${{ fromJSON(github.event.pull_request.head.repo.fork && '"ubuntu-latest"' || '["self-hosted","xharness"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # 自建 runner 會重複使用 Python 工具快取：套件一律裝進這次新建的虛擬環境，用完隨暫存目錄清掉。
+      # venv 內附的 pip 是 Python 出廠的舊版（pip-audit 會抓到它的弱點），建好先升級
+      - run: |
+          python -m venv "$RUNNER_TEMP/venv" && echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install -q --disable-pip-version-check --upgrade pip
       - run: python -m pip install "bandit[toml]"
       - run: bandit -r xharness scripts
   dependency-audit:
     name: Dependency audit (pip-audit)
-    runs-on: ubuntu-latest
+    # 同一儲存庫的 PR、push、排程走 .50 自建 runner；來自 fork 的 PR 一律留在 GitHub 代管機器，外人的程式不進公司內網
+    runs-on: ${{ fromJSON(github.event.pull_request.head.repo.fork && '"ubuntu-latest"' || '["self-hosted","xharness"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # 自建 runner 會重複使用 Python 工具快取：套件一律裝進這次新建的虛擬環境，用完隨暫存目錄清掉。
+      # venv 內附的 pip 是 Python 出廠的舊版（pip-audit 會抓到它的弱點），建好先升級
+      - run: |
+          python -m venv "$RUNNER_TEMP/venv" && echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install -q --disable-pip-version-check --upgrade pip
       - run: python -m pip install -e ".[dev]" pip-audit
       - run: pip-audit --skip-editable
   secret-scan:
     name: Secret scan (gitleaks, full history)
-    runs-on: ubuntu-latest
+    # 同一儲存庫的 PR、push、排程走 .50 自建 runner；來自 fork 的 PR 一律留在 GitHub 代管機器，外人的程式不進公司內網
+    runs-on: ${{ fromJSON(github.event.pull_request.head.repo.fork && '"ubuntu-latest"' || '["self-hosted","xharness"]') }}
     steps:
       - uses: actions/checkout@v4
         with:
