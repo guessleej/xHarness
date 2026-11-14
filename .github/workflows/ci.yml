@@ -15,7 +15,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      # 自建 runner 會重複使用 Python 工具快取：套件一律裝進這次新建的虛擬環境，用完隨暫存目錄清掉
-      - run: python -m venv "$RUNNER_TEMP/venv" && echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      # 自建 runner 會重複使用 Python 工具快取：套件一律裝進這次新建的虛擬環境，用完隨暫存目錄清掉。
+      # venv 內附的 pip 是 Python 出廠的舊版（pip-audit 會抓到它的弱點），建好先升級
+      - run: |
+          python -m venv "$RUNNER_TEMP/venv" && echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install -q --disable-pip-version-check --upgrade pip
       - run: python -m pip install -e ".[dev]"
       - run: python -m pytest -q
