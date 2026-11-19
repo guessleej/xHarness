@@ -389,3 +389,42 @@ def test_large_message_bodies_need_a_credential_first(server_factory):
     bad = {"text": "x", "images": [{"type": "image/svg+xml", "data": png}]}
     status, payload = client.request("POST", f"/api/conversations/{conv['id']}/messages", bad)
     assert status in (400, 409) and ("unsupported" in json.dumps(payload) or "busy" in json.dumps(payload))
+
+
+def test_web_search_endpoint_returns_structured_results(server_factory, monkeypatch):
+    from xharness import web as web_module
+
+    seen = {}
+
+    def fake_search(self, query, limit):
+        seen.update(base=self.base_url, query=query, limit=limit)
+        return [{"title": "國立臺灣藝術大學", "url": "https://www.ntua.edu.tw/", "snippet": "校首頁"}]
+
+    monkeypatch.setattr(web_module.Browser, "search", fake_search)
+    client, app = server_factory([], token="s3cret")
+    status, payload = client.request("POST", "/api/tools/web_search", body={"query": "台藝大"})
+    assert status == 404  # no [tools] browser on this node
+    app.config = ResolvedConfig(provider=CONFIG.provider, provider_name="fake", browser="http://127.0.0.1:9377")
+    status, _ = client.request("POST", "/api/tools/web_search", body={"query": "台藝大"}, bearer=False)
+    assert status == 401
+    status, _ = client.request("POST", "/api/tools/web_search", body={"query": "  "})
+    assert status == 400
+    status, _ = client.request("POST", "/api/tools/web_search", body={"query": "x" * 301})
+    assert status == 400
+    status, payload = client.request("POST", "/api/tools/web_search", body={"query": " 台藝大  校友會 ", "max_results": 99})
+    assert status == 200
+    assert payload["engine"] == "DuckDuckGo" and payload["results"][0]["url"] == "https://www.ntua.edu.tw/"
+    assert seen == {"base": "http://127.0.0.1:9377", "query": "台藝大 校友會", "limit": 10}
+
+
+def test_web_search_endpoint_reports_a_browser_failure(server_factory, monkeypatch):
+    from xharness import web as web_module
+
+    def broken(self, query, limit):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(web_module.Browser, "search", broken)
+    client, app = server_factory([])
+    app.config = ResolvedConfig(provider=CONFIG.provider, provider_name="fake", browser="http://127.0.0.1:9377")
+    status, payload = client.request("POST", "/api/tools/web_search", body={"query": "台藝大"})
+    assert status == 502 and "connection refused" in payload["error"]

@@ -2,6 +2,10 @@
 
 中文 | English below
 
+## 未發布
+
+- **`POST /api/tools/web_search`**：讓別的平台直接用節點的瀏覽器搜尋，不必跑代理與模型。送 `{"query","max_results"}`，回 `{"query","engine","results":[{title,url,snippet}],"problems","seconds"}`。驗證與其他API相同（帳號權杖或節點權杖，只走Authorization標頭），要帶 `X-XHarness-Client`；帳號被 `deny_tools` 拿掉 `web_search` 時回403；節點沒設 `[tools] browser` 時回404；查詢最多300字，同時最多2個搜尋。第一個使用者是xStudio模型測試台的「網路搜尋」：模型由xStudio照常經閘道呼叫，xHarness只負責搜尋。
+
 ## 1.19.0 — 2026-11-09
 
 常駐代理：節點上常駐一個代理，自己聽 GitHub 存放庫與 Telegram 群組的事件，接下的工作交給各自隔離的工作代理去做，結果回到原本的話題或 PR；人只在要決定、要驗收時被叫。設計照 DeepSeek〈Super-agent 設計探索〉與其公開原型 dsh-superagent（MIT）的領域模型與規則，以 Python 標準函式庫重寫，並保留 xHarness 的審批、沙箱與稽核。`[superagent] enabled = true` 開啟，預設關閉。
