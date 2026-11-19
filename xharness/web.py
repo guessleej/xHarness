@@ -21,6 +21,7 @@ import secrets
 import sys
 import threading
 import time
+import urllib.error
 import webbrowser
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -54,6 +55,12 @@ from .session import (SessionLog, clean_title, export_markdown, messages_from_ev
 from .telegram import TelegramBridge, load_token, telegram_settings
 from .channels import EVENTS as CHANNEL_EVENTS, TYPES as CHANNEL_TYPES, ChannelError, ChannelHub, crypto_available
 from .telemetry import BudgetExceeded
+from .tools.browser import MAX_RESULTS as SEARCH_MAX_RESULTS, Browser
+
+#: `POST /api/tools/web_search`: how long a query may be, and how many searches run at once
+#: (each one opens tabs in the one shared browser).
+MAX_SEARCH_QUERY = 300
+SEARCH_SLOTS = threading.BoundedSemaphore(2)
 
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 #: Callers that are not a signed-in person: the single-operator install with
@@ -855,6 +862,39 @@ class WebApp:
                 "notify": bool(runner and runner.notify_argv),
                 "language_servers": [{"name": n, "extensions": e} for n, _c, e in (lsp.servers if lsp else [])]}
 
+    def web_search(self, user: Any, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """The browser search, for another platform that runs its own model (xStudio's
+        playground): the same engines and redirect unwrapping as the `web_search` tool,
+        returned as structured results instead of text for a model. No agent and no
+        model run here; the caller authenticates like any other API call."""
+        if not getattr(self.config, "browser", None):
+            return 404, {"error": "web_search is not configured on this node ([tools] browser)"}
+        if "web_search" in set(getattr(user, "denied_tools", ()) or ()):
+            return 403, {"error": "web_search is denied for this account"}
+        query = " ".join(str(body.get("query") or "").split())
+        if not query:
+            return 400, {"error": "query is required"}
+        if len(query) > MAX_SEARCH_QUERY:
+            return 400, {"error": f"query is longer than {MAX_SEARCH_QUERY} characters"}
+        try:
+            limit = max(1, min(int(body.get("max_results") or 5), SEARCH_MAX_RESULTS))
+        except (TypeError, ValueError):
+            return 400, {"error": "max_results must be an integer"}
+        if not SEARCH_SLOTS.acquire(timeout=60):
+            return 503, {"error": "the browser is busy, try again"}
+        started = time.monotonic()
+        try:
+            found = Browser(self.config.browser).search(query, limit)
+        except (urllib.error.URLError, OSError, RuntimeError, TimeoutError) as error:
+            return 502, {"error": f"search failed: {error}"}
+        finally:
+            SEARCH_SLOTS.release()
+        # ponytail: Browser.search returns a list here and (engine, items, problems) once the
+        # Google/Bing fallback lands; accept both so that merge needs no change here.
+        engine, items, problems = found if isinstance(found, tuple) else ("DuckDuckGo", found, [])
+        return 200, {"query": query, "engine": engine, "results": items, "problems": problems,
+                     "seconds": round(time.monotonic() - started, 2)}
+
     def memory_index(self) -> list[dict[str, Any]]:
         """Read-only view of what the agent remembers, straight from disk."""
         directory = str(self.config.memory.get("dir") or default_memory_dir())
@@ -1362,6 +1402,10 @@ def make_handler(app: WebApp, token: str | None) -> type[BaseHTTPRequestHandler]
                     return
                 ok = app.delete_file(self.principal, name)
                 self._json(200 if ok else 404, {"ok": ok})
+                return
+            if parts[1:] == ["tools", "web_search"]:
+                status, payload = app.web_search(self.principal, body)
+                self._json(status, payload)
                 return
             if parts[1:] == ["notify"]:
                 text = str(body.get("text") or "").strip()
