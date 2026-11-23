@@ -208,12 +208,26 @@ def run_assist(assist: dict[str, Any], entry: ModelEntry, record: dict[str, Any]
     except (TypeError, ValueError):
         confidence = 0.0
     quotes = [q for q in parsed.get("evidence", []) if isinstance(q, dict)][:5] if isinstance(parsed.get("evidence"), list) else []
+    # Grounding: a model's own confidence is a weak signal. For text we can check that every value is really in the source;
+    # a value that is not there caps the confidence below any sensible floor. Images cannot be checked by a program.
+    texts = [re.sub(r"[\s,，]", "", d["text"]) for d in usable if d["kind"] == "text"]
+    def found(value: Any) -> bool:
+        needle = re.sub(r"[\s,，]", "", str(value))
+        if re.fullmatch(r"-?\d+(\.\d+)?", needle):  # a number must appear as a whole number, not inside "2026"
+            return any(re.search(rf"(?<![\d.]){re.escape(needle)}(?![\d])", t) for t in texts)
+        return any(needle in t for t in texts)
+
+    ungrounded = [k for k, v in fields.items() if texts and not isinstance(v, (dict, list)) and not found(v)]
+    if ungrounded:
+        confidence = min(confidence, 0.5)
+    grounding = ("沒有取到欄位" if not fields else ("原文查無：" + "、".join(ungrounded)) if ungrounded
+                 else ("已核對原文" if texts else "圖片無法以程式核對原文"))
     evidence = {
         "doc": "、".join(d["name"] for d in usable), "field": "、".join(fields) or "（無）",
         "value": "；".join(f"{k}={v}" for k, v in fields.items())[:300], "page": (quotes[0].get("page") if quotes else None),
         "assist": str(assist.get("id")), "model": entry.model, "confidence": round(confidence, 3),
         "prompt_sha256": hashlib.sha256((SYSTEM + str(assist.get("prompt", ""))).encode()).hexdigest()[:16],
         "input_sha256": hashlib.sha256("".join(d["sha256"] for d in usable).encode()).hexdigest()[:16],
-        "quote": str(quotes[0].get("quote", ""))[:200] if quotes else "",
+        "quote": str(quotes[0].get("quote", ""))[:200] if quotes else "", "grounding": grounding,
     }
     return fields, evidence

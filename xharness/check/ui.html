@@ -320,7 +320,7 @@ async function loadCases(){const q=new URLSearchParams({status:$("cStatus").valu
   $("cRows").innerHTML=d.cases.map(c=>`<tr class="click" data-id="${esc(c.case_id)}"><td class="nw"><span class="pill ${esc(c.status)}">${esc(c.status_label)}</span></td><td class="reason">${esc(c.reason)}</td><td style="min-width:7em">${esc(agentName(c.agent))}</td><td class="nw">${esc(c.business_key)}</td><td class="nw">${esc(c.assignee)}</td><td class="nw">${t(c.updated)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">沒有案件</td></tr>';
   $("cRows").querySelectorAll("tr.click").forEach(r=>r.onclick=()=>caseDrawer(r.dataset.id))}
 function findingHtml(f){const lv={notice:"提示",manual:"轉人工",sample:"抽審"}[f.level]||f.level;
-  const ev=(f.evidence||[]).map(e=>e.assist?`子Agent ${esc(e.assist)}（${esc(e.model)}，信心 ${esc(e.confidence)}）從 ${esc(e.doc)}${e.page?" 第"+esc(e.page)+"頁":""} 取得 ${esc(e.value)}${e.quote?"，原文「"+esc(e.quote)+"」":""}`
+  const ev=(f.evidence||[]).map(e=>e.assist?`子Agent ${esc(e.assist)}（${esc(e.model)}，信心 ${esc(e.confidence)}）從 ${esc(e.doc)}${e.page?" 第"+esc(e.page)+"頁":""} 取得 ${esc(e.value)}${e.quote?"，原文「"+esc(e.quote)+"」":""}${e.grounding?"（"+esc(e.grounding)+"）":""}`
     :`${esc(e.doc||"")}${e.page?" 第"+esc(e.page)+"頁":""} ${esc(e.field||"")}：${esc(e.value||"")}`).join("；");
   return `<div class="finding"><div class="t"><span class="pill ${esc(f.level)}">${lv}</span> ${esc(f.rule_id)} ${esc(f.rule_title||f.title)}</div><div>${esc(f.message)}</div><div class="b">依據：${esc(f.basis)}${f.fields&&f.fields.length?"｜比對欄位："+esc(f.fields.join("、")):""}${ev?"｜證據："+ev:""}${f.run_id?"｜執行識別："+esc(f.run_id):""}</div></div>`}
 async function caseDrawer(id){openCase=id;const c=await api("/cases/"+encodeURIComponent(id));

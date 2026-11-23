@@ -679,3 +679,21 @@ def test_assist_unknown_model_or_down_model_goes_to_manual():
     result = run_doc(eng)["results"][0]
     assert result["level"] == "manual" and "模型連線失敗（TimeoutError）" in result["message"]
     eng.shutdown()
+
+
+def test_run_assist_caps_confidence_when_value_is_not_in_the_text():
+    entry = assist_mod.ModelEntry("granite", "http://h/v1", "granite-4.2-30b")
+    docs = [assist_mod.read_document({"name": "r.txt", "text": "計程車乘車證明 車資：新臺幣 1,385 元"})]
+    ok = assist_mod.run_assist({"id": "a", "outputs": ["fare"]}, entry, {}, docs, post=fake_post('{"fields":{"fare":1385},"confidence":0.97}'))
+    assert ok[1]["confidence"] == 0.97 and ok[1]["grounding"] == "已核對原文"
+    made_up = assist_mod.run_assist({"id": "a", "outputs": ["fare"]}, entry, {}, docs, post=fake_post('{"fields":{"fare":1500},"confidence":0.99}'))
+    assert made_up[1]["confidence"] == 0.5 and made_up[1]["grounding"] == "原文查無：fare"
+
+
+def test_grounding_needs_the_whole_number():
+    entry = assist_mod.ModelEntry("granite", "http://h/v1", "granite-4.2-30b")
+    docs = [assist_mod.read_document({"name": "r.txt", "text": "日期 2026-12-05 車資 385 元"})]
+    fields, note = assist_mod.run_assist({"id": "a", "outputs": ["fare"]}, entry, {}, docs, post=fake_post('{"fields":{"fare":0},"confidence":1}'))
+    assert note["confidence"] == 0.5  # "0" is inside 2026 but is not a number in the text
+    fields, note = assist_mod.run_assist({"id": "a", "outputs": ["fare"]}, entry, {}, docs, post=fake_post('{"fields":{"fare":"38"},"confidence":1}'))
+    assert note["confidence"] == 0.5
