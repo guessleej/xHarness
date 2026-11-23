@@ -87,11 +87,12 @@ class AgentSpec:
     tables: dict[str, TableSpec] = field(default_factory=dict)
     cases: list[Case] = field(default_factory=list)
     test_tables: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    assists: list[dict[str, Any]] = field(default_factory=list)
     digest: str = ""
 
     @property
     def is_async(self) -> bool:
-        return bool(self.needs)
+        return bool(self.needs or self.assists)
 
     def public(self) -> dict[str, Any]:
         return {
@@ -99,6 +100,7 @@ class AgentSpec:
             "triggers": self.triggers, "needs": self.needs, "business_key": self.business_key,
             "required": self.required, "risk": self.risk, "sample_rate": self.sample_rate,
             "depends": self.depends, "digest": self.digest[:12],
+            "assists": [{k: a.get(k) for k in ("id", "kind", "model", "outputs", "min_confidence")} for a in self.assists],
             "rules": [{"id": r.id, "title": r.title, "basis": r.basis} for r in self.rules],
             "tables": {name: {"title": t.title, "key": t.key,
                               "columns": [{"name": c.name, "type": c.type, "title": c.title or c.name} for c in t.columns]}
@@ -207,6 +209,7 @@ def load_agent(path: str) -> AgentSpec:
         risk=risk, sample_rate=min(sample_rate, 1.0), depends=[str(d) for d in meta.get("depends", [])],
         retry_attempts=max(1, int(retry.get("attempts", 3))), retry_backoff=float(retry.get("backoff_seconds", 2.0)),
         rules=rules, tables=_tables(os.path.join(path, "tables.schema.toml")), digest=digest.hexdigest(),
+        assists=[dict(a) for a in meta.get("assists", []) if isinstance(a, dict)],
     )
     cases_dir = os.path.join(path, "cases")
     if os.path.isdir(cases_dir):

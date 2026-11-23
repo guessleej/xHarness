@@ -152,6 +152,10 @@ def validate(definition: Any) -> dict[str, Any]:
         outputs = assist.get("outputs", [])
         if not isinstance(outputs, list) or not all(NAME.match(str(o)) for o in outputs):
             raise SpecError(f"輔助子Agent「{assist['id']}」的產出欄位只能用英數與底線")
+        if not str(assist.get("model", "")).strip():
+            raise SpecError(f"輔助子Agent「{assist['id']}」要選模型")
+        if not outputs:
+            raise SpecError(f"輔助子Agent「{assist['id']}」至少要有一個產出欄位")
         confidence = float(assist.get("min_confidence", 0.8))
         if not 0 <= confidence <= 1:
             raise SpecError("信心門檻要在 0～1 之間")
@@ -288,6 +292,7 @@ def to_spec(definition: dict[str, Any], version: str) -> AgentSpec:
         cases=[Case(str(c.get("name", f"案例{i + 1}")), dict(c["record"]), [str(r) for r in c.get("expect", [])])
                for i, c in enumerate(d.get("cases", []))],
         test_tables={k: list(v) for k, v in (d.get("test_tables") or {}).items()}, digest=digest(d),
+        assists=[dict(a) for a in d.get("assists", [])],
     )
 
 

@@ -185,7 +185,8 @@ main{padding:16px}.track{grid-template-columns:1fr 1fr}
       <p class="muted">送一筆樣本，看提示內容與依據是否正確。這裡送的檢核會記成「manual」觸發，和來源系統送的分開統計。</p>
       <div class="row"><label>檢核 Agent <select id="tAgent"></select></label>
         <label>樣本 <select id="tCase"></select></label>
-        <label class="muted"><input type="checkbox" id="tDocs"> 附一份附件（走非同步辨識）</label></div>
+        <label class="muted"><input type="checkbox" id="tDocs"> 附一份附件（走非同步辨識）</label>
+        <input type="file" id="tFile" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.webp,.txt" hidden></div>
       <textarea id="tBody" rows="12" style="margin-top:12px" spellcheck="false"></textarea>
       <div class="row" style="margin-top:12px"><button class="btn primary" id="tSend">送出檢核</button><span id="tErr" class="err"></span></div>
     </div>
@@ -319,7 +320,8 @@ async function loadCases(){const q=new URLSearchParams({status:$("cStatus").valu
   $("cRows").innerHTML=d.cases.map(c=>`<tr class="click" data-id="${esc(c.case_id)}"><td class="nw"><span class="pill ${esc(c.status)}">${esc(c.status_label)}</span></td><td class="reason">${esc(c.reason)}</td><td style="min-width:7em">${esc(agentName(c.agent))}</td><td class="nw">${esc(c.business_key)}</td><td class="nw">${esc(c.assignee)}</td><td class="nw">${t(c.updated)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">沒有案件</td></tr>';
   $("cRows").querySelectorAll("tr.click").forEach(r=>r.onclick=()=>caseDrawer(r.dataset.id))}
 function findingHtml(f){const lv={notice:"提示",manual:"轉人工",sample:"抽審"}[f.level]||f.level;
-  const ev=(f.evidence||[]).map(e=>`${esc(e.doc||"")} 第${esc(e.page||"?")}頁 ${esc(e.field||"")}=${esc(e.value||"")}`).join("；");
+  const ev=(f.evidence||[]).map(e=>e.assist?`子Agent ${esc(e.assist)}（${esc(e.model)}，信心 ${esc(e.confidence)}）從 ${esc(e.doc)}${e.page?" 第"+esc(e.page)+"頁":""} 取得 ${esc(e.value)}${e.quote?"，原文「"+esc(e.quote)+"」":""}`
+    :`${esc(e.doc||"")}${e.page?" 第"+esc(e.page)+"頁":""} ${esc(e.field||"")}：${esc(e.value||"")}`).join("；");
   return `<div class="finding"><div class="t"><span class="pill ${esc(f.level)}">${lv}</span> ${esc(f.rule_id)} ${esc(f.rule_title||f.title)}</div><div>${esc(f.message)}</div><div class="b">依據：${esc(f.basis)}${f.fields&&f.fields.length?"｜比對欄位："+esc(f.fields.join("、")):""}${ev?"｜證據："+ev:""}${f.run_id?"｜執行識別："+esc(f.run_id):""}</div></div>`}
 async function caseDrawer(id){openCase=id;const c=await api("/cases/"+encodeURIComponent(id));
   const acts=has("reviewer")?`<h2>處理</h2><div class="row">${c.status==="open"?'<button class="btn primary" data-a="take">接手</button>':""}${c.status!=="resolved"?'<button class="btn primary" data-a="resolve">結案</button>':'<button class="btn" data-a="reopen">重新開啟</button>'}</div>
@@ -374,11 +376,11 @@ async function loadAgents(){agents=(await api("/agents")).agents;const risk={low
 
 // --- designer (設計檢核Agent) -------------------------------------------------
 const STEPS=["基本資料","資料欄位","規則","判定值表","輔助子Agent","驗證與發布"];
-let D=null,dStep=0,dNew=false,dMeta=null,OPS={},AK={};
+let D=null,dStep=0,dNew=false,dMeta=null,OPS={},AK={},MODELS=[];
 const blankDef=()=>({id:"",name:"",description:"",risk:"low",triggers:["sync","batch"],needs:[],business_key:"",person_field:"",date_field:"",
   required:[],fields:[],sample:"",tables:{},test_tables:{},rules:[],assists:[],cases:[]});
 $("aNew").onclick=()=>openDesigner("");
-async function openDesigner(id){const meta=await api("/designs");OPS=meta.ops;AK=meta.assist_kinds;dNew=!id;dStep=0;
+async function openDesigner(id){const meta=await api("/designs");OPS=meta.ops;AK=meta.assist_kinds;MODELS=meta.models||[];dNew=!id;dStep=0;
   if(id){dMeta=await api("/designs/"+encodeURIComponent(id));D=Object.assign(blankDef(),dMeta.draft?dMeta.draft.definition:(dMeta.versions[0]||{}).definition||{})}
   else{dMeta=null;D=blankDef()}
   $("dSaved").textContent=dMeta&&dMeta.draft?`草稿最後儲存 ${t(dMeta.draft.updated)}`:"";show("design");drawDesigner()}
@@ -504,10 +506,11 @@ function stepTables(){const T=D.tables;$("dPanel").innerHTML=`<h2>4. 判定值�
   P.querySelectorAll("[data-tt]").forEach(a=>a.onchange=()=>{try{D.test_tables[a.dataset.tt]=JSON.parse(a.value||"[]");a.style.outline=""}catch(e){a.style.outline="2px solid var(--red)"}})}
 
 function stepAssists(){$("dPanel").innerHTML=`<h2>5. 輔助子Agent</h2><p class="hint">子Agent幫忙做一件具體的事（從收據擷取金額、比對條文、摘要公文），產出的是「欄位」，再交給規則判定；它不下結論，信心值低於門檻就轉人工。模型只能選非中國來源。</p>
-  <p class="hint"><b>目前版本只儲存設定</b>；接上模型、在附件流程裡實際執行，排在下一批（與排程、介接一起）。</p>
+  <p class="hint">來源系統送件時附上附件，就會依序跑這些子Agent；取出的欄位併進資料後再交給規則。圖片要選「看得懂圖片」的模型；PDF 先取文字層，掃描件會轉人工。</p>
+  ${MODELS.length?"":'<p class="err">模型清單是空的：請平臺管理者在設定檔 [check.models] 加入模型（只能用非中國來源），重新啟動後才能選。</p>'}
   ${D.assists.map((a,i)=>`<div class="rule"><div class="fgrid"><label>代號<input data-k="assists.${i}.id" value="${esc(a.id)}"></label>
    <label>用途<select data-k="assists.${i}.kind">${opt(Object.entries(AK),a.kind)}</select></label>
-   <label>模型<input data-k="assists.${i}.model" value="${esc(a.model||"")}" placeholder="例：gemma-4-e4b-xreadable-ocr"></label>
+   <label>模型<small>只列平臺核可的非中國來源模型</small><select data-k="assists.${i}.model"><option value="">請選</option>${opt(MODELS.map(m=>[m.name,`${m.name}（${m.model}）${m.vision?"・看得懂圖片":"・只讀文字"}`]),a.model)}</select></label>
    <label>產出欄位<small>逗號分隔，要對到「2. 資料欄位」</small><input data-outs="${i}" value="${esc((a.outputs||[]).join(","))}"></label>
    <label>信心門檻<small>低於就轉人工</small><input type="number" step="0.05" min="0" max="1" data-k="assists.${i}.min_confidence" data-num="1" value="${a.min_confidence??0.85}"></label></div>
    <label style="display:block;margin-top:10px;font-weight:600">提示詞<textarea data-k="assists.${i}.prompt" rows="3" style="font-family:inherit;font-size:16px">${esc(a.prompt||"")}</textarea></label>
@@ -568,14 +571,17 @@ function runDrawer(id){const a=agents.find(x=>x.id===id);$("dBody").innerHTML=`<
 // --- try
 let samples=[];
 async function prepTry(){const id=$("tAgent").value;if(!id)return;const agent=agents.find(a=>a.id===id);
-  $("tDocs").parentElement.hidden=!(agent&&agent.needs.length);
+  $("tDocs").parentElement.hidden=!(agent&&(agent.needs.length||(agent.assists||[]).length));
   samples=(await api(`/agents/${encodeURIComponent(id)}/samples`)).samples;
   $("tCase").innerHTML=samples.map((c,i)=>`<option value="${i}">${esc(c.name)}</option>`).join("");fillSample()}
 function fillSample(){const id=$("tAgent").value;const agent=agents.find(a=>a.id===id);const rec=(samples[+$("tCase").value||0]||{}).record;
   $("tBody").value=JSON.stringify({record:rec||{[agent.business_key]:"TEST-001"}},null,2)}
-$("tAgent").onchange=prepTry;$("tCase").onchange=fillSample;
+$("tAgent").onchange=prepTry;$("tCase").onchange=fillSample;$("tDocs").onchange=()=>{$("tFile").hidden=!$("tDocs").checked};
 $("tSend").onclick=async()=>{$("tErr").textContent="";let body;try{body=JSON.parse($("tBody").value)}catch(e){$("tErr").textContent="內容不是合法的 JSON";return}
-  if($("tDocs").checked&&!$("tDocs").parentElement.hidden)body.documents=[{name:"附件.pdf",type:"application/pdf"}];
+  if($("tDocs").checked&&!$("tDocs").parentElement.hidden){const f=$("tFile").files[0];
+    if(!f){$("tErr").textContent="請選一個附件檔";return}if(f.size>8e6){$("tErr").textContent="附件超過 8MB";return}
+    const b64=await new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]);r.onerror=bad;r.readAsDataURL(f)});
+    body.documents=[{name:f.name,data:b64}]}
   $("tSend").disabled=true;try{const r=await api(`/agents/${encodeURIComponent($("tAgent").value)}/check`,{method:"POST",body:JSON.stringify(body)});
     if(r.task_id){$("tOut").hidden=false;$("tOut").innerHTML=`<h2>已排入非同步辨識</h2><p>任務 <b id="tTask">${esc(r.task_id)}</b>　狀態 <span id="tState">${esc(r.state)}</span></p><div id="tRes"></div>`;pollTask(r.task_id,0)}
     else showResult(r)}catch(e){$("tErr").textContent=e.message}finally{$("tSend").disabled=false}};

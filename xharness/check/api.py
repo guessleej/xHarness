@@ -43,12 +43,13 @@ from urllib.parse import parse_qs, urlparse
 from ..identity import UserStore
 from ..session import harness_home
 from . import declarative
+from .assist import load_models
 from .engine import CheckEngine, evaluate_spec
 from .spec import AgentSpec, SpecError, discover
 from .store import CASE_STATES, CheckStore, now_iso
 
 DEFAULT_PORT = 3095
-MAX_BODY = 2_000_000
+MAX_BODY = 12_000_000  # one 8 MB attachment in base64
 MAX_RECORDS = 500
 ROLES = {"reviewer", "approver", "operator", "auditor", "designer"}
 MAX_UPLOAD_ROWS = 5000
@@ -142,7 +143,10 @@ class CheckService:
         self.agents = agents if agents is not None else discover([str(d) for d in settings.get("agents_dirs", [])])
         self.code_agents = set(self.agents)  # rule packs on disk; the web designer cannot overwrite them
         secret = load_secret(str(settings.get("secret_file") or os.path.join(home, "secret")))
-        self.engine = engine or CheckEngine(self.store, self.agents, secret=secret,
+        self.models, problems = load_models(settings)
+        for problem in problems:
+            print(f"[xharness check] {problem}", file=sys.stderr)
+        self.engine = engine or CheckEngine(self.store, self.agents, secret=secret, models=self.models,
                                             max_parallel=int(settings.get("max_parallel", 2)))
         self.clients = Clients(str(settings.get("clients_file") or os.path.join(home, "clients.json")))
         self.users = UserStore(auth)
@@ -532,7 +536,8 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
                                  "published_at": web[agent_id]["published_at"] if agent_id in web else None,
                                  "draft_updated": drafts[agent_id]["updated"] if agent_id in drafts else None,
                                  "enabled": service.enabled(agent_id), "rules": len(spec.rules) if spec else 0})
-                return self._json(200, {"designs": rows, "ops": declarative.OPS, "assist_kinds": declarative.ASSIST_KINDS})
+                return self._json(200, {"designs": rows, "ops": declarative.OPS, "assist_kinds": declarative.ASSIST_KINDS,
+                                        "models": [m.public() for m in service.models.values()]})
             if parts == ["designs", "sample-fields"] and method == "POST":
                 sample = self._body().get("sample")
                 if not isinstance(sample, dict):
@@ -573,7 +578,11 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
                     return self._json(200, {"ok": False, "problem": str(error)})
                 report = evaluate_spec(spec)
                 ready = bool(spec.cases) and all(report[k]["value"] == 1.0 for k in ("rule_coverage", "consistency", "traceability"))
-                return self._json(200, {"ok": ready, "problem": "" if ready else "三項驗證指標都要 100%，而且至少要有一個驗證案例", "report": report})
+                unknown = [str(x.get("model")) for x in spec.assists if str(x.get("model")) not in service.models]
+                problem = "" if ready else "三項驗證指標都要 100%，而且至少要有一個驗證案例"
+                if unknown:
+                    ready, problem = False, f"子Agent用的模型不在模型清單：{'、'.join(unknown)}"
+                return self._json(200, {"ok": ready, "problem": problem, "report": report})
             if len(parts) == 3 and parts[2] == "publish" and method == "POST":
                 body = self._body()
                 draft = store.draft(agent_id)
@@ -583,6 +592,9 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
                 report = evaluate_spec(spec)
                 if not spec.cases or not all(report[k]["value"] == 1.0 for k in ("rule_coverage", "consistency", "traceability")):
                     raise ApiError(409, "驗證指標沒有全部 100%，不能發布")
+                unknown = [str(x.get("model")) for x in spec.assists if str(x.get("model")) not in service.models]
+                if unknown:
+                    raise ApiError(409, f"子Agent用的模型不在模型清單：{'、'.join(unknown)}")
                 metrics = {k: report[k] for k in ("rule_coverage", "consistency", "traceability")}
                 version = store.publish_agent(agent_id, draft["definition"], caller.name, metrics, str(body.get("note", "")))
                 service.reload_web_agents()

@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from . import rulekit
+from .assist import AssistError, ModelEntry, read_document, run_assist
 from .spec import AgentSpec
 from .store import TPE, CheckStore, canonical, now_iso, sha256
 
@@ -91,12 +92,16 @@ def evaluate(agent: AgentSpec, record: dict[str, Any], tables: rulekit.Tables) -
 
 class CheckEngine:
     def __init__(self, store: CheckStore, agents: dict[str, AgentSpec], *, secret: bytes,
-                 extractor: Extractor | None = None, max_parallel: int = 2):
+                 extractor: Extractor | None = None, max_parallel: int = 2,
+                 models: dict[str, ModelEntry] | None = None, post: Any = None):
         self.store = store
         self.agents = agents
         self.secret = secret
         self.extractor = extractor
         self.breaker = Breaker()
+        self.models = models or {}
+        self.model_breakers: dict[str, Breaker] = {}
+        self._post = post  # tests replace the HTTP call
         self.max_parallel = max_parallel
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._pool_lock = threading.Lock()
@@ -218,6 +223,8 @@ class CheckEngine:
         """(record with extracted fields, evidence, findings that replace the rules or None)."""
         if not documents:
             return record, [], None
+        if agent.assists:
+            return self._assists(agent, record, documents)
         if self.extractor is None:
             return record, [], [_manual("DOC", "附件無法判讀", "附件辨識服務未設定，轉人工")]
         if not self.breaker.allow():
@@ -234,6 +241,58 @@ class CheckEngine:
                 if attempt + 1 < agent.retry_attempts and self.breaker.allow():
                     time.sleep(min(agent.retry_backoff * (2 ** attempt), 60.0))
         return record, [], [_manual("DOC", "附件無法判讀", f"附件辨識失敗（{type(last).__name__}），轉人工")]
+
+    def _assists(self, agent: AgentSpec, record: dict[str, Any], documents: list[dict[str, Any]]
+                 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]] | None]:
+        """Run each assist sub-agent over the documents; its fields go into the record, rules decide."""
+        docs = [read_document(d) for d in documents]
+        refused = [d for d in docs if d["kind"] == "refused"]
+        evidence: list[dict[str, Any]] = [{"doc": d["name"], "field": "附件", "value": d["reason"]} for d in refused]
+        if len(refused) == len(docs):
+            return record, evidence, [_manual("DOC", "附件無法判讀", "；".join(d["reason"] for d in refused) + "，轉人工")]
+        merged, manual = dict(record), []
+        for assist in agent.assists:
+            entry = self.models.get(str(assist.get("model", "")))
+            name = str(assist.get("id", "assist"))
+            if entry is None:
+                manual.append(_manual(f"AS-{name}"[:16], "子Agent無法執行", f"子Agent「{name}」指定的模型「{assist.get('model')}」不在模型清單，轉人工"))
+                continue
+            breaker = self.model_breakers.setdefault(entry.name, Breaker())
+            if not breaker.allow():
+                manual.append(_manual(f"AS-{name}"[:16], "子Agent暫停", f"模型「{entry.name}」連續失敗，暫停中，轉人工"))
+                continue
+            last: Exception | None = None
+            for attempt in range(agent.retry_attempts):
+                try:
+                    fields, note = run_assist(assist, entry, merged, docs, post=self._post)
+                    breaker.ok()
+                    break
+                except AssistError as error:  # the model answered but not usably: retrying the same input rarely helps
+                    last, fields, note = error, None, None
+                    break
+                except Exception as error:  # noqa: BLE001 -- network or server failure: retry, then degrade to manual review
+                    last, fields, note = error, None, None
+                    breaker.fail()
+                    if attempt + 1 < agent.retry_attempts and breaker.allow():
+                        time.sleep(min(agent.retry_backoff * (2 ** attempt), 60.0))
+            self.store.audit("assist", "assist.call", target=agent.id, detail={
+                "assist": name, "model": entry.model, "ok": fields is not None, "error": type(last).__name__ if last else "",
+                **({k: note[k] for k in ("confidence", "prompt_sha256", "input_sha256")} if note else {})})
+            if fields is None:
+                why = str(last) if isinstance(last, AssistError) else f"模型連線失敗（{type(last).__name__}）"
+                manual.append(_manual(f"AS-{name}"[:16], "子Agent無法判讀", f"子Agent「{name}」：{why}，轉人工"))
+                continue
+            evidence.append(note)
+            floor = float(assist.get("min_confidence", 0.8))
+            if note["confidence"] < floor:
+                manual.append(_manual(f"AS-{name}"[:16], "子Agent信心不足",
+                                      f"子Agent「{name}」信心 {note['confidence']:.2f} 低於門檻 {floor:.2f}，轉人工", list(fields)))
+                continue
+            missing = [o for o in assist.get("outputs", []) if o not in fields]
+            if missing:
+                manual.append(_manual(f"AS-{name}"[:16], "子Agent欄位不全", f"子Agent「{name}」沒取到：{'、'.join(missing)}，轉人工", missing))
+            merged.update(fields)
+        return merged, evidence, (manual or None)
 
     def _work(self, agent: AgentSpec, task_id: str, agency: str, record: dict[str, Any],
               documents: list[dict[str, Any]], caller: str, received: str) -> None:
