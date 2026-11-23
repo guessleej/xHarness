@@ -1,0 +1,17 @@
+[fare_cap]
+title = "票價上限表"
+key = ["from", "to", "mode"]
+columns = [
+  { name = "from", title = "起站" },
+  { name = "to", title = "迄站" },
+  { name = "mode", title = "交通工具" },
+  { name = "cap", type = "number", title = "上限（元）" },
+]
+
+[class_allowed]
+title = "可報支車廂等級"
+key = ["mode", "class"]
+columns = [
+  { name = "mode", title = "交通工具" },
+  { name = "class", title = "車廂等級" },
+]

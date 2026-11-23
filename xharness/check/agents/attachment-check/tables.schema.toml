@@ -1,0 +1,8 @@
+[required_attachments]
+title = "各類核銷應附單據"
+key = ["claim_type", "kind"]
+columns = [
+  { name = "claim_type", title = "核銷類別" },
+  { name = "kind", title = "單據代碼" },
+  { name = "label", title = "單據名稱" },
+]

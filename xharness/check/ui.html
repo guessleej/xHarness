@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xHarness 檢核平臺</title>
+<style>
+:root{--red:#bf181f;--red-d:#9c1218;--ink:#16202a;--ink2:#44525e;--mist:#f4f7f9;--card:#fff;--tint:rgba(191,24,31,.1);
+--ok:#2e7d32;--warn:#b45309;--info:#0e7490;--shadow:0 12px 32px rgba(22,32,42,.11);--line:#e3e8ec;--field:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#eef2f5;--ink2:#b8c2ce;--mist:#0f1a22;--card:#16242f;
+--tint:rgba(224,72,79,.18);--shadow:0 12px 32px rgba(0,0,0,.35);--line:#263744;--field:#1b2b37;--ok:#66bb6a;--warn:#f59e0b;--info:#22d3ee}}
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0;background:var(--mist);color:var(--ink);font:16px/1.6 "Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+header{position:sticky;top:0;z-index:20;background:rgba(244,247,249,.82);backdrop-filter:blur(14px);transition:box-shadow .2s,background .2s}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) header{background:rgba(15,26,34,.82)}}
+header.scrolled{box-shadow:0 6px 20px rgba(22,32,42,.12)}
+.bar{max-width:1280px;margin:0 auto;display:flex;align-items:center;gap:20px;padding:12px 24px}
+.brand{font-weight:700;font-size:18px;white-space:nowrap}.brand b{color:var(--red)}
+nav{display:flex;gap:4px;flex:1;overflow-x:auto}
+nav button{border:0;background:none;padding:8px 14px;border-radius:10px;cursor:pointer;white-space:nowrap;color:var(--ink2);font-weight:600}
+nav button.on{background:var(--tint);color:var(--red)}
+.who{font-size:14px;color:var(--ink2);white-space:nowrap}
+main{max-width:1280px;margin:0 auto;padding:20px 24px 40px}
+h1{font-size:28px;margin:4px 0 14px}h2{font-size:20px;margin:0 0 12px}
+.card{background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:20px;margin-bottom:18px}
+.btn{border:0;border-radius:10px;padding:9px 16px;cursor:pointer;font-weight:600;background:var(--tint);color:var(--red)}
+.btn.primary{background:var(--red);color:#fff}.btn.primary:hover{background:var(--red-d)}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+input,select,textarea{background:var(--field);border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-width:0}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--red);outline-offset:1px}
+textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.muted{color:var(--ink2);font-size:14px}
+.err{color:var(--red);font-weight:600}
+.track{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.step{border-radius:14px;padding:14px;background:var(--mist);cursor:pointer}
+.step .n{font-weight:700}.step.done .n{color:var(--ok)}.step.current{background:var(--tint)}.step.current .n{color:var(--red)}
+.step.blocked{opacity:.75}.step p{margin:4px 0;font-size:14px;color:var(--ink2)}
+.scroll{max-height:58vh;overflow:auto;border-radius:12px}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th{position:sticky;top:0;background:var(--card);text-align:left;font-size:14px;color:var(--ink2);padding:8px 10px;z-index:1}
+td{padding:9px 10px;border-top:1px solid var(--line);vertical-align:top}
+tr.click{cursor:pointer}tr.click:hover td{background:var(--tint)}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:14px;font-weight:600;background:var(--mist)}
+.pill.open{background:rgba(191,24,31,.12);color:var(--red)}.pill.in_progress{background:rgba(180,83,9,.14);color:var(--warn)}
+.pill.resolved{background:rgba(46,125,50,.14);color:var(--ok)}.pill.manual{background:rgba(14,116,144,.14);color:var(--info)}
+.pill.notice{background:rgba(191,24,31,.12);color:var(--red)}.pill.sample{background:var(--mist);color:var(--ink2)}
+.finding{background:var(--mist);border-radius:12px;padding:12px 14px;margin:8px 0}
+.finding .t{font-weight:700}.finding .b{font-size:14px;color:var(--ink2)}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(620px,100%);background:var(--card);box-shadow:-12px 0 40px rgba(22,32,42,.2);
+z-index:40;overflow:auto;padding:22px;transform:translateX(105%);transition:transform .25s cubic-bezier(.22,.8,.3,1)}
+.drawer.on{transform:none}.drawer .x{float:right}
+.events{font-size:14px}.events div{padding:6px 0;border-top:1px solid var(--line)}
+.grid input{width:100%}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:12px}
+.kpi div{background:var(--mist);border-radius:12px;padding:12px 14px}.kpi b{display:block;font-size:26px}
+.login{max-width:420px;margin:12vh auto}
+.login input{width:100%;margin:6px 0 12px}
+@media (max-width:820px){.track{grid-template-columns:1fr 1fr}.bar{flex-wrap:wrap;padding:10px 16px}main{padding:16px}}
+</style>
+</head>
+<body>
+<header id="hdr"><div class="bar">
+  <div class="brand"><b>x</b>Harness 檢核平臺</div>
+  <nav id="nav" hidden></nav>
+  <div class="who" id="who"></div>
+</div></header>
+
+<main>
+<section id="login" class="login card" hidden>
+  <h2>登入檢核平臺</h2>
+  <p class="muted">用 xHarness 帳號登入；帳號要有機關與角色，由平臺管理者在 [check.people] 設定。</p>
+  <form id="loginForm" autocomplete="on">
+    <label>帳號<input id="lu" autocomplete="username" required></label>
+    <label>密碼<input id="lp" type="password" autocomplete="current-password" required></label>
+    <button class="btn primary" type="submit">登入</button> <span id="lerr" class="err"></span>
+  </form>
+</section>
+
+<section id="app" hidden>
+  <div class="card" id="setupCard">
+    <div class="row" style="justify-content:space-between"><h2 id="setupTitle">設定順序</h2><span class="muted" id="setupNext"></span></div>
+    <div class="track" id="track"></div>
+  </div>
+
+  <div data-tab="cases">
+    <h1>案件覆核</h1>
+    <div class="card">
+      <div class="row">
+        <select id="cStatus"><option value="">全部狀態</option><option value="open">待處理</option><option value="in_progress">處理中</option><option value="resolved">已處理</option></select>
+        <label class="muted"><input type="checkbox" id="cMine"> 只看我承辦的</label>
+        <button class="btn" id="cReload">重新整理</button>
+        <span class="muted" id="cCount"></span>
+      </div>
+      <div class="scroll" style="margin-top:12px"><table><thead><tr><th>狀態</th><th>原因</th><th>Agent</th><th>業務鍵</th><th>承辦</th><th>更新</th></tr></thead><tbody id="cRows"></tbody></table></div>
+    </div>
+  </div>
+
+  <div data-tab="try" hidden>
+    <h1>試打檢核</h1>
+    <div class="card">
+      <p class="muted">送一筆樣本，看提示內容與依據是否正確。這裡送的檢核會記成「manual」觸發，和來源系統送的分開統計。</p>
+      <div class="row"><label>檢核 Agent <select id="tAgent"></select></label>
+        <label>樣本 <select id="tCase"></select></label>
+        <label class="muted"><input type="checkbox" id="tDocs"> 附一份附件（走非同步辨識）</label></div>
+      <textarea id="tBody" rows="12" style="margin-top:12px" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:12px"><button class="btn primary" id="tSend">送出檢核</button><span id="tErr" class="err"></span></div>
+    </div>
+    <div class="card" id="tOut" hidden></div>
+  </div>
+
+  <div data-tab="tables" hidden>
+    <h1>判定值</h1>
+    <div class="card">
+      <p class="muted">規則用到的數值都在這裡，由機關核定、留版本與生效日。每次發布都是新版本，舊版本保留不刪；檢核依資料基準日套用當時有效的版本。</p>
+      <div class="row"><label>Agent <select id="vAgent"></select></label><label>表 <select id="vTable"></select></label></div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><h2 id="vTitle">目前版本</h2><span class="muted" id="vMeta"></span></div>
+      <div class="scroll grid"><table><thead id="vHead"></thead><tbody id="vRows"></tbody></table></div>
+      <div id="vEdit" hidden style="margin-top:12px">
+        <div class="row"><button class="btn" id="vAdd">加一列</button>
+          <label>生效日 <input type="date" id="vEff"></label>
+          <label style="flex:1">異動說明 <input id="vNote" style="width:100%" maxlength="500" placeholder="例：依115年12月公告票價調整"></label>
+          <button class="btn primary" id="vPub">發布新版本</button></div>
+        <span id="vErr" class="err"></span>
+      </div>
+    </div>
+    <div class="card"><h2>版本歷程</h2><div class="scroll"><table><thead><tr><th>版本</th><th>生效日</th><th>列數</th><th>核定人</th><th>核定時間</th><th>說明</th></tr></thead><tbody id="vHist"></tbody></table></div></div>
+  </div>
+
+  <div data-tab="runs" hidden>
+    <h1>執行紀錄</h1>
+    <div class="card">
+      <p class="muted">每次檢核都留下 Agent 版本、規則指紋、判定值版本與資料基準日，可依執行識別查回當時的結果。</p>
+      <div class="row"><button class="btn" id="rReload">重新整理</button></div>
+      <div class="scroll" style="margin-top:12px"><table><thead><tr><th>收到時間</th><th>Agent</th><th>觸發</th><th>筆數</th><th>耗時</th><th>狀態</th><th>執行識別</th></tr></thead><tbody id="rRows"></tbody></table></div>
+    </div>
+  </div>
+
+  <div data-tab="stats" hidden>
+    <h1>統計匯出</h1>
+    <div class="card">
+      <div class="row"><label>起 <input type="date" id="sSince"></label><label>迄（不含） <input type="date" id="sUntil"></label>
+        <button class="btn" id="sGo">統計</button><button class="btn primary" id="sCsv">匯出去識別 CSV</button></div>
+    </div>
+    <div class="card"><div class="kpi" id="sKpi"></div>
+      <div class="scroll"><table><thead><tr><th>Agent</th><th>規則</th><th>等級</th><th>則數</th></tr></thead><tbody id="sRows"></tbody></table></div></div>
+  </div>
+
+  <div data-tab="audit" hidden>
+    <h1>稽核</h1>
+    <div class="card">
+      <p class="muted">每筆操作都串成雜湊鏈，只增不刪；改掉或刪掉任何一筆，驗證就會指出從哪一筆斷開。</p>
+      <div class="row"><button class="btn primary" id="aVerify">驗證稽核鏈</button><span id="aRes"></span></div>
+      <div class="scroll" style="margin-top:12px"><table><thead><tr><th>#</th><th>時間</th><th>操作者</th><th>動作</th><th>對象</th><th>雜湊</th></tr></thead><tbody id="aRows"></tbody></table></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<aside class="drawer" id="drawer" aria-hidden="true"><button class="btn x" id="dClose">關閉</button><div id="dBody"></div></aside>
+
+<script>
+"use strict";
+const API="/api/check/v1";let token=sessionStorage.getItem("xck")||"";let me=null,agents=[],tab="cases",openCase="";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const t=s=>String(s||"").replace("T"," ").slice(0,19);
+async function api(path,opt={}){const r=await fetch(API+path,{...opt,headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{}),...(opt.headers||{})}});
+  if(r.status===401&&path!=="/login"){logout(false);throw new Error("請重新登入")}
+  const ct=r.headers.get("Content-Type")||"";const data=ct.includes("json")?await r.json():await r.blob();
+  if(!r.ok)throw new Error(data.error||("HTTP "+r.status));return data}
+const has=role=>me&&me.roles.includes(role);
+// IME: Enter while composing never submits
+let composing=false;document.addEventListener("compositionstart",()=>composing=true);document.addEventListener("compositionend",()=>composing=false);
+document.addEventListener("keydown",e=>{if(e.key==="Enter"&&(composing||e.isComposing||e.keyCode===229)){e.preventDefault();e.stopPropagation()}},true);
+addEventListener("scroll",()=>$("hdr").classList.toggle("scrolled",scrollY>20),{passive:true});
+
+const TABS=[["cases","案件覆核",null],["try","試打檢核","operator"],["tables","判定值",null],["runs","執行紀錄",null],["stats","統計匯出",null],["audit","稽核","auditor"]];
+function show(name){tab=name;document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===name));
+  document.querySelectorAll("[data-tab]").forEach(s=>s.hidden=s.dataset.tab!==name);
+  ({cases:loadCases,try:prepTry,tables:loadTable,runs:loadRuns,stats:loadStats,audit:loadAudit})[name]()}
+
+async function start(){if(!token){$("login").hidden=false;$("app").hidden=true;$("nav").hidden=true;$("who").textContent="";return}
+  try{me=await api("/me");agents=(await api("/agents")).agents}catch(e){return}
+  $("login").hidden=true;$("app").hidden=false;$("nav").hidden=false;
+  $("who").innerHTML=esc(me.name)+"｜"+esc(me.agency||"全部機關（唯讀）")+' <button class="btn" id="out">登出</button>';$("out").onclick=()=>logout(true);
+  $("nav").innerHTML=TABS.filter(x=>!x[2]||has(x[2])).map(x=>`<button data-t="${x[0]}">${x[1]}</button>`).join("");
+  $("nav").querySelectorAll("button").forEach(b=>b.onclick=()=>show(b.dataset.t));
+  const opts=agents.map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("");$("tAgent").innerHTML=opts;$("vAgent").innerHTML=opts;
+  await loadSetup();show(tab)}
+async function logout(call){if(call){try{await api("/logout",{method:"POST"})}catch(e){}}token="";sessionStorage.removeItem("xck");me=null;start()}
+$("loginForm").onsubmit=async e=>{e.preventDefault();$("lerr").textContent="";
+  try{const r=await api("/login",{method:"POST",body:JSON.stringify({user:$("lu").value,password:$("lp").value})});token=r.token;sessionStorage.setItem("xck",token);$("lp").value="";start()}
+  catch(err){$("lerr").textContent=err.message}};
+
+async function loadSetup(){const steps=(await api("/setup")).steps;const done=steps.filter(s=>s.state==="done").length;const next=steps.find(s=>s.state==="current");
+  $("setupTitle").textContent=`設定順序　${done}/${steps.length} 步完成`;$("setupNext").textContent=next?`下一步：${next.step}. ${next.title}`:"已可上線使用";
+  const label={done:"已完成",current:"現在做這步",blocked:"還不能做",todo:"可以先做"};
+  $("track").innerHTML=steps.map(s=>`<div class="step ${s.state}" data-t="${esc(s.tab)}"><div class="n">${s.step}. ${esc(s.title)}　<span class="muted">${label[s.state]}</span></div><p>${esc(s.why)}</p><p>${esc(s.detail)}</p></div>`).join("");
+  $("track").querySelectorAll(".step").forEach(el=>el.onclick=()=>{const t=el.dataset.t;if(t&&$("nav").querySelector(`[data-t="${t}"]`))show(t)});
+  $("setupCard").hidden=done===steps.length}
+
+// --- cases
+$("cStatus").onchange=loadCases;$("cMine").onchange=loadCases;$("cReload").onclick=loadCases;
+async function loadCases(){const q=new URLSearchParams({status:$("cStatus").value,mine:$("cMine").checked?"1":""});const d=await api("/cases?"+q);
+  $("cCount").textContent=`共 ${d.total} 件${d.total>d.cases.length?`，顯示最新 ${d.cases.length} 件，請用篩選縮小範圍`:""}`;
+  $("cRows").innerHTML=d.cases.map(c=>`<tr class="click" data-id="${esc(c.case_id)}"><td><span class="pill ${esc(c.status)}">${esc(c.status_label)}</span></td><td>${esc(c.reason)}</td><td>${esc(c.agent)}</td><td>${esc(c.business_key)}</td><td>${esc(c.assignee)}</td><td>${t(c.updated)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">沒有案件</td></tr>';
+  $("cRows").querySelectorAll("tr.click").forEach(r=>r.onclick=()=>caseDrawer(r.dataset.id))}
+function findingHtml(f){const lv={notice:"提示",manual:"轉人工",sample:"抽審"}[f.level]||f.level;
+  const ev=(f.evidence||[]).map(e=>`${esc(e.doc||"")} 第${esc(e.page||"?")}頁 ${esc(e.field||"")}=${esc(e.value||"")}`).join("；");
+  return `<div class="finding"><div class="t"><span class="pill ${esc(f.level)}">${lv}</span> ${esc(f.rule_id)} ${esc(f.rule_title||f.title)}</div><div>${esc(f.message)}</div><div class="b">依據：${esc(f.basis)}${f.fields&&f.fields.length?"｜比對欄位："+esc(f.fields.join("、")):""}${ev?"｜證據："+ev:""}${f.run_id?"｜執行識別："+esc(f.run_id):""}</div></div>`}
+async function caseDrawer(id){openCase=id;const c=await api("/cases/"+encodeURIComponent(id));
+  const acts=has("reviewer")?`<h2>處理</h2><div class="row">${c.status==="open"?'<button class="btn primary" data-a="take">接手</button>':""}${c.status!=="resolved"?'<button class="btn primary" data-a="resolve">結案</button>':'<button class="btn" data-a="reopen">重新開啟</button>'}</div>
+   <div class="row" style="margin-top:10px"><input id="dAssignee" placeholder="指派給（帳號）"><button class="btn" data-a="assign">指派</button></div>
+   <textarea id="dNote" rows="3" style="margin-top:10px;font-family:inherit;font-size:16px" placeholder="附註（處理結果、聯絡紀錄）"></textarea>
+   <div class="row" style="margin-top:8px"><button class="btn" data-a="note">加附註</button><span id="dErr" class="err"></span></div>`:'<p class="muted">你沒有覆核角色，只能檢視。</p>';
+  $("dBody").innerHTML=`<h1 style="font-size:22px">${esc(c.reason)}</h1><p><span class="pill ${esc(c.status)}">${esc(c.status_label)}</span>　<span class="muted">${esc(c.agent)}｜業務鍵 ${esc(c.business_key)}｜承辦 ${esc(c.assignee||"未指派")}</span></p>
+   <h2>提示與證據（${c.results.length}）</h2>${c.results.map(findingHtml).join("")}${acts}
+   <h2 style="margin-top:18px">歷程</h2><div class="events">${c.events.map(e=>`<div>${t(e.ts)}　${esc(e.actor)}　${esc(e.action)}${e.from_status!==e.to_status?`（${esc(e.from_status)}→${esc(e.to_status)}）`:""}　${esc(e.note)}</div>`).join("")}</div>`;
+  $("dBody").querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>caseAct(b.dataset.a));openDrawer()}
+async function caseAct(action){const body={action,note:($("dNote")||{}).value||"",assignee:($("dAssignee")||{}).value||""};
+  if(action==="assign"&&!body.assignee){$("dErr").textContent="請填要指派的帳號";return}
+  try{await api("/cases/"+encodeURIComponent(openCase),{method:"POST",body:JSON.stringify(body)});await caseDrawer(openCase);loadCases();loadSetup()}catch(e){$("dErr").textContent=e.message}}
+function openDrawer(){$("drawer").classList.add("on");$("drawer").setAttribute("aria-hidden","false")}
+$("dClose").onclick=()=>{$("drawer").classList.remove("on");$("drawer").setAttribute("aria-hidden","true")};
+document.addEventListener("keydown",e=>{if(e.key==="Escape")$("dClose").click()});
+
+// --- try
+let samples=[];
+async function prepTry(){const id=$("tAgent").value;if(!id)return;const agent=agents.find(a=>a.id===id);
+  $("tDocs").parentElement.hidden=!(agent&&agent.needs.length);
+  samples=(await api(`/agents/${encodeURIComponent(id)}/samples`)).samples;
+  $("tCase").innerHTML=samples.map((c,i)=>`<option value="${i}">${esc(c.name)}</option>`).join("");fillSample()}
+function fillSample(){const id=$("tAgent").value;const agent=agents.find(a=>a.id===id);const rec=(samples[+$("tCase").value||0]||{}).record;
+  $("tBody").value=JSON.stringify({record:rec||{[agent.business_key]:"TEST-001"}},null,2)}
+$("tAgent").onchange=prepTry;$("tCase").onchange=fillSample;
+$("tSend").onclick=async()=>{$("tErr").textContent="";let body;try{body=JSON.parse($("tBody").value)}catch(e){$("tErr").textContent="內容不是合法的 JSON";return}
+  if($("tDocs").checked&&!$("tDocs").parentElement.hidden)body.documents=[{name:"附件.pdf",type:"application/pdf"}];
+  $("tSend").disabled=true;try{const r=await api(`/agents/${encodeURIComponent($("tAgent").value)}/check`,{method:"POST",body:JSON.stringify(body)});
+    if(r.task_id){$("tOut").hidden=false;$("tOut").innerHTML=`<h2>已排入非同步辨識</h2><p>任務 <b id="tTask">${esc(r.task_id)}</b>　狀態 <span id="tState">${esc(r.state)}</span></p><div id="tRes"></div>`;pollTask(r.task_id,0)}
+    else showResult(r)}catch(e){$("tErr").textContent=e.message}finally{$("tSend").disabled=false}};
+function showResult(r){$("tOut").hidden=false;const res=r.results||[];
+  $("tOut").innerHTML=`<h2>結果</h2><p class="muted">執行識別 ${esc(r.run_id)}｜Agent v${esc(r.agent_version)}｜資料基準 ${esc(r.data_basis)}｜判定值版本 ${esc(JSON.stringify(r.table_versions))}｜耗時 ${esc(r.elapsed_ms)} ms</p>`+
+   res.map(x=>`<h2 style="font-size:17px">${esc(x.business_key)}</h2>`+(x.findings.length?x.findings.map(findingHtml).join(""):'<p>沒有提示，可以照原流程送出。</p>')).join("");loadSetup()}
+async function pollTask(id,n){const d=await api("/tasks/"+encodeURIComponent(id));$("tState").textContent=d.state;
+  if(d.state==="done"){const run=d.result;$("tRes").innerHTML=(run.results.length?run.results.map(findingHtml).join(""):"<p>沒有提示。</p>")+`<p class="muted">執行識別 ${esc(run.run_id)}</p>`;loadSetup();return}
+  if(d.state==="error"){$("tRes").innerHTML=`<p class="err">${esc(d.error)}</p>`;return}if(n<60)setTimeout(()=>pollTask(id,n+1),1000)}
+
+// --- tables
+let tdef=null,trows=[];
+$("vAgent").onchange=()=>{fillTables();loadTable()};$("vTable").onchange=loadTable;
+function fillTables(){const a=agents.find(x=>x.id===$("vAgent").value);if(!a)return;const cur=$("vTable").value;
+  $("vTable").innerHTML=Object.entries(a.tables).map(([k,v])=>`<option value="${esc(k)}">${esc(v.title)}</option>`).join("");if(a.tables[cur])$("vTable").value=cur}
+async function loadTable(){if(!$("vTable").value)fillTables();const a=$("vAgent").value,n=$("vTable").value;if(!a||!n)return;
+  const d=await api(`/tables/${encodeURIComponent(a)}/${encodeURIComponent(n)}`);const def=agents.find(x=>x.id===a).tables[n];tdef=def;
+  const cur=(d.history||[])[0];trows=cur?JSON.parse(JSON.stringify(cur.rows)):[];
+  $("vTitle").textContent=def.title+(cur?`　第 ${cur.version} 版`:"　尚未核定");
+  $("vMeta").textContent=cur?`${cur.effective_from} 生效｜核定人 ${cur.approved_by}`:(d.note||"還沒有任何版本，規則會轉人工");
+  const edit=has("approver")&&me.agency;$("vEdit").hidden=!edit;
+  $("vHead").innerHTML="<tr>"+def.columns.map(c=>`<th>${esc(c.title)}</th>`).join("")+(edit?"<th></th>":"")+"</tr>";drawRows(edit);
+  $("vHist").innerHTML=(d.history||[]).map(h=>`<tr><td>${h.version}</td><td>${esc(h.effective_from)}</td><td>${h.rows.length}</td><td>${esc(h.approved_by)}</td><td>${t(h.approved_at)}</td><td>${esc(h.note)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">沒有版本</td></tr>';
+  if(!$("vEff").value)$("vEff").value=new Date(Date.now()+864e5).toISOString().slice(0,10)}
+function drawRows(edit){$("vRows").innerHTML=trows.map((r,i)=>"<tr>"+tdef.columns.map(c=>edit?`<td><input data-i="${i}" data-c="${esc(c.name)}" value="${esc(r[c.name])}" ${c.type==="number"?'inputmode="decimal"':""}></td>`:`<td>${esc(r[c.name])}</td>`).join("")+(edit?`<td><button class="btn" data-del="${i}">刪</button></td>`:"")+"</tr>").join("")||`<tr><td colspan="${tdef.columns.length+1}" class="muted">沒有資料</td></tr>`;
+  $("vRows").querySelectorAll("input").forEach(el=>el.oninput=()=>{trows[+el.dataset.i][el.dataset.c]=el.value});
+  $("vRows").querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{trows.splice(+b.dataset.del,1);drawRows(true)})}
+$("vAdd").onclick=()=>{trows.push(Object.fromEntries(tdef.columns.map(c=>[c.name,""])));drawRows(true)};
+$("vPub").onclick=async()=>{$("vErr").textContent="";if(!$("vNote").value.trim()){$("vErr").textContent="請寫異動說明（會進版本歷程與稽核）";return}
+  try{const r=await api(`/tables/${encodeURIComponent($("vAgent").value)}/${encodeURIComponent($("vTable").value)}`,{method:"POST",body:JSON.stringify({rows:trows,effective_from:$("vEff").value,note:$("vNote").value})});
+   $("vNote").value="";await loadTable();loadSetup();$("vErr").textContent=`已發布第 ${r.version} 版`}catch(e){$("vErr").textContent=e.message}};
+
+// --- runs
+$("rReload").onclick=loadRuns;
+async function loadRuns(){const d=await api("/runs?limit=200");
+  $("rRows").innerHTML=d.runs.map(r=>`<tr class="click" data-id="${esc(r.run_id)}"><td>${t(r.received)}</td><td>${esc(r.agent)} v${esc(r.agent_version)}</td><td>${esc(r.trigger)}</td><td>${r.records}</td><td>${r.elapsed_ms==null?"":r.elapsed_ms+" ms"}</td><td>${esc(r.status)}</td><td>${esc(r.run_id)}</td></tr>`).join("")||'<tr><td colspan="7" class="muted">還沒有執行紀錄</td></tr>';
+  $("rRows").querySelectorAll("tr.click").forEach(r=>r.onclick=async()=>{const run=await api("/runs/"+encodeURIComponent(r.dataset.id));
+    $("dBody").innerHTML=`<h1 style="font-size:22px">執行 ${esc(run.run_id)}</h1><p class="muted">${esc(run.agent)} v${esc(run.agent_version)}｜規則指紋 ${esc(run.agent_digest.slice(0,12))}｜判定值版本 ${esc(JSON.stringify(run.table_versions))}｜資料基準 ${esc(run.data_basis)}｜觸發 ${esc(run.trigger)}｜呼叫者 ${esc(run.caller)}</p><p class="muted">收到 ${t(run.received)}｜完成 ${t(run.finished)}｜${esc(run.elapsed_ms)} ms</p>`+(run.results.map(findingHtml).join("")||"<p>這次沒有提示。</p>");openDrawer()})}
+
+// --- stats
+$("sGo").onclick=loadStats;
+async function loadStats(){const q=new URLSearchParams({since:$("sSince").value,until:$("sUntil").value});const d=await api("/stats?"+q);
+  const total=d.by_rule.reduce((s,r)=>s+r.n,0);const runs=d.runs.reduce((s,r)=>s+r.n,0);const ms=d.runs.length?Math.max(...d.runs.map(r=>r.max_ms||0)):0;
+  $("sKpi").innerHTML=`<div>提示<b>${total}</b></div><div>執行<b>${runs}</b></div><div>待處理案件<b>${d.cases.open||0}</b></div><div>已處理案件<b>${d.cases.resolved||0}</b></div><div>最慢一次<b>${ms.toFixed?ms.toFixed(0):ms} ms</b></div>`;
+  $("sRows").innerHTML=d.by_rule.map(r=>`<tr><td>${esc(r.agent)}</td><td>${esc(r.rule_id)} ${esc(r.rule_title)}</td><td>${esc(r.level)}</td><td>${r.n}</td></tr>`).join("")||'<tr><td colspan="4" class="muted">這段期間沒有提示</td></tr>'}
+$("sCsv").onclick=async()=>{const q=new URLSearchParams({since:$("sSince").value,until:$("sUntil").value});const blob=await api("/export.csv?"+q);
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="check-export.csv";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000)};
+
+// --- audit
+$("aVerify").onclick=async()=>{const r=await api("/audit/verify");$("aRes").innerHTML=r.ok?`<span class="pill resolved">完整</span>　${r.count} 筆全部通過`:`<span class="pill open">斷開</span>　第 ${r.broken_at} 筆起不符`;loadAudit()};
+async function loadAudit(){if(!has("auditor"))return;const d=await api("/audit?limit=300");
+  $("aRows").innerHTML=d.audit.map(a=>`<tr><td>${a.seq}</td><td>${t(a.ts)}</td><td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td>${esc(a.target)}</td><td class="muted">${esc(a.hash.slice(0,12))}</td></tr>`).join("")}
+start();
+</script>
+</body>
+</html>

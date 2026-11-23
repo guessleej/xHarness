@@ -1,0 +1,8 @@
+{
+  "required_attachments": [
+    {"claim_type": "健康檢查", "kind": "receipt", "label": "醫療院所收據"},
+    {"claim_type": "健康檢查", "kind": "report", "label": "健康檢查報告首頁"},
+    {"claim_type": "計程車", "kind": "receipt", "label": "乘車收據"},
+    {"claim_type": "計程車", "kind": "approval", "label": "搭乘核准文件"}
+  ]
+}

@@ -40,5 +40,8 @@ build = ["pywebview>=6", "pyinstaller>=6.16", "cryptography>=42"]
 [tool.setuptools.packages.find]
 include = ["xharness*"]
 
+[tool.setuptools.package-data]
+"xharness.check" = ["ui.html", "agents/*/*.toml", "agents/*/*.py", "agents/*/*.md", "agents/*/cases/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

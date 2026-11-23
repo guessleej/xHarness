@@ -43,7 +43,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "task",
         nargs="*",
-        help='the task; "sessions" lists saved sessions; "users" manages accounts; "report" prints the service usage report; "eval <path>" runs a suite; "acp" serves an editor over the Agent Client Protocol; "mcp-serve" offers the browser, python_run and desktop tools to an MCP client over stdio; "a2a-serve" takes tasks from other agent platforms over A2A (loopback, Bearer token); "web" starts the local UI; "desktop" opens it in a native window; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; "route <text>" shows which model routing would pick, and why; "usage" shows token history; empty starts a REPL',
+        help='the task; "sessions" lists saved sessions; "users" manages accounts; "report" prints the service usage report; "eval <path>" runs a suite; "acp" serves an editor over the Agent Client Protocol; "mcp-serve" offers the browser, python_run and desktop tools to an MCP client over stdio; "a2a-serve" takes tasks from other agent platforms over A2A (loopback, Bearer token); "check ..." runs the check platform (serve, agents, eval, run, tables, client, audit); "web" starts the local UI; "desktop" opens it in a native window; "memory [list|topics|show|search|audit|consolidate|stale|verify|expire]" inspects, tidies, and re-verifies memory; "providers [presets|probe]" lists and probes endpoints; "fleet" polls the configured nodes; "route <text>" shows which model routing would pick, and why; "usage" shows token history; empty starts a REPL',
     )
     parser.add_argument("--config", dest="config_path", help="config file (default: ./xharness.toml, then $XHARNESS_HOME/config.toml)")
     parser.add_argument("--provider", help="provider from the config's [providers] table")
@@ -475,6 +475,12 @@ def main(argv: list[str] | None = None) -> int:
         return _run_users(args, config)
     if args.task and args.task[0] in ("report", "usage-report"):
         return _run_report(args, config)
+    if args.task and args.task[0] == "check":
+        from .check.cli import main as check_main
+
+        # --port defaults to the web UI's 3080; the check platform keeps 3095 unless one is given.
+        return check_main(config.check, getattr(config, "auth", {}) or {}, args.task[1:],
+                          host=args.host or "127.0.0.1", port=None if args.port == 3080 else args.port)
     if args.task and args.task[0] == "a2a-serve":
         from .a2a import run_a2a_serve
 

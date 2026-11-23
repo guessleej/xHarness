@@ -1,0 +1,11 @@
+[
+  {"name": "健檢附件齊全", "expect": [],
+   "record": {"claim_id": "A-001", "claim_type": "健康檢查", "applicant": "王小明", "claim_date": "2026-12-01",
+              "attachments": [{"kind": "receipt"}, {"kind": "report"}]}},
+  {"name": "計程車缺核准文件", "expect": ["AC-01"],
+   "record": {"claim_id": "A-002", "claim_type": "計程車", "applicant": "李大華", "claim_date": "2026-12-02",
+              "attachments": [{"kind": "receipt"}]}},
+  {"name": "未設定的類別", "expect": ["AC-02"],
+   "record": {"claim_id": "A-003", "claim_type": "加班誤餐", "applicant": "陳美玲", "claim_date": "2026-12-03",
+              "attachments": []}}
+]

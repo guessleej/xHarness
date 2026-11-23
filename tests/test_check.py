@@ -1,0 +1,404 @@
+"""檢核平臺：接入規格、規則沙箱、雜湊鏈稽核、判定值版本、案件、非同步、API 權限。"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sqlite3
+import threading
+import time
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
+
+import pytest
+
+from xharness.check import spec
+from xharness.check.api import CheckService, make_handler
+from xharness.check.engine import CheckEngine, evaluate
+from xharness.check.rulekit import Tables
+from xharness.check.store import CheckStore
+from xharness.identity import UserStore
+
+AGENTS = spec.discover()
+TRAVEL = AGENTS["travel-fare"]
+FARES = TRAVEL.test_tables
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def wait(predicate, seconds=5.0):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return bool(predicate())
+
+
+def record(**over):
+    base = {"claim_id": "C-9", "traveler": "王小明", "trip_date": "2026-12-01",
+            "legs": [{"from": "臺北", "to": "高雄", "mode": "高鐵", "class": "標準", "amount": 1640}]}
+    return {**base, **over}
+
+
+@pytest.fixture
+def engine():
+    store = CheckStore(":memory:")
+    for name, rows in FARES.items():
+        store.put_table(agency="EPA", agent="travel-fare", name=name, rows=rows, effective_from="2026-01-01", approved_by="核定人")
+    eng = CheckEngine(store, AGENTS, secret=b"s" * 32)
+    yield eng
+    eng.shutdown()
+
+
+# --- intake spec and rule sandbox -------------------------------------------
+
+@pytest.mark.parametrize("source", [
+    "import os\n", "import subprocess\n", "from pathlib import Path\n", "from . import x\n",
+    "x = open('a')\n", "eval('1')\n", "__import__('os')\n", "y = ().__class__\n",
+    "getattr(1, 'real')\n", "def f():\n    global z\n",
+])
+def test_rules_sandbox_refuses_escape(source):
+    with pytest.raises(spec.SpecError):
+        spec.check_rules_source("from xharness.check.rulekit import rule\n" + source)
+
+
+def test_rules_runtime_builtins_are_restricted(tmp_path):
+    # Even if the static check were bypassed, exec gets no open().
+    path = tmp_path / "rules.py"
+    path.write_text("from xharness.check.rulekit import rule\nimport re\n@rule('X-1', title='t', basis='b', message='m')\n"
+                    "def r(rec, tables):\n    return None\n", encoding="utf-8")
+    rules = spec.load_rules(str(path))
+    assert [r.id for r in rules] == ["X-1"]
+    assert "open" not in rules[0].func.__globals__["__builtins__"]
+
+
+def test_builtin_agents_validation_cases_all_pass(engine):
+    for agent_id in AGENTS:
+        report = engine.evaluate_cases(agent_id)
+        assert report["rule_coverage"]["value"] == 1.0, report
+        assert report["consistency"]["value"] == 1.0, report
+        assert report["traceability"]["value"] == 1.0, report
+
+
+def test_new_agent_plugs_in_without_core_change(tmp_path):
+    extra = tmp_path / "agents"
+    shutil.copytree(AGENTS["attachment-check"].path, extra / "leave-overlap")
+    toml = (extra / "leave-overlap" / "agent.toml").read_text(encoding="utf-8")
+    (extra / "leave-overlap" / "agent.toml").write_text(toml.replace('id = "attachment-check"', 'id = "leave-overlap"'), encoding="utf-8")
+    found = spec.discover([str(extra)])
+    assert {"travel-fare", "attachment-check", "leave-overlap"} <= set(found)
+
+
+def test_platform_core_does_not_know_any_agent():
+    # 擴充能力驗證：核心程式不得出現任何一支 Agent 的業務代號。
+    core = os.path.join(REPO, "xharness", "check")
+    for name in os.listdir(core):
+        if name.endswith(".py") or name.endswith(".html"):
+            with open(os.path.join(core, name), encoding="utf-8") as handle:
+                text = handle.read()
+            for agent_id in AGENTS:
+                assert agent_id not in text, f"{name} mentions {agent_id}"
+
+
+def test_broken_agent_is_skipped_not_fatal(tmp_path, capsys):
+    bad = tmp_path / "agents" / "bad-one"
+    bad.mkdir(parents=True)
+    (bad / "agent.toml").write_text('id = "bad-one"\nname = "x"\nversion = "1"\n', encoding="utf-8")
+    (bad / "rules.py").write_text("import os\n", encoding="utf-8")
+    found = spec.discover([str(tmp_path / "agents")])
+    assert "bad-one" not in found and "travel-fare" in found
+    assert "不准 import os" in capsys.readouterr().out
+
+
+def test_medium_risk_keeps_ten_percent_sampling():
+    assert TRAVEL.risk == "medium" and TRAVEL.sample_rate >= 0.10
+
+
+# --- rules ------------------------------------------------------------------
+
+def test_rule_that_raises_becomes_manual_not_pass():
+    def boom(rec, tables):
+        raise RuntimeError("x")
+
+    agent = spec.AgentSpec(id="t", name="t", version="1", path="", rules=[type(TRAVEL.rules[0])("Z-1", "t", "b", "m", boom)])
+    findings = evaluate(agent, {"id": 1}, Tables())
+    assert findings[0]["level"] == "manual" and findings[0]["rule_id"] == "Z-1"
+
+
+def test_missing_required_fields_go_to_manual():
+    findings = evaluate(TRAVEL, {"claim_id": "1"}, Tables())
+    assert findings[0]["rule_id"] == "INPUT" and findings[0]["level"] == "manual"
+
+
+# --- store ------------------------------------------------------------------
+
+def test_audit_chain_detects_tampering(tmp_path):
+    path = str(tmp_path / "c.db")
+    store = CheckStore(path)
+    for index in range(5):
+        store.audit("u", "act", target=str(index))
+    assert store.verify_audit() == {"ok": True, "count": 5, "broken_at": None, "head": store.verify_audit()["head"]}
+    with pytest.raises(sqlite3.IntegrityError):
+        store._db.execute("DELETE FROM audit WHERE seq=2")
+    with pytest.raises(sqlite3.IntegrityError):
+        store._db.execute("UPDATE audit SET actor='x' WHERE seq=2")
+    store.close()
+    raw = sqlite3.connect(path)
+    raw.execute("DROP TRIGGER audit_no_update")
+    raw.execute("UPDATE audit SET target='99' WHERE seq=3")
+    raw.commit()
+    raw.close()
+    result = CheckStore(path).verify_audit()
+    assert result["ok"] is False and result["broken_at"] == 3
+
+
+def test_results_and_table_versions_are_append_only():
+    store = CheckStore(":memory:")
+    store.put_table(agency="A", agent="x", name="t", rows=[], effective_from="2026-01-01", approved_by="p")
+    with pytest.raises(sqlite3.IntegrityError):
+        store._db.execute("DELETE FROM table_versions")
+
+
+def test_table_version_follows_data_basis_date():
+    store = CheckStore(":memory:")
+    store.put_table(agency="A", agent="x", name="t", rows=[{"v": 1}], effective_from="2026-01-01", approved_by="p")
+    store.put_table(agency="A", agent="x", name="t", rows=[{"v": 2}], effective_from="2026-07-01", approved_by="p")
+    assert store.table_at("A", "x", "t", "2025-12-31") == (0, [])
+    assert store.table_at("A", "x", "t", "2026-03-01") == (1, [{"v": 1}])
+    assert store.table_at("A", "x", "t", "2026-07-01") == (2, [{"v": 2}])
+    assert store.table_at("B", "x", "t", "2026-07-01") == (0, [])
+
+
+def test_case_state_machine():
+    store = CheckStore(":memory:")
+    case_id = store.case_for(agency="A", agent="x", business_key="k", fingerprint="f", reason="r", actor="sys")
+    with pytest.raises(ValueError):
+        store.case_action(case_id, "A", actor="u", action="reopen")
+    assert store.case_action(case_id, "A", actor="u", action="take")["status"] == "in_progress"
+    assert store.case_action(case_id, "A", actor="u", action="resolve", note="已補件")["status"] == "resolved"
+    with pytest.raises(LookupError):
+        store.case_action(case_id, "B", actor="u", action="reopen")
+    events = [e["action"] for e in store.case(case_id, "A")["events"]]
+    assert events == ["create", "take", "resolve"]
+
+
+# --- engine -----------------------------------------------------------------
+
+def test_check_records_versions_and_evidence(engine):
+    out = engine.check("travel-fare", agency="EPA", records=[record()], trigger="sync", caller="BAF")
+    finding = out["results"][0]["findings"][0]
+    assert finding["rule_id"] == "TF-01" and "1,640" in finding["message"] and "1,490" in finding["message"]
+    run = engine.store.run(out["run_id"], "EPA")
+    assert run["agent_version"] == "1.0.0" and run["table_versions"] == {"fare_cap": 1, "class_allowed": 1}
+    assert run["data_basis"] == "2026-12-01" and run["results"][0]["fields"]
+    assert engine.store.run(out["run_id"], "OTHER") is None
+    assert engine.store.verify_audit()["ok"]
+
+
+def test_before_tables_take_effect_everything_goes_to_manual(engine):
+    out = engine.check("travel-fare", agency="EPA", records=[record(trip_date="2025-06-01")], trigger="sync", caller="BAF")
+    assert {f["rule_id"] for f in out["results"][0]["findings"]} >= {"TF-02"}
+    assert out["table_versions"] == {"fare_cap": 0, "class_allowed": 0}
+
+
+def test_same_event_merges_into_one_case_and_reopens_new_after_resolve(engine):
+    a = engine.check("travel-fare", agency="EPA", records=[record()], trigger="sync", caller="BAF")
+    b = engine.check("travel-fare", agency="EPA", records=[record()], trigger="batch", caller="batch")
+    case_a = a["results"][0]["findings"][0]["case_id"]
+    assert b["results"][0]["findings"][0]["case_id"] == case_a
+    assert len(engine.store.history("EPA", "C-9")) == 2
+    engine.store.case_action(case_a, "EPA", actor="u", action="resolve")
+    c = engine.check("travel-fare", agency="EPA", records=[record()], trigger="batch", caller="batch")
+    assert c["results"][0]["findings"][0]["case_id"] != case_a
+
+
+def test_sampling_is_deterministic_and_near_rate(engine):
+    clean = [record(claim_id=f"K-{i}", legs=[{"from": "臺北", "to": "臺中", "mode": "高鐵", "amount": 700}]) for i in range(400)]
+    out = engine.check("travel-fare", agency="EPA", records=clean, trigger="batch", caller="batch")
+    sampled = [r for r in out["results"] if r["findings"]]
+    assert all(r["findings"][0]["level"] == "sample" for r in sampled)
+    assert 0.05 < len(sampled) / 400 < 0.16
+    again = engine.check("travel-fare", agency="EPA", records=clean, trigger="batch", caller="batch")
+    assert [r["business_key"] for r in again["results"] if r["findings"]] == [r["business_key"] for r in sampled]
+
+
+def test_async_without_extractor_marks_manual(engine):
+    task = engine.submit("travel-fare", agency="EPA", record=record(), documents=[{"name": "票根.pdf"}], caller="BAF")
+    assert wait(lambda: engine.store.task(task, "EPA")["state"] == "done")
+    run = engine.store.run(engine.store.task(task, "EPA")["run_id"], "EPA")
+    assert [r["rule_id"] for r in run["results"]] == ["DOC"] and run["results"][0]["level"] == "manual"
+
+
+def test_async_extractor_fills_fields_and_evidence(engine):
+    def extractor(agent, rec, docs):
+        return {"legs": [{"from": "臺北", "to": "高雄", "mode": "高鐵", "amount": 1800}]}, [{"doc": "票根.pdf", "page": 1, "field": "票價", "value": "1800"}]
+
+    engine.extractor = extractor
+    task = engine.submit("travel-fare", agency="EPA", record=record(legs=[]), documents=[{"name": "票根.pdf"}], caller="BAF")
+    assert wait(lambda: engine.store.task(task, "EPA")["state"] == "done")
+    run = engine.store.run(engine.store.task(task, "EPA")["run_id"], "EPA")
+    assert run["results"][0]["rule_id"] == "TF-01" and run["results"][0]["evidence"][0]["value"] == "1800"
+
+
+def test_failing_extractor_opens_breaker(engine):
+    calls = []
+
+    def bad(agent, rec, docs):
+        calls.append(1)
+        raise TimeoutError("ocr down")
+
+    engine.extractor = bad
+    for agent in engine.agents.values():
+        agent.retry_backoff = 0.0
+    tasks = [engine.submit("travel-fare", agency="EPA", record=record(claim_id=f"B{i}"), documents=[{"n": 1}], caller="BAF") for i in range(3)]
+    assert wait(lambda: all(engine.store.task(t, "EPA")["state"] == "done" for t in tasks))
+    assert engine.breaker.state == "open" and len(calls) <= 5
+    run = engine.store.run(engine.store.task(tasks[-1], "EPA")["run_id"], "EPA")
+    assert run["results"][0]["level"] == "manual"
+
+
+# --- HTTP API ---------------------------------------------------------------
+
+@pytest.fixture
+def server(tmp_path, monkeypatch):
+    monkeypatch.setenv("XHARNESS_HOME", str(tmp_path / "home"))
+    auth = {"pbkdf2_iterations": 1}
+    users = UserStore(auth)
+    for name, role in [("reviewer1", "user"), ("approver1", "user"), ("vendor", "admin"), ("outsider", "user")]:
+        users.add(name, "correct-horse-12", role=role)
+    settings = {"home": str(tmp_path / "check"), "people": {
+        "reviewer1": {"agency": "EPA", "roles": ["reviewer", "operator"]},
+        "approver1": {"agency": "EPA", "roles": ["approver", "auditor"]},
+    }}
+    service = CheckService(settings, auth)
+    for name, rows in FARES.items():
+        service.store.put_table(agency="EPA", agent="travel-fare", name=name, rows=rows, effective_from="2026-01-01", approved_by="p")
+    client_token = service.clients.add("BAF", "EPA", ["travel-fare"])
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    yield base, client_token, service
+    httpd.shutdown()
+    service.engine.shutdown()
+
+
+def call(base, method, path, token="", body=None):
+    request = urllib.request.Request(base + path, method=method, data=json.dumps(body).encode() if body is not None else None,
+                                     headers={"Content-Type": "application/json", **({"Authorization": "Bearer " + token} if token else {})})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310 -- loopback test server
+            raw = response.read()
+            return response.status, (json.loads(raw) if "json" in response.headers.get("Content-Type", "") else raw.decode("utf-8-sig")), response.headers
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read() or b"{}"), error.headers
+
+
+def login(base, name):
+    status, data, _ = call(base, "POST", "/api/check/v1/login", body={"user": name, "password": "correct-horse-12"})
+    assert status == 200, data
+    return data["token"]
+
+
+def test_api_sync_check_uses_token_agency(server):
+    base, token, service = server
+    status, data, headers = call(base, "POST", "/api/check/v1/agents/travel-fare/check", token,
+                                 {"record": record(), "agency": "OTHER"})
+    assert status == 200 and data["results"][0]["findings"][0]["rule_id"] == "TF-01"
+    assert float(headers["X-Check-Elapsed-Ms"]) < 5000 and data["received"] <= data["sent"]
+    assert service.store.run(data["run_id"], "EPA") is not None and service.store.run(data["run_id"], "OTHER") is None
+    assert headers["X-Content-Type-Options"] == "nosniff" and "frame-ancestors 'none'" in headers["Content-Security-Policy"]
+
+
+def test_api_documents_return_202_and_task(server):
+    base, token, _ = server
+    status, data, _ = call(base, "POST", "/api/check/v1/agents/travel-fare/check", token,
+                           {"record": record(), "documents": [{"name": "票根.pdf"}]})
+    assert status == 202 and data["task_id"].startswith("task_")
+    assert wait(lambda: call(base, "GET", data["poll"], token)[1]["state"] == "done")
+    assert call(base, "GET", data["poll"], token)[1]["result"]["results"][0]["rule_id"] == "DOC"
+
+
+def test_api_client_scope(server):
+    base, token, _ = server
+    assert call(base, "POST", "/api/check/v1/agents/attachment-check/check", token, {"record": {"claim_id": "1"}})[0] == 404
+    assert call(base, "GET", "/api/check/v1/cases", token)[0] == 403
+    assert call(base, "GET", "/api/check/v1/cases", "xck_wrong")[0] == 401
+    assert call(base, "GET", "/api/check/v1/cases")[0] == 401
+
+
+def test_api_login_requires_check_people_entry(server):
+    base, _, _ = server
+    assert call(base, "POST", "/api/check/v1/login", body={"user": "outsider", "password": "correct-horse-12"})[0] == 401
+    assert call(base, "POST", "/api/check/v1/login", body={"user": "reviewer1", "password": "nope"})[0] == 401
+
+
+def test_api_review_flow(server):
+    base, token, _ = server
+    call(base, "POST", "/api/check/v1/agents/travel-fare/check", token, {"record": record()})
+    reviewer = login(base, "reviewer1")
+    cases = call(base, "GET", "/api/check/v1/cases?status=open", reviewer)[1]["cases"]
+    case_id = cases[0]["case_id"]
+    assert call(base, "POST", f"/api/check/v1/cases/{case_id}", reviewer, {"action": "take"})[1]["status"] == "in_progress"
+    done = call(base, "POST", f"/api/check/v1/cases/{case_id}", reviewer, {"action": "resolve", "note": "已說明特殊事由"})[1]
+    assert done["status"] == "resolved" and done["events"][-1]["note"] == "已說明特殊事由"
+    approver = login(base, "approver1")
+    assert call(base, "POST", f"/api/check/v1/cases/{case_id}", approver, {"action": "reopen"})[0] == 403
+
+
+def test_api_only_agency_approver_publishes_tables(server):
+    base, _, service = server
+    rows = [{"from": "臺北", "to": "高雄", "mode": "高鐵", "cap": "1,700"}]
+    path = "/api/check/v1/tables/travel-fare/fare_cap"
+    vendor = login(base, "vendor")
+    assert call(base, "POST", path, vendor, {"rows": rows, "effective_from": "2027-01-01"})[0] == 403
+    reviewer = login(base, "reviewer1")
+    assert call(base, "POST", path, reviewer, {"rows": rows, "effective_from": "2027-01-01"})[0] == 403
+    approver = login(base, "approver1")
+    assert call(base, "POST", path, approver, {"rows": rows + rows, "effective_from": "2027-01-01"})[0] == 400
+    assert call(base, "POST", path, approver, {"rows": [{"from": "臺北", "to": "高雄", "mode": "高鐵", "cap": "abc"}],
+                                               "effective_from": "2027-01-01"})[0] == 400
+    status, data, _ = call(base, "POST", path, approver, {"rows": rows, "effective_from": "2027-01-01", "note": "調整"})
+    assert status == 200 and data["version"] == 2
+    assert service.store.table_at("EPA", "travel-fare", "fare_cap", "2027-01-02")[1] == [{"from": "臺北", "to": "高雄", "mode": "高鐵", "cap": 1700}]
+    actions = [a["action"] for a in service.store.audit_list(None)]
+    assert "table.publish" in actions
+
+
+def test_api_export_is_deidentified_and_audited(server):
+    base, token, service = server
+    call(base, "POST", "/api/check/v1/agents/travel-fare/check", token, {"record": record(claim_id="SECRET-KEY-1")})
+    reviewer = login(base, "reviewer1")
+    status, text, headers = call(base, "GET", "/api/check/v1/export.csv", reviewer)
+    assert status == 200 and "attachment" in headers["Content-Disposition"]
+    assert "SECRET-KEY-1" not in text and "王小明" not in text and "TF-01" in text
+    assert any(a["action"] == "export.csv" for a in service.store.audit_list("EPA"))
+
+
+def test_api_audit_needs_auditor_and_verifies(server):
+    base, _, _ = server
+    reviewer = login(base, "reviewer1")
+    assert call(base, "GET", "/api/check/v1/audit/verify", reviewer)[0] == 403
+    approver = login(base, "approver1")
+    status, data, _ = call(base, "GET", "/api/check/v1/audit/verify", approver)
+    assert status == 200 and data["ok"] is True
+    vendor = login(base, "vendor")
+    assert call(base, "GET", "/api/check/v1/audit/export", vendor)[1]["verify"]["ok"] is True
+    assert call(base, "GET", "/api/check/v1/audit/export", approver)[0] == 403
+
+
+def test_api_setup_track_reflects_real_state(server):
+    base, token, _ = server
+    reviewer = login(base, "reviewer1")
+    steps = call(base, "GET", "/api/check/v1/setup", reviewer)[1]["steps"]
+    states = [s["state"] for s in steps]
+    # travel-fare tables are set, attachment-check's are not -> step 1 current; step 3 blocked on it.
+    assert states[0] == "current" and states[1] == "done" and states[2] == "blocked" and states[3] == "blocked"
+
+
+def test_api_ui_served_with_csp(server):
+    base, _, _ = server
+    with urllib.request.urlopen(base + "/", timeout=5) as response:  # nosec B310 -- loopback test server
+        html = response.read().decode()
+    assert "檢核平臺" in html and response.headers["Cache-Control"] == "no-store"

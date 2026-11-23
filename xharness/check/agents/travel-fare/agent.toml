@@ -1,0 +1,16 @@
+id = "travel-fare"
+name = "國內差旅費交通費檢核"
+version = "1.0.0"
+description = "核銷送出前比對每段行程的交通費與機關核定的票價上限、車廂等級，並找出同日重複報支的行程。附票根時先辨識再比對。"
+triggers = ["sync", "batch"]
+needs = ["ocr"]              # 只有附票根（documents）時走非同步；沒附就同步回覆
+business_key = "claim_id"
+required = ["claim_id", "traveler", "trip_date", "legs"]
+person_field = "traveler"
+date_field = "trip_date"
+risk = "medium"              # 中風險：人工抽審至少 10%
+depends = ["BAF 核銷資料"]
+
+[retry]
+attempts = 3
+backoff_seconds = 2

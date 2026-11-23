@@ -1,0 +1,21 @@
+[
+  {"name": "來回都在上限內", "expect": [],
+   "record": {"claim_id": "C-001", "traveler": "王小明", "trip_date": "2026-12-01",
+              "legs": [{"from": "臺北", "to": "臺中", "mode": "高鐵", "class": "標準", "amount": 700},
+                       {"from": "臺中", "to": "臺北", "mode": "高鐵", "class": "標準", "amount": 700}]}},
+  {"name": "去程高於上限", "expect": ["TF-01"],
+   "record": {"claim_id": "C-002", "traveler": "李大華", "trip_date": "2026-12-02",
+              "legs": [{"from": "臺北", "to": "高雄", "mode": "高鐵", "class": "標準", "amount": 1640}]}},
+  {"name": "路線不在上限表", "expect": ["TF-02"],
+   "record": {"claim_id": "C-003", "traveler": "陳美玲", "trip_date": "2026-12-03",
+              "legs": [{"from": "臺北", "to": "臺東", "mode": "臺鐵", "class": "標準", "amount": 783}]}},
+  {"name": "商務車廂", "expect": ["TF-01", "TF-03"],
+   "record": {"claim_id": "C-004", "traveler": "林志遠", "trip_date": "2026-12-04",
+              "legs": [{"from": "臺北", "to": "臺中", "mode": "高鐵", "class": "商務", "amount": 1060}]}},
+  {"name": "同日重複行程", "expect": ["TF-04"],
+   "record": {"claim_id": "C-005", "traveler": "張雅婷", "trip_date": "2026-12-05",
+              "legs": [{"from": "臺北", "to": "花蓮", "mode": "臺鐵", "amount": 440},
+                       {"from": "臺北", "to": "花蓮", "mode": "臺鐵", "amount": 440}]}},
+  {"name": "缺行程", "expect": ["INPUT"],
+   "record": {"claim_id": "C-006", "traveler": "黃建國", "trip_date": "2026-12-06", "legs": []}}
+]

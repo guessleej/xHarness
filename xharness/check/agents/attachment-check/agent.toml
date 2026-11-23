@@ -1,0 +1,10 @@
+id = "attachment-check"
+name = "核銷附件缺漏檢核"
+version = "1.0.0"
+description = "擴充示範：依核銷類別比對應附的單據是否齊全。整支只有設定、規則與判定值表，沒有改平臺核心。"
+triggers = ["sync", "batch"]
+business_key = "claim_id"
+required = ["claim_id", "claim_type"]
+person_field = "applicant"
+date_field = "claim_date"
+risk = "low"
