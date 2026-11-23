@@ -65,7 +65,7 @@ textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:
 table{width:100%;border-collapse:collapse;font-size:15px}
 th{position:sticky;top:0;background:var(--card);text-align:left;font-size:14px;color:var(--ink2);padding:8px 10px;z-index:1}
 td{padding:9px 10px;border-top:1px solid var(--line);vertical-align:top}
-td.nw{white-space:nowrap}tr.click{cursor:pointer}tr.click:hover td{background:var(--tint)}
+td.nw{white-space:nowrap}td.reason{min-width:16em}tr.click{cursor:pointer}tr.click:hover td{background:var(--tint)}
 .pill{display:inline-block;white-space:nowrap;padding:2px 10px;border-radius:999px;font-size:14px;font-weight:600;background:var(--mist)}
 .pill.open{background:rgba(191,24,31,.12);color:var(--red)}.pill.in_progress{background:rgba(180,83,9,.14);color:var(--warn)}
 .pill.resolved{background:rgba(46,125,50,.14);color:var(--ok)}.pill.manual{background:rgba(14,116,144,.14);color:var(--info)}
@@ -273,7 +273,7 @@ async function loadSetup(){const steps=(await api("/setup")).steps;const done=st
 $("cStatus").onchange=loadCases;$("cAgent").onchange=loadCases;$("cMine").onchange=loadCases;$("cReload").onclick=loadCases;
 async function loadCases(){const q=new URLSearchParams({status:$("cStatus").value,agent:$("cAgent").value,mine:$("cMine").checked?"1":""});const d=await api("/cases?"+q);
   $("cCount").textContent=`共 ${d.total} 件${d.total>d.cases.length?`，顯示最新 ${d.cases.length} 件，請用篩選縮小範圍`:""}`;
-  $("cRows").innerHTML=d.cases.map(c=>`<tr class="click" data-id="${esc(c.case_id)}"><td class="nw"><span class="pill ${esc(c.status)}">${esc(c.status_label)}</span></td><td>${esc(c.reason)}</td><td class="nw">${esc(agentName(c.agent))}</td><td class="nw">${esc(c.business_key)}</td><td class="nw">${esc(c.assignee)}</td><td class="nw">${t(c.updated)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">沒有案件</td></tr>';
+  $("cRows").innerHTML=d.cases.map(c=>`<tr class="click" data-id="${esc(c.case_id)}"><td class="nw"><span class="pill ${esc(c.status)}">${esc(c.status_label)}</span></td><td class="reason">${esc(c.reason)}</td><td style="min-width:7em">${esc(agentName(c.agent))}</td><td class="nw">${esc(c.business_key)}</td><td class="nw">${esc(c.assignee)}</td><td class="nw">${t(c.updated)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">沒有案件</td></tr>';
   $("cRows").querySelectorAll("tr.click").forEach(r=>r.onclick=()=>caseDrawer(r.dataset.id))}
 function findingHtml(f){const lv={notice:"提示",manual:"轉人工",sample:"抽審"}[f.level]||f.level;
   const ev=(f.evidence||[]).map(e=>`${esc(e.doc||"")} 第${esc(e.page||"?")}頁 ${esc(e.field||"")}=${esc(e.value||"")}`).join("；");
