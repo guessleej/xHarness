@@ -655,7 +655,7 @@ def test_assist_fields_reach_the_rules_with_evidence():
     assert [r["rule_id"] for r in run["results"]] == ["TX-01"]
     ev = run["results"][0]["evidence"][0]
     assert ev["assist"] == "receipt" and ev["model"] == "gemma-4-e4b-xreadable-ocr" and ev["confidence"] == 0.95 and ev["quote"] == "NT$420"
-    assert any(a["action"] == "assist.call" for a in eng.store.audit_list(None))
+    assert any(a["action"] == "assist.call" for a in eng.store.audit_list("EPA"))  # visible to the agency, not only the platform
     eng.shutdown()
 
 

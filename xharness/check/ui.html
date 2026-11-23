@@ -318,8 +318,9 @@ async function start(){if(!token){$("loginShell").hidden=false;$("shell").hidden
   $("nav").innerHTML=NAV.map(([g,why,items])=>{const vis=items.filter(x=>!x[2]||has(x[2]));if(!vis.length)return"";
     return `<div class="grp" title="${why}">${g}</div>`+vis.map(x=>`<button data-t="${x[0]}" title="${x[1]}">${icon(x[0])}<span class="lbl">${x[1]}</span>${x[0]==="cases"?'<span class="badge" hidden></span>':""}</button>`).join("")}).join("");
   $("nav").querySelectorAll("button").forEach(b=>b.onclick=()=>show(b.dataset.t));
-  const opts=agents.map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("");$("tAgent").innerHTML=opts;$("vAgent").innerHTML=opts;$("cAgent").innerHTML='<option value="">全部 Agent</option>'+opts;
-  await loadSetup();show(tab);badge()}
+  fillAgentSelects();await loadSetup();show(tab);badge()}
+function fillAgentSelects(){const opts=agents.map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("");
+  for(const [id,head] of [["tAgent",""],["vAgent",""],["cAgent",'<option value="">全部 Agent</option>']]){const el=$(id);const cur=el.value;el.innerHTML=head+opts;if([...el.options].some(o=>o.value===cur))el.value=cur}}
 async function logout(call){if(call){try{await api("/logout",{method:"POST"})}catch(e){}}token="";store.set("xck","");me=null;start()}
 $("loginForm").onsubmit=async e=>{e.preventDefault();$("lerr").textContent="";
   try{const r=await api("/login",{method:"POST",body:JSON.stringify({user:$("lu").value,password:$("lp").value})});token=r.token;store.set("xck",token);$("lp").value="";start()}
@@ -348,7 +349,7 @@ async function caseDrawer(id){openCase=id;const c=await api("/cases/"+encodeURIC
    <div class="row" style="margin-top:10px"><input id="dAssignee" placeholder="指派給（帳號）"><button class="btn" data-a="assign">指派</button></div>
    <textarea id="dNote" rows="3" style="margin-top:10px;font-family:inherit;font-size:16px" placeholder="附註（處理結果、聯絡紀錄）"></textarea>
    <div class="row" style="margin-top:8px"><button class="btn" data-a="note">加附註</button><span id="dErr" class="err"></span></div>`:'<p class="muted">你沒有覆核角色，只能檢視。</p>';
-  $("dBody").innerHTML=`<h1 style="font-size:22px">${esc(c.reason)}</h1><p><span class="pill ${esc(c.status)}">${esc(c.status_label)}</span>　<span class="muted">${esc(c.agent)}｜業務鍵 ${esc(c.business_key)}｜承辦 ${esc(c.assignee||"未指派")}</span></p>
+  $("dBody").innerHTML=`<h1 style="font-size:22px">${esc(c.reason)}</h1><p><span class="pill ${esc(c.status)}">${esc(c.status_label)}</span>　<span class="muted">${esc(agentName(c.agent))}｜業務鍵 ${esc(c.business_key)}｜承辦 ${esc(c.assignee||"未指派")}</span></p>
    <h2>提示與證據（${c.results.length}）</h2>${c.results.map(findingHtml).join("")}${acts}
    <h2 style="margin-top:18px">歷程</h2><div class="events">${c.events.map(e=>`<div>${t(e.ts)}　${esc(e.actor)}　${esc(ACT[e.action]||e.action)}${e.from_status!==e.to_status?`（${esc(ST[e.from_status]||"新案")}→${esc(ST[e.to_status]||e.to_status)}）`:""}　${esc(e.note)}</div>`).join("")}</div>`;
   $("dBody").querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>caseAct(b.dataset.a));openDrawer()}
@@ -360,7 +361,7 @@ $("dClose").onclick=()=>{$("drawer").classList.remove("on");$("drawer").setAttri
 document.addEventListener("keydown",e=>{if(e.key==="Escape")$("dClose").click()});
 
 // --- agents (清冊)
-async function loadAgents(){agents=(await api("/agents")).agents;const risk={low:"低風險",medium:"中風險",high:"高風險"};
+async function loadAgents(){agents=(await api("/agents")).agents;fillAgentSelects();const risk={low:"低風險",medium:"中風險",high:"高風險"};
   const trig={sync:"送出前同步檢核",batch:"每日批次"};
   const evals=await Promise.all(agents.map(a=>api(`/agents/${encodeURIComponent(a.id)}/eval`).catch(()=>null)));
   const pct=m=>m&&m.value!=null?Math.round(m.value*100)+"%":"—";
@@ -562,7 +563,7 @@ function stepPublish(){const ids=D.rules.map(r=>r.id);$("dPanel").innerHTML=`<h2
     $("pubGo").disabled=!r.ok};
   $("pubGo").onclick=async()=>{try{const r=await api(`/designs/${encodeURIComponent(D.id)}/publish`,{method:"POST",body:JSON.stringify({note:$("pubNote").value})});
     $("vOut").innerHTML=`<span class="pill resolved">已發布第 ${r.version} 版</span>　機關核定人還要到「判定值」頁填正式數值。`;$("pubGo").disabled=true;
-    agents=(await api("/agents")).agents;history()}catch(e){$("vOut").innerHTML=`<span class="err">${esc(e.message)}</span>`}};
+    agents=(await api("/agents")).agents;fillAgentSelects();history()}catch(e){$("vOut").innerHTML=`<span class="err">${esc(e.message)}</span>`}};
   history()}
 async function history(){if(!D.id)return;let m;try{m=await api("/designs/"+encodeURIComponent(D.id))}catch(e){return}
   $("vHistory").innerHTML=m.versions.map(v=>`<div>第 ${v.version} 版　${t(v.published_at)}　${esc(v.published_by)}　${esc(v.note)}　<button class="btn" data-rb="${v.version}">回復到這一版</button></div>`).join("")||"還沒有發布過";
@@ -692,12 +693,13 @@ $("tSend").onclick=async()=>{$("tErr").textContent="";let body;try{body=JSON.par
     const b64=await new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]);r.onerror=bad;r.readAsDataURL(f)});
     body.documents=[{name:f.name,data:b64}]}
   $("tSend").disabled=true;try{const r=await api(`/agents/${encodeURIComponent($("tAgent").value)}/check`,{method:"POST",body:JSON.stringify(body)});
-    if(r.task_id){$("tOut").hidden=false;$("tOut").innerHTML=`<h2>已排入非同步辨識</h2><p>任務 <b id="tTask">${esc(r.task_id)}</b>　狀態 <span id="tState">${esc(r.state)}</span></p><div id="tRes"></div>`;pollTask(r.task_id,0)}
+    if(r.task_id){$("tOut").hidden=false;$("tOut").innerHTML=`<h2>已排入非同步辨識</h2><p>任務 <b id="tTask">${esc(r.task_id)}</b>　狀態 <span id="tState">${esc(TASK[r.state]||r.state)}</span></p><div id="tRes"></div>`;pollTask(r.task_id,0)}
     else showResult(r)}catch(e){$("tErr").textContent=e.message}finally{$("tSend").disabled=false}};
 function showResult(r){$("tOut").hidden=false;const res=r.results||[];
   $("tOut").innerHTML=`<h2>結果</h2><p class="muted">執行識別 ${esc(r.run_id)}｜Agent v${esc(r.agent_version)}｜資料基準 ${esc(r.data_basis)}｜判定值版本 ${esc(JSON.stringify(r.table_versions))}｜耗時 ${esc(r.elapsed_ms)} ms</p>`+
    res.map(x=>`<h2 style="font-size:17px">${esc(x.business_key)}</h2>`+(x.findings.length?x.findings.map(findingHtml).join(""):'<p>沒有提示，可以照原流程送出。</p>')).join("");loadSetup()}
-async function pollTask(id,n){const d=await api("/tasks/"+encodeURIComponent(id));$("tState").textContent=d.state;
+const TASK={queued:"排隊中",running:"辨識與檢核中",done:"完成",error:"失敗"};
+async function pollTask(id,n){const d=await api("/tasks/"+encodeURIComponent(id));$("tState").textContent=TASK[d.state]||d.state;
   if(d.state==="done"){const run=d.result;$("tRes").innerHTML=(run.results.length?run.results.map(findingHtml).join(""):"<p>沒有提示。</p>")+`<p class="muted">執行識別 ${esc(run.run_id)}</p>`;loadSetup();return}
   if(d.state==="error"){$("tRes").innerHTML=`<p class="err">${esc(d.error)}</p>`;return}if(n<60)setTimeout(()=>pollTask(id,n+1),1000)}
 
@@ -721,7 +723,7 @@ function drawRows(edit){$("vRows").innerHTML=trows.map((r,i)=>"<tr>"+tdef.column
 $("vAdd").onclick=()=>{trows.push(Object.fromEntries(tdef.columns.map(c=>[c.name,""])));drawRows(true)};
 $("vPub").onclick=async()=>{$("vErr").textContent="";if(!$("vNote").value.trim()){$("vErr").textContent="請寫異動說明（會進版本歷程與稽核）";return}
   try{const r=await api(`/tables/${encodeURIComponent($("vAgent").value)}/${encodeURIComponent($("vTable").value)}`,{method:"POST",body:JSON.stringify({rows:trows,effective_from:$("vEff").value,note:$("vNote").value})});
-   $("vNote").value="";await loadTable();loadSetup();$("vErr").textContent=`已發布第 ${r.version} 版`}catch(e){$("vErr").textContent=e.message}};
+   $("vNote").value="";await loadTable();loadSetup();$("vErr").innerHTML=`<span class="pill resolved">已發布第 ${r.version} 版</span>`}catch(e){$("vErr").textContent=e.message}};
 
 // --- runs
 $("rReload").onclick=loadRuns;
@@ -741,8 +743,13 @@ $("sCsv").onclick=async()=>{const q=new URLSearchParams({since:$("sSince").value
 
 // --- audit
 $("aVerify").onclick=async()=>{const r=await api("/audit/verify");$("aRes").innerHTML=r.ok?`<span class="pill resolved">完整</span>　${r.count} 筆全部通過`:`<span class="pill open">斷開</span>　第 ${r.broken_at} 筆起不符`;loadAudit()};
+const AUDIT={"login":"登入","logout":"登出","check.run":"執行檢核","check.submit":"送出附件檢核","assist.call":"子Agent呼叫模型",
+  "case.take":"接手案件","case.resolve":"結案","case.reopen":"重新開啟案件","case.assign":"指派案件","case.note":"案件附註",
+  "table.publish":"發布判定值","agent.publish":"發布Agent","agent.rollback":"回復Agent版本","agent.enable":"啟用Agent","agent.disable":"停用Agent",
+  "connector.save":"儲存介接","connector.delete":"刪除介接","schedule.save":"儲存排程","schedule.delete":"刪除排程","schedule.run":"手動執行排程",
+  "schedule.failed":"排程失敗","client.add":"發API金鑰","client.revoke":"撤銷API金鑰","export.csv":"匯出CSV","audit.verify":"驗證稽核鏈","audit.export":"匯出稽核鏈"};
 async function loadAudit(){if(!has("auditor"))return;const d=await api("/audit?limit=300");
-  $("aRows").innerHTML=d.audit.map(a=>`<tr><td>${a.seq}</td><td>${t(a.ts)}</td><td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td>${esc(a.target)}</td><td class="muted">${esc(a.hash.slice(0,12))}</td></tr>`).join("")}
+  $("aRows").innerHTML=d.audit.map(a=>`<tr><td>${a.seq}</td><td>${t(a.ts)}</td><td>${esc(a.actor)}</td><td>${esc(AUDIT[a.action]||a.action)}</td><td>${esc(a.target)}</td><td class="muted">${esc(a.hash.slice(0,12))}</td></tr>`).join("")}
 start();
 </script>
 </body>

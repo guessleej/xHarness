@@ -218,13 +218,13 @@ class CheckEngine:
         self._pool(agent.id).submit(self._work, agent, task_id, agency, record, documents, caller, received or now_iso())
         return task_id
 
-    def _extract(self, agent: AgentSpec, record: dict[str, Any], documents: list[dict[str, Any]]
+    def _extract(self, agent: AgentSpec, record: dict[str, Any], documents: list[dict[str, Any]], agency: str = ""
                  ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]] | None]:
         """(record with extracted fields, evidence, findings that replace the rules or None)."""
         if not documents:
             return record, [], None
         if agent.assists:
-            return self._assists(agent, record, documents)
+            return self._assists(agent, record, documents, agency)
         if self.extractor is None:
             return record, [], [_manual("DOC", "附件無法判讀", "附件辨識服務未設定，轉人工")]
         if not self.breaker.allow():
@@ -242,7 +242,7 @@ class CheckEngine:
                     time.sleep(min(agent.retry_backoff * (2 ** attempt), 60.0))
         return record, [], [_manual("DOC", "附件無法判讀", f"附件辨識失敗（{type(last).__name__}），轉人工")]
 
-    def _assists(self, agent: AgentSpec, record: dict[str, Any], documents: list[dict[str, Any]]
+    def _assists(self, agent: AgentSpec, record: dict[str, Any], documents: list[dict[str, Any]], agency: str = ""
                  ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]] | None]:
         """Run each assist sub-agent over the documents; its fields go into the record, rules decide."""
         docs = [read_document(d) for d in documents]
@@ -275,7 +275,7 @@ class CheckEngine:
                     breaker.fail()
                     if attempt + 1 < agent.retry_attempts and breaker.allow():
                         time.sleep(min(agent.retry_backoff * (2 ** attempt), 60.0))
-            self.store.audit("assist", "assist.call", target=agent.id, detail={
+            self.store.audit("assist", "assist.call", agency=agency, target=agent.id, detail={
                 "assist": name, "model": entry.model, "ok": fields is not None, "error": type(last).__name__ if last else "",
                 **({k: note[k] for k in ("confidence", "prompt_sha256", "input_sha256")} if note else {})})
             if fields is None:
@@ -300,7 +300,7 @@ class CheckEngine:
         try:
             result = self.check(agent.id, agency=agency, records=[record], trigger="async", caller=caller, received=received,
                                 params={"task_id": task_id, "documents": len(documents)},
-                                prepared=lambda rec: self._extract(agent, rec, documents))
+                                prepared=lambda rec: self._extract(agent, rec, documents, agency))
             self.store.set_task(task_id, state="done", run_id=result["run_id"])
         except Exception as error:  # noqa: BLE001 -- recorded on the task, source system keeps going
             self.store.set_task(task_id, state="error", error=f"{type(error).__name__}: {error}")
