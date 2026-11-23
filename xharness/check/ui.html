@@ -290,7 +290,7 @@ async function start(){if(!token){$("loginShell").hidden=false;$("shell").hidden
   try{me=await api("/me");agents=(await api("/agents")).agents}catch(e){return}
   $("loginShell").hidden=true;$("shell").hidden=false;
   try{fold(localStorage.getItem("xck-rail")==="1")}catch(e){}
-  const roleName={reviewer:"覆核",approver:"核定",operator:"試打",auditor:"稽核"};
+  const roleName={reviewer:"覆核",approver:"核定",operator:"試打",auditor:"稽核",designer:"設計"};
   $("who").innerHTML=`<div class="avatar" aria-hidden="true">${esc(me.name.slice(0,1).toUpperCase())}</div><div class="meta"><b>${esc(me.name)}</b><span>${esc(me.agency||"全部機關（唯讀）")}</span><span>${esc(me.roles.map(r=>roleName[r]||r).join("・"))}</span></div>
    <button id="out" title="登出" aria-label="登出"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5"/><path d="M5 12h11"/></svg></button>`;
   $("out").onclick=()=>logout(true);
@@ -415,7 +415,7 @@ function stepBasic(){$("dPanel").innerHTML=`<h2>1. 基本資料</h2><p class="hi
 function stepFields(){const fs=D.fields;$("dPanel").innerHTML=`<h2>2. 資料欄位</h2><p class="hint">貼一筆來源系統送來的樣本資料（JSON），按「抽出欄位」，再補上中文名稱、勾選必要欄位。</p>
   <textarea id="fSample" rows="6" spellcheck="false" placeholder='{"claim_id":"T-001","rider":"王小明","ride_date":"2026-12-01","unit":"總務處","rides":[{"fare":250}]}'>${esc(D.sample||"")}</textarea>
   <div class="row" style="margin:10px 0"><button class="btn" id="fPull">抽出欄位</button><span class="err" id="fErr"></span></div>
-  ${fs.length?`<div class="scroll"><table><thead><tr><th>欄位</th><th>型別</th><th>中文名稱</th><th>必要</th></tr></thead><tbody>${fs.map((f,i)=>`<tr><td>${esc(f.name)}${f.items&&f.items.length?`<div class="muted">每一筆：${f.items.map(x=>esc(x.name)).join("、")}</div>`:""}</td>
+  ${fs.length?`<div class="scroll"><table><thead><tr><th>欄位</th><th>型別</th><th>中文名稱</th><th>必要</th></tr></thead><tbody>${fs.map((f,i)=>`<tr><td>${esc(f.name)}${f.items&&f.items.length?`<div class="muted" style="margin-top:6px">清單裡每一筆的欄位：</div>${f.items.map((x,j)=>`<div class="row" style="gap:6px;margin:4px 0"><span style="min-width:90px">${esc(x.name)}</span><input data-k="fields.${i}.items.${j}.title" value="${esc(x.title||"")}" placeholder="中文名稱" style="width:140px"></div>`).join("")}`:""}</td>
    <td>${({text:"文字",number:"數字",date:"日期",bool:"是否",list:"清單"})[f.type]||f.type}</td><td><input data-k="fields.${i}.title" value="${esc(f.title||"")}"></td>
    <td><input type="checkbox" data-req="${esc(f.name)}" ${D.required.includes(f.name)?"checked":""}></td></tr>`).join("")}</tbody></table></div>
   <div class="fgrid" style="margin-top:14px"><label>業務單號<small>同一件事的識別，用來串歷次結果</small><select data-k="business_key"><option value="">請選</option>${opt(fs.filter(f=>f.type!=="list").map(f=>[f.name,f.title||f.name]),D.business_key)}</select></label>
@@ -425,7 +425,7 @@ function stepFields(){const fs=D.fields;$("dPanel").innerHTML=`<h2>2. 資料欄�
   $("dPanel").querySelectorAll("[data-req]").forEach(c=>c.onchange=()=>{const n=c.dataset.req;D.required=c.checked?[...new Set([...D.required,n])]:D.required.filter(x=>x!==n)});
   $("fPull").onclick=async()=>{let sample;try{sample=JSON.parse($("fSample").value)}catch(e){$("fErr").textContent="樣本不是合法的 JSON";return}
     const r=await api("/designs/sample-fields",{method:"POST",body:JSON.stringify({sample})});const old=Object.fromEntries(D.fields.map(f=>[f.name,f]));
-    D.fields=r.fields.map(f=>({...f,title:(old[f.name]||{}).title||""}));if(!D.cases.length)D.cases=[{name:"樣本",record:sample,expect:[]}];stepFields()}}
+    D.fields=r.fields.map(f=>{const o=old[f.name]||{};const oi=Object.fromEntries((o.items||[]).map(x=>[x.name,x.title]));return {...f,title:o.title||"",items:(f.items||[]).map(x=>({...x,title:oi[x.name]||""}))}});if(!D.cases.length)D.cases=[{name:"樣本",record:sample,expect:[]}];stepFields()}}
 
 // operand editor: {field}|{record}|{value}|{lookup}
 function operandHtml(o,path,each){const kind=Object.keys(o||{field:""})[0];const v=(o||{})[kind];
