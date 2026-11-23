@@ -556,3 +556,16 @@ def test_api_design_publish_run_and_disable(server):
     assert service.agents["taxi-limit"].name == "計程車費額度檢核"
     actions = [a["action"] for a in service.store.audit_list(None)]
     assert {"agent.publish", "agent.rollback", "agent.disable", "agent.enable"} <= set(actions)
+
+
+def test_second_instance_picks_up_published_agent(tmp_path, monkeypatch):
+    monkeypatch.setenv("XHARNESS_HOME", str(tmp_path / "home"))
+    settings = {"home": str(tmp_path / "check")}
+    first, second = CheckService(settings, {}), CheckService(settings, {})
+    first.store.publish_agent("taxi-limit", TAXI, "u", {})
+    first.reload_web_agents()
+    assert "taxi-limit" in first.agents and "taxi-limit" not in second.agents
+    second.refresh()
+    assert "taxi-limit" in second.agents
+    first.engine.shutdown()
+    second.engine.shutdown()

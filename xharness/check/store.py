@@ -364,6 +364,11 @@ class CheckStore:
             row["definition"] = json.loads(row["definition"])
         return rows
 
+    def agents_stamp(self) -> int:
+        """Changes whenever any process publishes an agent version (lets every instance on the same database reload)."""
+        row = self._one("SELECT MAX(id) AS m FROM agent_versions")
+        return int((row or {}).get("m") or 0)
+
     def set_enabled(self, agent: str, enabled: bool, actor: str) -> None:
         with self._lock:
             self._db.execute("INSERT INTO agent_state(agent, enabled, actor, updated) VALUES (?,?,?,?) ON CONFLICT(agent) DO UPDATE SET "

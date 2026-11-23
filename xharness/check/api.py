@@ -162,6 +162,11 @@ class CheckService:
         for agent_id in [a for a in self.agents if a not in self.code_agents and a not in published]:
             self.agents.pop(agent_id)
         self.agents.update(published)
+        self._stamp = self.store.agents_stamp()
+
+    def refresh(self) -> None:
+        if self.store.agents_stamp() != getattr(self, "_stamp", -1):
+            self.reload_web_agents()
 
     def enabled(self, agent_id: str) -> bool:
         return self.store.enabled_map().get(agent_id, True)
@@ -369,6 +374,7 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
                         raise ApiError(401, "帳號或密碼錯誤，或這個帳號沒有檢核平臺的機關與角色")
                     return self._json(200, {"token": result[0], "me": result[1].public()})
                 caller = self._caller()
+                service.refresh()  # another instance on the same database may have published an agent
                 return self._route(method, route, query, caller, received)
             except ApiError as error:
                 return self._json(error.status, {"error": str(error)})
