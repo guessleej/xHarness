@@ -398,8 +398,8 @@ class CheckStore:
                              "actor=excluded.actor, updated=excluded.updated", (cid, agency, name, canonical(config), keep, actor, now_iso()))
 
     def connectors(self, agency: str | None) -> list[dict[str, Any]]:
-        rows = self._rows("SELECT * FROM connectors" + ("" if agency is None else " WHERE agency=?") + " ORDER BY name",
-                          () if agency is None else (agency,))
+        rows = (self._rows("SELECT * FROM connectors ORDER BY name") if agency is None
+                else self._rows("SELECT * FROM connectors WHERE agency=? ORDER BY name", (agency,)))
         for row in rows:
             row["config"] = json.loads(row["config"])
             row["has_secret"] = bool(row.pop("secret"))
@@ -426,8 +426,8 @@ class CheckStore:
                              (sid, agency, agent, connector, at, days, int(enabled), actor, now_iso()))
 
     def schedules(self, agency: str | None) -> list[dict[str, Any]]:
-        rows = self._rows("SELECT * FROM schedules" + ("" if agency is None else " WHERE agency=?") + " ORDER BY at",
-                          () if agency is None else (agency,))
+        rows = (self._rows("SELECT * FROM schedules ORDER BY at") if agency is None
+                else self._rows("SELECT * FROM schedules WHERE agency=? ORDER BY at", (agency,)))
         for row in rows:
             row["enabled"] = bool(row["enabled"])
             row["last"] = self._one("SELECT * FROM schedule_runs WHERE schedule=? ORDER BY id DESC LIMIT 1", (row["id"],))

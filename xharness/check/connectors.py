@@ -104,15 +104,14 @@ def map_records(records: list[Any], mapping: dict[str, str], records_path: str =
     for raw in records:
         if not isinstance(raw, dict):
             continue
-        record = dict(raw)
-        for ours, theirs in mapping.items():
-            if theirs:
-                record[ours] = rulekit.dig(raw, theirs)
+        record = {ours: rulekit.dig(raw, theirs) for ours, theirs in mapping.items() if theirs}  # mapped fields first
+        for key, value in raw.items():
+            record.setdefault(key, value)
         out.append(record)
     return out
 
 
-def fetch(config: dict[str, Any], settings: dict[str, Any], secret: str = "", *, opener: Any = None,
+def fetch(config: dict[str, Any], settings: dict[str, Any], secret: str, *, opener: Any = None,
           dry_run: bool = False) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """(records, snapshot note). dry_run reads without moving files (for "測試連線")."""
     basis = datetime.now(TPE).isoformat(timespec="seconds")

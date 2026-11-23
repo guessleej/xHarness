@@ -94,6 +94,9 @@ def tick(service: Any, now: datetime | None = None) -> list[dict[str, Any]]:
         slot = now.strftime("%Y-%m-%d")
         if schedule.get("last") and schedule["last"]["slot"] == slot:
             continue
+        # Catch-up is for a server that was down at the time, not for a schedule created or edited after it.
+        if str(schedule.get("updated", ""))[:16] >= f"{slot}T{schedule['at']}":
+            continue
         out.append(run_schedule(service, schedule, slot))
     return out
 

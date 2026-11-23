@@ -628,7 +628,7 @@ function cnForm(c){const x=c?c.config:{kind:"rest",mapping:{}};const map=Object.
 
 // --- 排程 -----------------------------------------------------------------------
 let SC={schedules:[]},scEdit=null;
-async function loadSchedules(){[SC,CN]=await Promise.all([api("/schedules"),api("/connectors")]);
+async function loadSchedules(){[SC,CN]=await Promise.all([api("/schedules"),api("/connectors")]);badge();
   const st={done:["resolved","完成"],partial:["in_progress","部分失敗"],failed:["open","失敗"],running:["sample","執行中"],skipped:["sample","略過"]};
   $("scRows").innerHTML=SC.schedules.map(x=>{const c=CN.connectors.find(c=>c.id===x.connector);const l=x.last;
     return `<tr><td>${esc(agentName(x.agent))}</td><td>${esc(c?c.name:"（已刪除）")}</td><td class="nw">${esc(x.days_label)} ${esc(x.at)}</td>

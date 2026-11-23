@@ -744,7 +744,8 @@ def test_rest_fetch_maps_fields_and_sends_token_in_header(monkeypatch):
     monkeypatch.setattr(conn, "check_host", lambda url, settings: None)
     records, note = conn.fetch({"kind": "rest", "name": "BAF", "url": "https://baf.example.test/api?since=today",
                                 "records_path": "data.items", "mapping": {"claim_id": "no", "rider": "who.name"}}, {}, "s3cret", opener=opener)
-    assert records == [{"no": "T1", "who": {"name": "王小明"}, "unit": "總務處", "claim_id": "T1", "rider": "王小明"}]
+    assert records == [{"claim_id": "T1", "rider": "王小明", "no": "T1", "who": {"name": "王小明"}, "unit": "總務處"}]
+    assert list(records[0])[:2] == ["claim_id", "rider"]
     assert seen["auth"] == "Bearer s3cret" and "s3cret" not in seen["url"] and note["records"] == 1 and len(note["sha256"]) == 64
 
 
@@ -756,6 +757,7 @@ def _sched_service(tmp_path, monkeypatch, **extra):
         service.store.put_table(agency="EPA", agent="travel-fare", name=name, rows=rows, effective_from="2026-01-01", approved_by="p")
     service.store.save_connector("c1", "EPA", "BAF 每日匯出", {"kind": "folder", "name": "BAF 每日匯出", "folder": "baf"}, "", "u")
     service.store.save_schedule("s1", "EPA", "travel-fare", "c1", "02:00", "weekdays", True, "u")
+    service.store._db.execute("UPDATE schedules SET updated='2026-01-01T00:00:00.000+08:00'")  # created long before the slots tested
     return service
 
 
@@ -840,3 +842,15 @@ def test_api_connectors_schedules_and_clients(server, tmp_path):
     assert call(base, "POST", "/api/check/v1/agents/travel-fare/check", data["token"], {"record": record()})[0] == 200
     assert call(base, "POST", "/api/check/v1/clients/IGSS/revoke", designer)[0] == 200
     assert call(base, "POST", "/api/check/v1/agents/travel-fare/check", data["token"], {"record": record()})[0] == 401
+
+
+def test_new_schedule_does_not_backfill_a_slot_before_it_existed(tmp_path, monkeypatch):
+    service = _sched_service(tmp_path, monkeypatch)
+    sid = "s1"
+    row = service.store.schedule(sid, "EPA")
+    service.store.save_schedule(sid, "EPA", row["agent"], row["connector"], "02:00", "daily", True, "u")  # edited now (21:xx today)
+    today = _dt.now(sched.TPE)
+    assert sched.tick(service, today.replace(hour=23, minute=0)) == []
+    tomorrow = today.replace(hour=2, minute=5) + __import__("datetime").timedelta(days=1)
+    assert [r["status"] for r in sched.tick(service, tomorrow)] in (["done"], ["partial"])
+    service.engine.shutdown()
