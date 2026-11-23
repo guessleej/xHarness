@@ -86,6 +86,19 @@ z-index:40;overflow:auto;padding:22px;transform:translateX(105%);transition:tran
 .rl{list-style:none;padding:0;margin:0}.rl li{padding:7px 0;border-top:1px solid var(--line);font-size:15px}.rl li span{color:var(--ink2);font-size:14px;display:block}
 .howto ol{margin:6px 0 0;padding-left:22px}.howto li{margin:4px 0}.howto code{background:var(--mist);padding:1px 6px;border-radius:6px;font-size:14px}
 @media (max-width:900px){.agrid{grid-template-columns:1fr}}
+.stepper{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.stepper button{border:0;border-radius:999px;padding:8px 16px;background:var(--card);box-shadow:var(--shadow);cursor:pointer;font-weight:600;color:var(--ink2)}
+.stepper button.on{background:var(--red);color:#fff}.stepper button.ok{color:var(--ok)}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px 18px}
+.fgrid label{display:flex;flex-direction:column;gap:4px;font-weight:600;font-size:15px}
+.fgrid label small,.hint{font-weight:400;color:var(--ink2);font-size:14px}
+.rule{background:var(--mist);border-radius:14px;padding:14px;margin:12px 0}
+.cond{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:8px;border-radius:10px;background:var(--card)}
+.cond select,.cond input{max-width:220px}
+.opnd{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}
+.vars{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.vars button{border:0;border-radius:999px;padding:2px 10px;background:var(--tint);color:var(--red);cursor:pointer;font-size:14px}
+.saved{font-size:14px;color:var(--ink2)}
+.navbtns{display:flex;justify-content:space-between;margin-top:16px}
 .kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:12px}
 .kpi div{background:var(--mist);border-radius:12px;padding:12px 14px}.kpi b{display:block;font-size:26px}
 .login{width:min(420px,100%)}
@@ -149,6 +162,8 @@ main{padding:16px}.track{grid-template-columns:1fr 1fr}
 
   <div data-tab="agents" hidden>
     <p class="muted" style="margin-top:-6px">平臺上接了哪些檢核Agent、各有哪些規則、判定值與驗證狀態。新增一支不必改平臺本身。</p>
+    <div class="row" style="margin-bottom:14px"><button class="btn primary" id="aNew" hidden>新增檢核Agent</button>
+      <span class="muted" id="aHint"></span></div>
     <div class="agrid" id="aGrid"></div>
     <div class="card howto" style="margin-top:18px"><h2>新增一支檢核Agent</h2>
       <ol><li>複製一支現有Agent的資料夾（例如核銷附件缺漏檢核），改 <code>agent.toml</code> 的代號、名稱與必要欄位。</li>
@@ -156,6 +171,13 @@ main{padding:16px}.track{grid-template-columns:1fr 1fr}
       <li>在 <code>tables.schema.toml</code> 定義判定值表的欄位；數值由機關在「判定值」頁核定，不寫在程式裡。</li>
       <li>在 <code>cases/</code> 放驗證案例與機關核定的標準答案，三項驗證指標都要 100%。</li>
       <li>資料夾放進設定檔 <code>[check] agents_dirs</code> 指定的目錄，重新啟動服務後就會出現在這一頁。</li></ol></div>
+  </div>
+
+  <div data-tab="design" hidden>
+    <div class="row" style="justify-content:space-between;margin-bottom:10px"><div class="stepper" id="dSteps"></div>
+      <span class="saved" id="dSaved"></span></div>
+    <div class="card" id="dPanel"></div>
+    <div class="navbtns"><button class="btn" id="dPrev">上一步</button><span id="dProblem" class="err"></span><button class="btn primary" id="dNext">下一步</button></div>
   </div>
 
   <div data-tab="try" hidden>
@@ -252,11 +274,11 @@ const NAV=[["日常作業","每天處理",[["cases","案件覆核",null],["try",
   ["規則設定","機關核定",[["agents","檢核Agent",null],["tables","判定值",null]]],
   ["查核追溯","對帳與留痕",[["runs","執行紀錄",null],["stats","統計匯出",null],["audit","稽核","auditor"]]]];
 const TABS=NAV.flatMap(g=>g[2].map(x=>[...x,g[0]]));
-function show(name){tab=name;const def=TABS.find(x=>x[0]===name)||TABS[0];
-  document.querySelectorAll("#nav button").forEach(b=>{b.classList.toggle("on",b.dataset.t===name);b.toggleAttribute("aria-current",b.dataset.t===name)});
+function show(name){tab=name;const navName=name==="design"?"agents":name;const def=name==="design"?["design","設計檢核Agent",null,"規則設定／檢核Agent"]:(TABS.find(x=>x[0]===name)||TABS[0]);
+  document.querySelectorAll("#nav button").forEach(b=>{b.classList.toggle("on",b.dataset.t===navName);b.toggleAttribute("aria-current",b.dataset.t===navName)});
   document.querySelectorAll("[data-tab]").forEach(s=>s.hidden=s.dataset.tab!==name);
   $("crumb").textContent=def[3];$("pageTitle").textContent=def[1];$("shell").classList.remove("open");
-  ({cases:loadCases,agents:loadAgents,try:prepTry,tables:loadTable,runs:loadRuns,stats:loadStats,audit:loadAudit})[name]()}
+  ({cases:loadCases,agents:loadAgents,design:()=>{},try:prepTry,tables:loadTable,runs:loadRuns,stats:loadStats,audit:loadAudit})[name]()}
 async function badge(){try{const d=await api("/cases?status=open&limit=1");const el=$("nav").querySelector('[data-t="cases"] .badge');
   if(el){el.textContent=d.total>999?"999+":d.total;el.hidden=!d.total}}catch(e){}}
 const fold=v=>{$("shell").classList.toggle("rail",v);try{localStorage.setItem("xck-rail",v?"1":"")}catch(e){}
@@ -324,7 +346,7 @@ async function loadAgents(){agents=(await api("/agents")).agents;const risk={low
     const ready=tables.filter(([,t])=>t.current).length;const ok=ev&&["rule_coverage","consistency","traceability"].every(k=>ev[k].value===1);
     return `<div class="card agent"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><h2>${esc(a.name)}</h2>
       <div class="sub">${esc(a.id)}｜v${esc(a.version)}｜規則指紋 ${esc(a.digest)}</div></div>
-      <span class="pill ${tables.length&&ready<tables.length?"open":"resolved"}">${tables.length&&ready<tables.length?"判定值未齊":"可上線"}</span></div>
+      <span class="pill ${!a.enabled?"sample":tables.length&&ready<tables.length?"open":"resolved"}">${!a.enabled?"已停用":tables.length&&ready<tables.length?"判定值未齊":"可上線"}</span></div>
      <div>${esc(a.description)}</div>
      <div class="chips"><span class="pill ${a.risk==="low"?"sample":"in_progress"}">${risk[a.risk]||a.risk}${a.sample_rate?`・抽審 ${Math.round(a.sample_rate*100)}%`:""}</span>
       ${a.triggers.map(t=>`<span class="pill sample">${trig[t]||t}</span>`).join("")}${a.needs.length?'<span class="pill manual">附件走非同步辨識</span>':""}</div>
@@ -335,9 +357,213 @@ async function loadAgents(){agents=(await api("/agents")).agents;const risk={low
      <div class="facts"><div>規則覆蓋率<b>${pct(ev&&ev.rule_coverage)}</b></div><div>回歸一致率<b>${pct(ev&&ev.consistency)}</b></div><div>可追溯率<b>${pct(ev&&ev.traceability)}</b></div></div>
      ${ok?"":'<p class="err">驗證指標未達 100%，請先修規則或案例</p>'}
      <div class="row" style="margin-top:6px">${has("operator")?`<button class="btn primary" data-go="try" data-a="${esc(a.id)}">用這支試打</button>`:""}
-      ${tables.length?`<button class="btn" data-go="tables" data-a="${esc(a.id)}">看判定值</button>`:""}<button class="btn" data-go="cases" data-a="${esc(a.id)}">看案件</button></div></div>`}).join("");
+      ${tables.length?`<button class="btn" data-go="tables" data-a="${esc(a.id)}">看判定值</button>`:""}<button class="btn" data-go="cases" data-a="${esc(a.id)}">看案件</button></div>
+     <div class="row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+      ${has("operator")&&a.enabled?`<button class="btn" data-run="${esc(a.id)}">立即執行／上傳整批</button>`:""}
+      ${has("designer")&&a.source==="web"?`<button class="btn" data-edit="${esc(a.id)}">編輯規則與版本</button>`:""}
+      ${has("designer")?`<button class="btn" data-toggle="${esc(a.id)}" data-on="${a.enabled?1:0}">${a.enabled?"停用":"啟用"}</button>`:""}
+      <span class="muted">${a.source==="code"?"程式規則包，由工程師維護":"網頁設計，第 "+esc(a.version)+" 版"}${a.enabled?"":"｜已停用：來源系統照常送件，不提示"}</span></div></div>`}).join("");
+  $("aNew").hidden=!has("designer");$("aHint").textContent=has("designer")?"網頁上設計的Agent要通過驗證才能發布；程式規則包只能在這裡啟用或停用。":"";
+  $("aGrid").querySelectorAll("[data-run]").forEach(b=>b.onclick=()=>runDrawer(b.dataset.run));
+  $("aGrid").querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>openDesigner(b.dataset.edit));
+  $("aGrid").querySelectorAll("[data-toggle]").forEach(b=>b.onclick=async()=>{const on=b.dataset.on!=="1";
+    if(!on&&!confirm("停用後，來源系統照常送件，但這支Agent不再提示。確定停用？"))return;
+    await api(`/agents/${encodeURIComponent(b.dataset.toggle)}/enabled`,{method:"POST",body:JSON.stringify({enabled:on})});loadAgents()});
   $("aGrid").querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{const id=b.dataset.a,go=b.dataset.go;
     if(go==="try")$("tAgent").value=id;if(go==="tables"){$("vAgent").value=id;fillTables()}if(go==="cases")$("cAgent").value=id;show(go)})}
+
+// --- designer (設計檢核Agent) -------------------------------------------------
+const STEPS=["基本資料","資料欄位","規則","判定值表","輔助子Agent","驗證與發布"];
+let D=null,dStep=0,dNew=false,dMeta=null,OPS={},AK={};
+const blankDef=()=>({id:"",name:"",description:"",risk:"low",triggers:["sync","batch"],needs:[],business_key:"",person_field:"",date_field:"",
+  required:[],fields:[],sample:"",tables:{},test_tables:{},rules:[],assists:[],cases:[]});
+$("aNew").onclick=()=>openDesigner("");
+async function openDesigner(id){const meta=await api("/designs");OPS=meta.ops;AK=meta.assist_kinds;dNew=!id;dStep=0;
+  if(id){dMeta=await api("/designs/"+encodeURIComponent(id));D=Object.assign(blankDef(),dMeta.draft?dMeta.draft.definition:(dMeta.versions[0]||{}).definition||{})}
+  else{dMeta=null;D=blankDef()}
+  $("dSaved").textContent=dMeta&&dMeta.draft?`草稿最後儲存 ${t(dMeta.draft.updated)}`:"";show("design");drawDesigner()}
+function drawDesigner(){$("dSteps").innerHTML=STEPS.map((n,i)=>`<button data-s="${i}" class="${i===dStep?"on":""}">${i+1}. ${n}</button>`).join("");
+  $("dSteps").querySelectorAll("button").forEach(b=>b.onclick=()=>goStep(+b.dataset.s));
+  $("dPrev").disabled=dStep===0;$("dNext").hidden=dStep===STEPS.length-1;$("dProblem").textContent="";
+  [stepBasic,stepFields,stepRules,stepTables,stepAssists,stepPublish][dStep]()}
+async function goStep(i){if(!await saveDraft())return;dStep=i;drawDesigner();scrollTo(0,0)}
+$("dPrev").onclick=()=>goStep(dStep-1);$("dNext").onclick=()=>goStep(dStep+1);
+async function saveDraft(){syncVars();if(!D.id){if(dStep===0){$("dProblem").textContent="請先填代號";return false}return true}
+  if(!/^[a-z0-9][a-z0-9-]{1,47}$/.test(D.id)){$("dProblem").textContent="代號只能用小寫英數與連字號，2～48 字";return false}
+  try{const r=await api(`/designs/${encodeURIComponent(D.id)}/draft`,{method:"POST",body:JSON.stringify({definition:D})});
+    dNew=false;$("dSaved").textContent=`已儲存草稿 ${new Date().toTimeString().slice(0,5)}`+(r.problem?`｜待補：${r.problem}`:"");return true}
+  catch(e){$("dProblem").textContent=e.message;return false}}
+const bind=(root)=>root.querySelectorAll("[data-k]").forEach(el=>{const set=()=>{const path=el.dataset.k.split(".");let o=D;
+  for(const k of path.slice(0,-1))o=o[k];const last=path.at(-1);
+  o[last]=el.type==="checkbox"?el.checked:(el.dataset.num?Number(el.value):el.value)};el.oninput=set;el.onchange=set});
+const opt=(list,cur)=>list.map(([v,l])=>`<option value="${esc(v)}" ${v===cur?"selected":""}>${esc(l)}</option>`).join("");
+const fieldNames=()=>D.fields.map(f=>f.name);
+const listFields=()=>D.fields.filter(f=>f.type==="list");
+
+function stepBasic(){$("dPanel").innerHTML=`<h2>1. 基本資料</h2><p class="hint">這支Agent做什麼、什麼時候跑、風險多高。中、高風險會強制至少 10% 人工抽審。</p>
+  <div class="fgrid"><label>代號<small>小寫英數與連字號，建立後不能改</small><input data-k="id" value="${esc(D.id)}" ${dNew?"":"disabled"} placeholder="例：taxi-limit"></label>
+  <label>名稱<input data-k="name" value="${esc(D.name)}" placeholder="例：計程車費額度檢核"></label>
+  <label>風險等級<select data-k="risk">${opt([["low","低風險"],["medium","中風險（抽審 10%）"],["high","高風險（抽審 10% 以上）"]],D.risk)}</select></label></div>
+  <label style="display:block;margin-top:12px;font-weight:600">用途說明<textarea data-k="description" rows="2" style="font-family:inherit;font-size:16px">${esc(D.description)}</textarea></label>
+  <div class="row" style="margin-top:12px"><b>何時執行</b>
+   <label><input type="checkbox" id="trS" ${D.triggers.includes("sync")?"checked":""}> 來源系統送出前（同步）</label>
+   <label><input type="checkbox" id="trB" ${D.triggers.includes("batch")?"checked":""}> 每日批次</label>
+   <label><input type="checkbox" id="ndO" ${D.needs.includes("ocr")?"checked":""}> 會收附件（走非同步辨識）</label></div>`;
+  bind($("dPanel"));$("trS").onchange=$("trB").onchange=()=>{D.triggers=[...($("trS").checked?["sync"]:[]),...($("trB").checked?["batch"]:[])]};
+  $("ndO").onchange=()=>{D.needs=$("ndO").checked?["ocr"]:[]}}
+
+function stepFields(){const fs=D.fields;$("dPanel").innerHTML=`<h2>2. 資料欄位</h2><p class="hint">貼一筆來源系統送來的樣本資料（JSON），按「抽出欄位」，再補上中文名稱、勾選必要欄位。</p>
+  <textarea id="fSample" rows="6" spellcheck="false" placeholder='{"claim_id":"T-001","rider":"王小明","ride_date":"2026-12-01","unit":"總務處","rides":[{"fare":250}]}'>${esc(D.sample||"")}</textarea>
+  <div class="row" style="margin:10px 0"><button class="btn" id="fPull">抽出欄位</button><span class="err" id="fErr"></span></div>
+  ${fs.length?`<div class="scroll"><table><thead><tr><th>欄位</th><th>型別</th><th>中文名稱</th><th>必要</th></tr></thead><tbody>${fs.map((f,i)=>`<tr><td>${esc(f.name)}${f.items&&f.items.length?`<div class="muted">每一筆：${f.items.map(x=>esc(x.name)).join("、")}</div>`:""}</td>
+   <td>${({text:"文字",number:"數字",date:"日期",bool:"是否",list:"清單"})[f.type]||f.type}</td><td><input data-k="fields.${i}.title" value="${esc(f.title||"")}"></td>
+   <td><input type="checkbox" data-req="${esc(f.name)}" ${D.required.includes(f.name)?"checked":""}></td></tr>`).join("")}</tbody></table></div>
+  <div class="fgrid" style="margin-top:14px"><label>業務單號<small>同一件事的識別，用來串歷次結果</small><select data-k="business_key"><option value="">請選</option>${opt(fs.filter(f=>f.type!=="list").map(f=>[f.name,f.title||f.name]),D.business_key)}</select></label>
+   <label>當事人<small>跨 Agent 歸併用</small><select data-k="person_field"><option value="">不指定</option>${opt(fs.map(f=>[f.name,f.title||f.name]),D.person_field)}</select></label>
+   <label>資料日期<small>決定套用哪一版判定值</small><select data-k="date_field"><option value="">用檢核當天</option>${opt(fs.filter(f=>f.type==="date"||f.type==="text").map(f=>[f.name,f.title||f.name]),D.date_field)}</select></label></div>`:""}`;
+  bind($("dPanel"));$("fSample").oninput=e=>D.sample=e.target.value;
+  $("dPanel").querySelectorAll("[data-req]").forEach(c=>c.onchange=()=>{const n=c.dataset.req;D.required=c.checked?[...new Set([...D.required,n])]:D.required.filter(x=>x!==n)});
+  $("fPull").onclick=async()=>{let sample;try{sample=JSON.parse($("fSample").value)}catch(e){$("fErr").textContent="樣本不是合法的 JSON";return}
+    const r=await api("/designs/sample-fields",{method:"POST",body:JSON.stringify({sample})});const old=Object.fromEntries(D.fields.map(f=>[f.name,f]));
+    D.fields=r.fields.map(f=>({...f,title:(old[f.name]||{}).title||""}));if(!D.cases.length)D.cases=[{name:"樣本",record:sample,expect:[]}];stepFields()}}
+
+// operand editor: {field}|{record}|{value}|{lookup}
+function operandHtml(o,path,each){const kind=Object.keys(o||{field:""})[0];const v=(o||{})[kind];
+  const itemFields=each?((D.fields.find(f=>f.name===each)||{}).items||[]).map(x=>[x.name,x.title||x.name]):[];
+  const recFields=D.fields.filter(f=>f.type!=="list").map(f=>[f.name,f.title||f.name]);
+  let inner="";
+  if(kind==="field")inner=`<select data-o="${path}" data-ok="field">${opt([["","選欄位"],...itemFields.map(([n,l])=>[n,"這一筆的"+l]),...(each?[]:recFields)],v)}</select>`;
+  if(kind==="record")inner=`<select data-o="${path}" data-ok="record">${opt([["","選欄位"],...recFields],v)}</select>`;
+  if(kind==="value")inner=`<input data-o="${path}" data-ok="value" value="${esc(v)}" placeholder="固定值" style="width:120px">`;
+  if(kind==="lookup"){const tb=D.tables[v.table]||{columns:[]};
+    inner=`查表 <select data-o="${path}" data-ok="lookup.table">${opt([["","選表"],...Object.entries(D.tables).map(([n,x])=>[n,x.title||n])],v.table)}</select>
+     取 <select data-o="${path}" data-ok="lookup.column">${opt([["","欄位"],...tb.columns.map(c=>[c.name,c.title||c.name])],v.column)}</select>
+     ${tb.key?tb.key.map(k=>`，${esc((tb.columns.find(c=>c.name===k)||{}).title||k)}＝<select data-o="${path}" data-ok="lookup.match.${k}">${opt([["","選欄位"],...itemFields.map(([n,l])=>["f:"+n,"這一筆的"+l]),...recFields.map(([n,l])=>["r:"+n,l])],(()=>{const m=(v.match||{})[k];return m?(m.field!=null?"f:"+m.field:"r:"+m.record):""})())}</select>`).join(""):""}`}
+  return `<span class="opnd"><select data-kind="${path}">${opt([["field",each?"這一筆的欄位":"欄位"],["record","整筆的欄位"],["value","固定值"],["lookup","判定值表"]],kind)}</select>${inner}</span>`}
+function getAt(path){return path.split(".").reduce((o,k)=>o[k],D)}
+function setAt(path,val){const ks=path.split(".");const o=ks.slice(0,-1).reduce((o,k)=>o[k],D);o[ks.at(-1)]=val}
+function stepRules(){const tables=Object.keys(D.tables);
+  $("dPanel").innerHTML=`<h2>3. 規則</h2><p class="hint">每條規則＝什麼情況下提示什麼。比較的數值如果由機關決定（上限、名單），請先到「4. 判定值表」建表，再回來選「判定值表」。</p>
+  ${D.rules.map((r,i)=>{const conds=(r.when&&(r.when.all||r.when.any))||[];const mode=r.when&&r.when.any?"any":"all";
+   const vars=["n",...(r.each?((D.fields.find(f=>f.name===r.each)||{}).items||[]).map(x=>x.name):[]),...fieldNames().filter(n=>!listFields().some(f=>f.name===n)),...Object.keys(r.values||{})];
+   return `<div class="rule"><div class="fgrid"><label>規則編號<input data-k="rules.${i}.id" value="${esc(r.id)}"></label><label>名稱<input data-k="rules.${i}.title" value="${esc(r.title)}"></label>
+    <label>依據<small>法規條文或核定表</small><input data-k="rules.${i}.basis" value="${esc(r.basis)}"></label>
+    <label>結果<select data-k="rules.${i}.level">${opt([["notice","提示"],["manual","轉人工"]],r.level||"notice")}</select></label>
+    <label>檢查對象<select data-each="${i}">${opt([["","整筆資料"],...listFields().map(f=>[f.name,"清單「"+(f.title||f.name)+"」的每一筆"])],r.each||"")}</select></label></div>
+    <div style="margin-top:10px"><b>當</b> <select data-mode="${i}">${opt([["all","下面全部符合"],["any","下面任一符合"]],mode)}</select></div>
+    ${conds.map((c,j)=>`<div class="cond">${operandHtml(c.left,`rules.${i}.when.${mode}.${j}.left`,r.each)}
+      <select data-op="rules.${i}.when.${mode}.${j}">${opt(Object.entries(OPS),c.op)}</select>
+      ${["empty","not_empty","found","not_found"].includes(c.op)?"":operandHtml(c.right,`rules.${i}.when.${mode}.${j}.right`,r.each)}
+      ${c.right&&c.right.lookup?`<label class="muted">提示裡叫它 <input data-var="${i}.${mode}.${j}" value="${esc(c._as||"")}" style="width:90px" placeholder="例：limit"></label>`:""}
+      <button class="btn" data-delc="${i}.${mode}.${j}">刪</button></div>`).join("")}
+    <button class="btn" data-addc="${i}">加一個條件</button>
+    <label style="display:block;margin-top:10px;font-weight:600">提示文字<input data-k="rules.${i}.message" value="${esc(r.message)}" style="width:100%" placeholder="例：第{n}趟 {fare} 元，超過額度 {limit} 元"></label>
+    <div class="vars">${vars.map(v=>`<button data-ins="${i}" data-v="${esc(v)}">{${esc(v)}}</button>`).join("")}</div>
+    <div class="row" style="justify-content:flex-end"><button class="btn" data-delr="${i}">刪除這條規則</button></div></div>`}).join("")}
+  <button class="btn primary" id="rAdd">加一條規則</button>${tables.length?"":'<span class="muted">　還沒有判定值表；比較固定值也可以先寫規則。</span>'}`;
+  const P=$("dPanel");bind(P);
+  $("rAdd").onclick=()=>{D.rules.push({id:"R-"+String(D.rules.length+1).padStart(2,"0"),title:"",basis:"",message:"",level:"notice",each:"",when:{all:[{left:{field:""},op:"gt",right:{value:""}}]}});stepRules()};
+  P.querySelectorAll("[data-delr]").forEach(b=>b.onclick=()=>{D.rules.splice(+b.dataset.delr,1);stepRules()});
+  P.querySelectorAll("[data-each]").forEach(s=>s.onchange=()=>{D.rules[+s.dataset.each].each=s.value;stepRules()});
+  P.querySelectorAll("[data-mode]").forEach(s=>s.onchange=()=>{const r=D.rules[+s.dataset.mode];const list=r.when.all||r.when.any;r.when={[s.value]:list};stepRules()});
+  P.querySelectorAll("[data-addc]").forEach(b=>b.onclick=()=>{const r=D.rules[+b.dataset.addc];(r.when.all||r.when.any).push({left:{field:""},op:"gt",right:{value:""}});stepRules()});
+  P.querySelectorAll("[data-delc]").forEach(b=>b.onclick=()=>{const [i,m,j]=b.dataset.delc.split(".");D.rules[i].when[m].splice(+j,1);stepRules()});
+  P.querySelectorAll("[data-op]").forEach(s=>s.onchange=()=>{getAt(s.dataset.op).op=s.value;stepRules()});
+  P.querySelectorAll("[data-kind]").forEach(s=>s.onchange=()=>{const k=s.value;setAt(s.dataset.kind,k==="lookup"?{lookup:{table:"",column:"",match:{}}}:{[k]:""});stepRules()});
+  P.querySelectorAll("[data-o]").forEach(el=>el.onchange=()=>{const o=getAt(el.dataset.o);const k=el.dataset.ok;
+    if(k==="value"){const n=Number(el.value);o.value=el.value!==""&&!isNaN(n)&&!/^0\d/.test(el.value)?n:el.value}
+    else if(k==="field"||k==="record")o[k]=el.value;
+    else if(k==="lookup.table"){o.lookup={table:el.value,column:"",match:{}};stepRules()}
+    else if(k==="lookup.column")o.lookup.column=el.value;
+    else{const col=k.split(".")[2];o.lookup.match[col]=el.value.startsWith("f:")?{field:el.value.slice(2)}:{record:el.value.slice(2)};}
+    syncVars()});
+  P.querySelectorAll("[data-var]").forEach(el=>el.onchange=()=>{const [i,m,j]=el.dataset.var.split(".");D.rules[i].when[m][j]._as=el.value.trim();syncVars();stepRules()});
+  P.querySelectorAll("[data-ins]").forEach(b=>b.onclick=()=>{const r=D.rules[+b.dataset.ins];r.message=(r.message||"")+"{"+b.dataset.v+"}";stepRules()})}
+function syncVars(){for(const r of D.rules){const list=(r.when&&(r.when.all||r.when.any))||[];r.values={};
+  for(const c of list)if(c._as&&c.right&&c.right.lookup)r.values[c._as]=c.right}}
+
+function stepTables(){const T=D.tables;$("dPanel").innerHTML=`<h2>4. 判定值表</h2><p class="hint">這裡只定義表的欄位。正式的數值由機關核定人在「判定值」頁填寫並發布；下面的測試值只給驗證案例用。</p>
+  ${Object.entries(T).map(([n,tb])=>`<div class="rule"><div class="fgrid"><label>表代號<input value="${esc(n)}" disabled></label><label>表名稱<input data-k="tables.${n}.title" value="${esc(tb.title||"")}"></label></div>
+   <table style="margin-top:8px"><thead><tr><th>欄位代號</th><th>中文名稱</th><th>型別</th><th>鍵值<small class="muted">（用來查表）</small></th><th></th></tr></thead><tbody>
+   ${tb.columns.map((c,j)=>`<tr><td><input data-k="tables.${n}.columns.${j}.name" value="${esc(c.name)}"></td><td><input data-k="tables.${n}.columns.${j}.title" value="${esc(c.title||"")}"></td>
+    <td><select data-k="tables.${n}.columns.${j}.type">${opt([["text","文字"],["number","數字"],["date","日期"],["bool","是否"]],c.type||"text")}</select></td>
+    <td><input type="checkbox" data-key="${n}.${j}" ${(tb.key||[]).includes(c.name)?"checked":""}></td><td><button class="btn" data-delcol="${n}.${j}">刪</button></td></tr>`).join("")}</tbody></table>
+   <button class="btn" data-addcol="${n}">加欄位</button>
+   <h3 style="font-size:16px;margin:14px 0 4px">測試值 <span class="muted">（JSON 陣列，給驗證案例用）</span></h3>
+   <textarea data-tt="${n}" rows="3" spellcheck="false">${esc(JSON.stringify(D.test_tables[n]||[],null,0))}</textarea>
+   <div class="row" style="justify-content:flex-end"><button class="btn" data-deltb="${n}">刪除這張表</button></div></div>`).join("")}
+  <div class="row"><input id="tbNew" placeholder="新表代號（例：fare_cap）"><button class="btn primary" id="tbAdd">建立判定值表</button><span class="err" id="tbErr"></span></div>`;
+  const P=$("dPanel");bind(P);
+  $("tbAdd").onclick=()=>{const n=$("tbNew").value.trim();if(!/^[A-Za-z_][A-Za-z0-9_]{0,47}$/.test(n)){$("tbErr").textContent="代號只能用英數與底線";return}
+    T[n]=T[n]||{title:"",key:[],columns:[{name:"",title:"",type:"text"}]};stepTables()};
+  P.querySelectorAll("[data-addcol]").forEach(b=>b.onclick=()=>{T[b.dataset.addcol].columns.push({name:"",title:"",type:"text"});stepTables()});
+  P.querySelectorAll("[data-delcol]").forEach(b=>b.onclick=()=>{const [n,j]=b.dataset.delcol.split(".");T[n].columns.splice(+j,1);stepTables()});
+  P.querySelectorAll("[data-deltb]").forEach(b=>b.onclick=()=>{delete T[b.dataset.deltb];delete D.test_tables[b.dataset.deltb];stepTables()});
+  P.querySelectorAll("[data-key]").forEach(c=>c.onchange=()=>{const [n,j]=c.dataset.key.split(".");const name=T[n].columns[+j].name;
+    T[n].key=c.checked?[...new Set([...(T[n].key||[]),name])]:(T[n].key||[]).filter(k=>k!==name)});
+  P.querySelectorAll("[data-tt]").forEach(a=>a.onchange=()=>{try{D.test_tables[a.dataset.tt]=JSON.parse(a.value||"[]");a.style.outline=""}catch(e){a.style.outline="2px solid var(--red)"}})}
+
+function stepAssists(){$("dPanel").innerHTML=`<h2>5. 輔助子Agent</h2><p class="hint">子Agent幫忙做一件具體的事（從收據擷取金額、比對條文、摘要公文），產出的是「欄位」，再交給規則判定；它不下結論，信心值低於門檻就轉人工。模型只能選非中國來源。</p>
+  <p class="hint"><b>目前版本只儲存設定</b>；接上模型、在附件流程裡實際執行，排在下一批（與排程、介接一起）。</p>
+  ${D.assists.map((a,i)=>`<div class="rule"><div class="fgrid"><label>代號<input data-k="assists.${i}.id" value="${esc(a.id)}"></label>
+   <label>用途<select data-k="assists.${i}.kind">${opt(Object.entries(AK),a.kind)}</select></label>
+   <label>模型<input data-k="assists.${i}.model" value="${esc(a.model||"")}" placeholder="例：gemma-4-e4b-xreadable-ocr"></label>
+   <label>產出欄位<small>逗號分隔，要對到「2. 資料欄位」</small><input data-outs="${i}" value="${esc((a.outputs||[]).join(","))}"></label>
+   <label>信心門檻<small>低於就轉人工</small><input type="number" step="0.05" min="0" max="1" data-k="assists.${i}.min_confidence" data-num="1" value="${a.min_confidence??0.85}"></label></div>
+   <label style="display:block;margin-top:10px;font-weight:600">提示詞<textarea data-k="assists.${i}.prompt" rows="3" style="font-family:inherit;font-size:16px">${esc(a.prompt||"")}</textarea></label>
+   <div class="row" style="justify-content:flex-end"><button class="btn" data-dela="${i}">刪除</button></div></div>`).join("")}
+  <button class="btn primary" id="asAdd">加一個輔助子Agent</button>`;
+  const P=$("dPanel");bind(P);
+  $("asAdd").onclick=()=>{D.assists.push({id:"assist_"+(D.assists.length+1),kind:"extract",model:"",outputs:[],min_confidence:0.85,prompt:""});stepAssists()};
+  P.querySelectorAll("[data-dela]").forEach(b=>b.onclick=()=>{D.assists.splice(+b.dataset.dela,1);stepAssists()});
+  P.querySelectorAll("[data-outs]").forEach(el=>el.onchange=()=>{D.assists[+el.dataset.outs].outputs=el.value.split(/[,，\s]+/).filter(Boolean)})}
+
+function stepPublish(){const ids=D.rules.map(r=>r.id);$("dPanel").innerHTML=`<h2>6. 驗證與發布</h2><p class="hint">每個案例放一筆資料，勾選「應該出現哪些提示」。規則覆蓋率、回歸一致率、可追溯率三項都要 100% 才能發布。</p>
+  ${D.cases.map((c,i)=>`<div class="rule"><div class="row"><label style="flex:1;font-weight:600">案例名稱<input data-k="cases.${i}.name" value="${esc(c.name)}" style="width:100%"></label><button class="btn" data-delcase="${i}">刪</button></div>
+   <textarea data-rec="${i}" rows="4" spellcheck="false" style="margin-top:8px">${esc(JSON.stringify(c.record))}</textarea>
+   <div class="row" style="margin-top:6px"><span class="muted">應出現：</span>${[...ids,"INPUT"].map(r=>`<label><input type="checkbox" data-exp="${i}" value="${esc(r)}" ${(c.expect||[]).includes(r)?"checked":""}> ${esc(r)}</label>`).join("")}<span class="muted">（都不勾＝不該有提示）</span></div></div>`).join("")}
+  <button class="btn" id="csAdd">加一個案例</button>
+  <div class="row" style="margin-top:16px"><button class="btn primary" id="vRun">驗證</button><span id="vOut"></span></div>
+  <div id="vDetail"></div>
+  <div class="row" style="margin-top:16px"><input id="pubNote" placeholder="這一版改了什麼（會進版本歷程與稽核）" style="flex:1"><button class="btn primary" id="pubGo" disabled>發布</button></div>
+  <h3 style="font-size:16px;margin-top:18px">版本歷程</h3><div id="vHistory" class="events"></div>`;
+  const P=$("dPanel");bind(P);
+  $("csAdd").onclick=()=>{D.cases.push({name:"案例"+(D.cases.length+1),record:D.cases[0]?JSON.parse(JSON.stringify(D.cases[0].record)):{},expect:[]});stepPublish()};
+  P.querySelectorAll("[data-delcase]").forEach(b=>b.onclick=()=>{D.cases.splice(+b.dataset.delcase,1);stepPublish()});
+  P.querySelectorAll("[data-rec]").forEach(a=>a.onchange=()=>{try{D.cases[+a.dataset.rec].record=JSON.parse(a.value);a.style.outline=""}catch(e){a.style.outline="2px solid var(--red)"}});
+  P.querySelectorAll("[data-exp]").forEach(c=>c.onchange=()=>{const k=D.cases[+c.dataset.exp];k.expect=c.checked?[...new Set([...(k.expect||[]),c.value])]:(k.expect||[]).filter(x=>x!==c.value)});
+  $("vRun").onclick=async()=>{if(!await saveDraft())return;const r=await api(`/designs/${encodeURIComponent(D.id)}/validate`,{method:"POST"});
+    const pct=m=>m&&m.value!=null?Math.round(m.value*100)+"%":"—";
+    $("vOut").innerHTML=r.report?`規則覆蓋率 <b>${pct(r.report.rule_coverage)}</b>　回歸一致率 <b>${pct(r.report.consistency)}</b>　可追溯率 <b>${pct(r.report.traceability)}</b>　`+(r.ok?'<span class="pill resolved">可以發布</span>':`<span class="err">${esc(r.problem)}</span>`):`<span class="err">${esc(r.problem)}</span>`;
+    $("vDetail").innerHTML=r.report?`<div class="events">${r.report.cases.map(c=>`<div>${c.ok?"符合":"<b class='err'>不符</b>"}　${esc(c.case)}　應為 ${esc(c.expect.join("、")||"無提示")}，實得 ${esc(c.got.join("、")||"無提示")}</div>`).join("")}${r.report.uncovered_rules.length?`<div class="err">沒有案例觸發的規則：${esc(r.report.uncovered_rules.join("、"))}</div>`:""}</div>`:"";
+    $("pubGo").disabled=!r.ok};
+  $("pubGo").onclick=async()=>{try{const r=await api(`/designs/${encodeURIComponent(D.id)}/publish`,{method:"POST",body:JSON.stringify({note:$("pubNote").value})});
+    $("vOut").innerHTML=`<span class="pill resolved">已發布第 ${r.version} 版</span>　機關核定人還要到「判定值」頁填正式數值。`;$("pubGo").disabled=true;
+    agents=(await api("/agents")).agents;history()}catch(e){$("vOut").innerHTML=`<span class="err">${esc(e.message)}</span>`}};
+  history()}
+async function history(){if(!D.id)return;let m;try{m=await api("/designs/"+encodeURIComponent(D.id))}catch(e){return}
+  $("vHistory").innerHTML=m.versions.map(v=>`<div>第 ${v.version} 版　${t(v.published_at)}　${esc(v.published_by)}　${esc(v.note)}　<button class="btn" data-rb="${v.version}">回復到這一版</button></div>`).join("")||"還沒有發布過";
+  $("vHistory").querySelectorAll("[data-rb]").forEach(b=>b.onclick=async()=>{if(!confirm(`回復到第 ${b.dataset.rb} 版？會發布成一個新版本，草稿也會換成那一版。`))return;
+    await api(`/designs/${encodeURIComponent(D.id)}/rollback`,{method:"POST",body:JSON.stringify({version:+b.dataset.rb})});openDesigner(D.id)})}
+
+// --- run now / upload (立即執行) ------------------------------------------------
+function runDrawer(id){const a=agents.find(x=>x.id===id);$("dBody").innerHTML=`<h1 style="font-size:22px">立即執行：${esc(a.name)}</h1>
+  <p class="muted">上傳 CSV（第一列是欄位名稱）或貼 JSON 陣列。結果會變成案件，和來源系統送的分開記錄為「manual-batch」。</p>
+  <input type="file" id="rFile" accept=".csv,.json,.jsonl,text/csv,application/json"><p class="muted" id="rFileInfo"></p>
+  <textarea id="rText" rows="8" spellcheck="false" placeholder='[{"${esc(a.business_key)}":"T-001", ...}]'></textarea>
+  <div class="row" style="margin-top:10px"><button class="btn primary" id="rGo">執行</button><span class="err" id="rErr"></span></div><div id="rOut"></div>`;
+  let file=null;$("rFile").onchange=async e=>{const f=e.target.files[0];if(!f)return;if(f.size>5e6){$("rErr").textContent="檔案超過 5MB";return}
+    file={name:f.name,text:await f.text()};$("rFileInfo").textContent=`${f.name}（${Math.round(f.size/1024)} KB）`};
+  $("rGo").onclick=async()=>{$("rErr").textContent="";let body;
+    if(file&&/\.csv$/i.test(file.name))body={csv:file.text,filename:file.name};
+    else{const raw=file?file.text:$("rText").value;try{body={records:/\.jsonl$/i.test(file?file.name:"")?raw.split("\n").filter(x=>x.trim()).map(x=>JSON.parse(x)):JSON.parse(raw),filename:file?file.name:""};
+      if(!Array.isArray(body.records))body.records=[body.records]}catch(e){$("rErr").textContent="內容不是合法的 JSON";return}}
+    $("rGo").disabled=true;try{const r=await api(`/agents/${encodeURIComponent(id)}/run`,{method:"POST",body:JSON.stringify(body)});
+      $("rOut").innerHTML=`<div class="kpi" style="margin-top:12px"><div>筆數<b>${r.records}</b></div><div>有提示<b>${r.with_findings}</b></div><div>提示則數<b>${r.findings}</b></div><div>耗時<b>${Math.round(r.elapsed_ms)} ms</b></div></div>
+       <p class="muted">執行識別 ${esc(r.run_id)}</p>${r.sample.slice(0,20).map(x=>`<h2 style="font-size:16px">${esc(x.business_key)}</h2>`+x.findings.map(findingHtml).join("")).join("")}
+       <button class="btn primary" id="rCases">到案件覆核看全部</button>`;
+      $("rCases").onclick=()=>{$("dClose").click();$("cAgent").value=id;show("cases")};badge()}
+    catch(e){$("rErr").textContent=e.message}finally{$("rGo").disabled=false}};openDrawer()}
 
 // --- try
 let samples=[];
