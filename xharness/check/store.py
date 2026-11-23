@@ -73,6 +73,17 @@ CREATE TABLE IF NOT EXISTS agent_versions (
   UNIQUE(agent, version));
 CREATE TABLE IF NOT EXISTS agent_state (
   agent TEXT PRIMARY KEY, enabled INTEGER NOT NULL, actor TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS connectors (
+  id TEXT PRIMARY KEY, agency TEXT NOT NULL, name TEXT NOT NULL, config TEXT NOT NULL, secret TEXT NOT NULL DEFAULT '',
+  actor TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS schedules (
+  id TEXT PRIMARY KEY, agency TEXT NOT NULL, agent TEXT NOT NULL, connector TEXT NOT NULL, at TEXT NOT NULL,
+  days TEXT NOT NULL, enabled INTEGER NOT NULL, actor TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS schedule_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, schedule TEXT NOT NULL, slot TEXT NOT NULL, started TEXT NOT NULL,
+  finished TEXT, status TEXT NOT NULL, run_id TEXT NOT NULL DEFAULT '', records INTEGER NOT NULL DEFAULT 0,
+  snapshot TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '', trigger TEXT NOT NULL DEFAULT 'schedule',
+  UNIQUE(schedule, slot));
 CREATE TABLE IF NOT EXISTS tasks (
   task_id TEXT PRIMARY KEY, agency TEXT NOT NULL, agent TEXT NOT NULL, caller TEXT NOT NULL,
   state TEXT NOT NULL, run_id TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL,
@@ -376,6 +387,84 @@ class CheckStore:
 
     def enabled_map(self) -> dict[str, bool]:
         return {r["agent"]: bool(r["enabled"]) for r in self._rows("SELECT agent, enabled FROM agent_state")}
+
+    # --- connectors and schedules ---------------------------------------------
+    def save_connector(self, cid: str, agency: str, name: str, config: dict[str, Any], secret: str | None, actor: str) -> None:
+        with self._lock:
+            old = self._db.execute("SELECT secret FROM connectors WHERE id=?", (cid,)).fetchone()
+            keep = old["secret"] if old and secret is None else (secret or "")
+            self._db.execute("INSERT INTO connectors(id, agency, name, config, secret, actor, updated) VALUES (?,?,?,?,?,?,?) "
+                             "ON CONFLICT(id) DO UPDATE SET name=excluded.name, config=excluded.config, secret=excluded.secret, "
+                             "actor=excluded.actor, updated=excluded.updated", (cid, agency, name, canonical(config), keep, actor, now_iso()))
+
+    def connectors(self, agency: str | None) -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM connectors" + ("" if agency is None else " WHERE agency=?") + " ORDER BY name",
+                          () if agency is None else (agency,))
+        for row in rows:
+            row["config"] = json.loads(row["config"])
+            row["has_secret"] = bool(row.pop("secret"))
+        return rows
+
+    def connector(self, cid: str, agency: str | None, with_secret: bool = False) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM connectors WHERE id=?", (cid,))
+        if row is None or (agency is not None and row["agency"] != agency):
+            return None
+        row["config"] = json.loads(row["config"])
+        if not with_secret:
+            row["has_secret"] = bool(row.pop("secret"))
+        return row
+
+    def delete_connector(self, cid: str) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM connectors WHERE id=?", (cid,))
+
+    def save_schedule(self, sid: str, agency: str, agent: str, connector: str, at: str, days: str, enabled: bool, actor: str) -> None:
+        with self._lock:
+            self._db.execute("INSERT INTO schedules(id, agency, agent, connector, at, days, enabled, actor, updated) VALUES (?,?,?,?,?,?,?,?,?) "
+                             "ON CONFLICT(id) DO UPDATE SET agent=excluded.agent, connector=excluded.connector, at=excluded.at, "
+                             "days=excluded.days, enabled=excluded.enabled, actor=excluded.actor, updated=excluded.updated",
+                             (sid, agency, agent, connector, at, days, int(enabled), actor, now_iso()))
+
+    def schedules(self, agency: str | None) -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM schedules" + ("" if agency is None else " WHERE agency=?") + " ORDER BY at",
+                          () if agency is None else (agency,))
+        for row in rows:
+            row["enabled"] = bool(row["enabled"])
+            row["last"] = self._one("SELECT * FROM schedule_runs WHERE schedule=? ORDER BY id DESC LIMIT 1", (row["id"],))
+        return rows
+
+    def schedule(self, sid: str, agency: str | None) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM schedules WHERE id=?", (sid,))
+        if row is None or (agency is not None and row["agency"] != agency):
+            return None
+        row["enabled"] = bool(row["enabled"])
+        return row
+
+    def delete_schedule(self, sid: str) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM schedules WHERE id=?", (sid,))
+
+    def claim_slot(self, schedule: str, slot: str, trigger: str = "schedule") -> int | None:
+        """Exactly one process wins a slot (UNIQUE): the winner gets the row id, everyone else None."""
+        with self._lock:
+            try:
+                cursor = self._db.execute("INSERT INTO schedule_runs(schedule, slot, started, status, trigger) VALUES (?,?,?, 'running', ?)",
+                                          (schedule, slot, now_iso(), trigger))
+            except sqlite3.IntegrityError:
+                return None
+            return int(cursor.lastrowid or 0)
+
+    def finish_slot(self, row_id: int, *, status: str, run_id: str = "", records: int = 0, snapshot: dict[str, Any] | None = None,
+                    error: str = "") -> None:
+        with self._lock:
+            self._db.execute("UPDATE schedule_runs SET status=?, run_id=?, records=?, snapshot=?, error=?, finished=? WHERE id=?",
+                             (status, run_id, records, canonical(snapshot or {}), error[:500], now_iso(), row_id))
+
+    def schedule_runs(self, schedule: str, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM schedule_runs WHERE schedule=? ORDER BY id DESC LIMIT ?", (schedule, limit))
+        for row in rows:
+            row["snapshot"] = json.loads(row["snapshot"])
+        return rows
 
     # --- async tasks -----------------------------------------------------
     def create_task(self, *, agency: str, agent: str, caller: str) -> str:

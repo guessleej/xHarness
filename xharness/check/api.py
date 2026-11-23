@@ -34,15 +34,19 @@ import socket
 import ssl
 import subprocess  # nosec B404 -- only openssl, for the temporary self-signed certificate
 import sys
+import threading
 import time
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .. import channels
 from ..identity import UserStore
 from ..session import harness_home
+from . import connectors as conn
 from . import declarative
+from . import scheduler as sched
 from .assist import load_models
 from .engine import CheckEngine, evaluate_spec
 from .spec import AgentSpec, SpecError, discover
@@ -435,6 +439,8 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
                 raise ApiError(403, "來源系統金鑰只能呼叫檢核與任務查詢")
             if parts[:1] == ["designs"] or (len(parts) == 3 and parts[0] == "agents" and parts[2] in ("enabled", "run")):
                 return self._design(method, parts, caller)
+            if parts[:1] in (["connectors"], ["schedules"]) or (parts[:1] == ["clients"] and method == "POST"):
+                return self._integration(method, parts, caller)
             if method == "GET" and route == "/runs":
                 return self._json(200, {"runs": service.store.runs(agency, limit=min(int(query.get("limit", 100)), 500))})
             if len(parts) == 2 and parts[0] == "runs" and method == "GET":
@@ -500,7 +506,8 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
             if method == "GET" and route == "/export.csv":
                 return self._export(caller, query)
             if method == "GET" and route == "/clients":
-                self._need(caller, "auditor")
+                if not caller.roles & {"auditor", "designer"}:
+                    raise ApiError(403, "需要「designer」或「auditor」角色")
                 return self._json(200, {"clients": [c for c in service.clients.listing() if agency is None or c["agency"] == agency]})
             if route.startswith("/audit"):
                 self._need(caller, "auditor")
@@ -516,6 +523,104 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
                     service.store.audit(caller.name, "audit.export")
                     return self._json(200, {"exported": now_iso(), "chain": service.store.audit_export(), "verify": service.store.verify_audit()},
                                       {"Content-Disposition": 'attachment; filename="check-audit.json"'})
+            raise ApiError(404, "找不到")
+
+        # --- integration: connectors, schedules, API clients -------------------
+        def _integration(self, method: str, parts: list[str], caller: Caller) -> None:
+            self._need(caller, "designer")
+            agency, store = caller.agency, service.store
+            if agency is None:
+                raise ApiError(403, "介接與排程要用機關的帳號設定")
+            kind = parts[0]
+            if kind == "clients":
+                if len(parts) == 1:
+                    body = self._body()
+                    agents = [a for a in body.get("agents", []) if a in service.agents]
+                    token = service.clients.add(str(body.get("name", "")), agency, agents)
+                    store.audit(caller.name, "client.add", agency=agency, target=str(body.get("name")), detail={"agents": agents})
+                    return self._json(200, {"name": body.get("name"), "token": token})
+                if len(parts) == 3 and parts[2] == "revoke":
+                    mine = {c["name"] for c in service.clients.listing() if c["agency"] == agency}
+                    if parts[1] not in mine or not service.clients.remove(parts[1]):
+                        raise ApiError(404, "沒有這組金鑰")
+                    store.audit(caller.name, "client.revoke", agency=agency, target=parts[1])
+                    return self._json(200, {"revoked": parts[1]})
+            if kind == "connectors":
+                if len(parts) == 1 and method == "GET":
+                    return self._json(200, {"connectors": store.connectors(agency), "kinds": conn.KINDS,
+                                            "inbox_root": bool(service.settings.get("inbox_root")),
+                                            "crypto": channels.crypto_available()})
+                if len(parts) == 1 and method == "POST":
+                    body = self._body()
+                    cid = str(body.get("id") or "c_" + secrets.token_hex(6))
+                    if body.get("id") and store.connector(cid, agency) is None:
+                        raise ApiError(404, "沒有這個介接")
+                    config = {k: body.get(k) for k in ("name", "kind", "url", "records_path", "folder", "mapping") if body.get(k) is not None}
+                    try:
+                        conn.validate(config, service.settings)
+                    except conn.ConnectorError as error:
+                        raise ApiError(400, str(error)) from None
+                    secret = body.get("secret")
+                    sealed = None if secret is None else (channels.encrypt(str(secret)) if secret else "")
+                    store.save_connector(cid, agency, str(config["name"]).strip(), config, sealed, caller.name)
+                    store.audit(caller.name, "connector.save", agency=agency, target=cid,
+                                detail={"kind": config["kind"], "secret_changed": secret is not None})
+                    return self._json(200, {"id": cid})
+                if len(parts) == 3 and method == "POST":
+                    row = store.connector(parts[1], agency, with_secret=True)
+                    if row is None:
+                        raise ApiError(404, "沒有這個介接")
+                    if parts[2] == "test":
+                        try:
+                            secret = channels.decrypt(row["secret"]) if row.get("secret") else ""
+                            records, note = conn.fetch(row["config"], service.settings, secret, dry_run=True)
+                        except (conn.ConnectorError, channels.ChannelError) as error:
+                            return self._json(200, {"ok": False, "problem": str(error)})
+                        return self._json(200, {"ok": True, "note": note, "preview": records[:5]})
+                    if parts[2] == "delete":
+                        if any(x["connector"] == parts[1] for x in store.schedules(agency)):
+                            raise ApiError(409, "還有排程在用這個介接，請先刪排程")
+                        store.delete_connector(parts[1])
+                        store.audit(caller.name, "connector.delete", agency=agency, target=parts[1])
+                        return self._json(200, {"deleted": parts[1]})
+            if kind == "schedules":
+                if len(parts) == 1 and method == "GET":
+                    rows = store.schedules(agency)
+                    for row in rows:
+                        row["days_label"] = sched.describe(row["days"])
+                    return self._json(200, {"schedules": rows, "days": sched.DAYS})
+                if len(parts) == 1 and method == "POST":
+                    body = self._body()
+                    sid = str(body.get("id") or "s_" + secrets.token_hex(6))
+                    if body.get("id") and store.schedule(sid, agency) is None:
+                        raise ApiError(404, "沒有這個排程")
+                    at, days = str(body.get("at", "")), str(body.get("days", "daily"))
+                    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", at):
+                        raise ApiError(400, "時間要是 HH:MM（24 小時制、台北時間）")
+                    if days not in sched.DAYS and not re.fullmatch(r"[1-7](,[1-7]){0,6}", days):
+                        raise ApiError(400, "日期只能是每天、週一到週五，或指定星期幾")
+                    if body.get("agent") not in service.agents:
+                        raise ApiError(400, "請選檢核 Agent")
+                    if store.connector(str(body.get("connector")), agency) is None:
+                        raise ApiError(400, "請選來源介接")
+                    store.save_schedule(sid, agency, str(body["agent"]), str(body["connector"]), at, days, bool(body.get("enabled", True)), caller.name)
+                    store.audit(caller.name, "schedule.save", agency=agency, target=sid, detail={"agent": body["agent"], "at": at, "days": days})
+                    return self._json(200, {"id": sid})
+                if len(parts) >= 2:
+                    row = store.schedule(parts[1], agency)
+                    if row is None:
+                        raise ApiError(404, "沒有這個排程")
+                    if len(parts) == 3 and parts[2] == "runs" and method == "GET":
+                        return self._json(200, {"runs": store.schedule_runs(parts[1])})
+                    if len(parts) == 3 and parts[2] == "run" and method == "POST":
+                        slot = "manual-" + now_iso()
+                        threading.Thread(target=sched.run_schedule, args=(service, row, slot, "manual"), daemon=True).start()
+                        store.audit(caller.name, "schedule.run", agency=agency, target=parts[1])
+                        return self._json(202, {"slot": slot})
+                    if len(parts) == 3 and parts[2] == "delete" and method == "POST":
+                        store.delete_schedule(parts[1])
+                        store.audit(caller.name, "schedule.delete", agency=agency, target=parts[1])
+                        return self._json(200, {"deleted": parts[1]})
             raise ApiError(404, "找不到")
 
         # --- designer: build, validate, publish, enable, run ----------------
@@ -747,6 +852,9 @@ def serve(settings: dict[str, Any], auth: dict[str, Any], host: str = "127.0.0.1
         print("xharness check: 沒有 [auth]，管理頁無法登入；來源系統金鑰仍可呼叫檢核 API", file=sys.stderr)
     port = port or int(settings.get("port") or DEFAULT_PORT)
     server = ThreadingHTTPServer((host, port), make_handler(service))
+    ticker = sched.Scheduler(service)
+    if settings.get("scheduler", True):
+        ticker.start()
     scheme = "http"
     if use_tls:
         try:
@@ -770,6 +878,7 @@ def serve(settings: dict[str, Any], auth: dict[str, Any], host: str = "127.0.0.1
     except KeyboardInterrupt:
         pass
     finally:
+        ticker.stop.set()
         server.server_close()
         service.engine.shutdown()
     return 0

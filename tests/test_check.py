@@ -697,3 +697,146 @@ def test_grounding_needs_the_whole_number():
     assert note["confidence"] == 0.5  # "0" is inside 2026 but is not a number in the text
     fields, note = assist_mod.run_assist({"id": "a", "outputs": ["fare"]}, entry, {}, docs, post=fake_post('{"fields":{"fare":"38"},"confidence":1}'))
     assert note["confidence"] == 0.5
+
+
+# --- connectors and schedules ------------------------------------------------
+
+import io as _io  # noqa: E402
+from datetime import datetime as _dt  # noqa: E402
+
+from xharness.check import connectors as conn  # noqa: E402
+from xharness.check import scheduler as sched  # noqa: E402
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8080/x", "http://169.254.169.254/latest/meta-data", "http://localhost/x"])
+def test_rest_connector_refuses_reserved_addresses(url):
+    with pytest.raises(conn.ConnectorError, match="保留位址"):
+        conn.validate({"kind": "rest", "name": "x", "url": url}, {})
+    conn.validate({"kind": "rest", "name": "x", "url": url}, {"connector_hosts": [__import__("urllib.parse").parse.urlsplit(url).hostname]})
+
+
+def test_folder_connector_stays_under_inbox_root(tmp_path):
+    settings = {"inbox_root": str(tmp_path)}
+    for bad in ("../etc", "a/../../b", "a b", "x;rm"):
+        with pytest.raises(conn.ConnectorError):
+            conn.folder_path({"folder": bad}, settings)
+    with pytest.raises(conn.ConnectorError, match="inbox_root"):
+        conn.folder_path({"folder": "baf"}, {})
+    assert conn.folder_path({"folder": "baf/daily"}, settings) == os.path.realpath(str(tmp_path / "baf" / "daily"))
+
+
+class _Resp(_io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_rest_fetch_maps_fields_and_sends_token_in_header(monkeypatch):
+    seen = {}
+
+    def opener(request, timeout):
+        seen["auth"] = request.get_header("Authorization")
+        seen["url"] = request.full_url
+        return _Resp(json.dumps({"data": {"items": [{"no": "T1", "who": {"name": "王小明"}, "unit": "總務處"}]}}).encode())
+
+    monkeypatch.setattr(conn, "check_host", lambda url, settings: None)
+    records, note = conn.fetch({"kind": "rest", "name": "BAF", "url": "https://baf.example.test/api?since=today",
+                                "records_path": "data.items", "mapping": {"claim_id": "no", "rider": "who.name"}}, {}, "s3cret", opener=opener)
+    assert records == [{"no": "T1", "who": {"name": "王小明"}, "unit": "總務處", "claim_id": "T1", "rider": "王小明"}]
+    assert seen["auth"] == "Bearer s3cret" and "s3cret" not in seen["url"] and note["records"] == 1 and len(note["sha256"]) == 64
+
+
+def _sched_service(tmp_path, monkeypatch, **extra):
+    monkeypatch.setenv("XHARNESS_HOME", str(tmp_path / "home"))
+    settings = {"home": str(tmp_path / "check"), "inbox_root": str(tmp_path / "inbox"), **extra}
+    service = CheckService(settings, {})
+    for name, rows in FARES.items():
+        service.store.put_table(agency="EPA", agent="travel-fare", name=name, rows=rows, effective_from="2026-01-01", approved_by="p")
+    service.store.save_connector("c1", "EPA", "BAF 每日匯出", {"kind": "folder", "name": "BAF 每日匯出", "folder": "baf"}, "", "u")
+    service.store.save_schedule("s1", "EPA", "travel-fare", "c1", "02:00", "weekdays", True, "u")
+    return service
+
+
+def test_schedule_runs_once_per_slot_and_archives_after_success(tmp_path, monkeypatch):
+    service = _sched_service(tmp_path, monkeypatch)
+    inbox = tmp_path / "inbox" / "baf"
+    inbox.mkdir(parents=True)
+    (inbox / "claims.jsonl").write_text(json.dumps(record()) + "\n" + json.dumps(record(claim_id="C-10")) + "\n", encoding="utf-8")
+    other = CheckService(service.settings, {})  # a second process on the same database
+    monday_0201 = _dt(2026, 11, 23, 2, 1, tzinfo=sched.TPE)
+    results = sched.tick(service, monday_0201) + sched.tick(other, monday_0201) + sched.tick(service, monday_0201)
+    assert [r["status"] for r in results] == ["done"]
+    assert results[0]["records"] == 2 and not (inbox / "claims.jsonl").exists()
+    assert (inbox / "processed" / _dt.now(sched.TPE).strftime("%Y-%m-%d") / "claims.jsonl").exists()
+    run = service.store.run(results[0]["run_id"], "EPA")
+    assert run["trigger"] == "batch" and run["params"]["snapshot"]["records"] == 2
+    assert sched.tick(service, _dt(2026, 11, 22, 3, 0, tzinfo=sched.TPE)) == []  # Sunday: weekdays only
+    assert sched.tick(service, _dt(2026, 11, 24, 1, 59, tzinfo=sched.TPE)) == []  # not yet 02:00
+    for s in (service, other):
+        s.engine.shutdown()
+
+
+def test_bad_file_is_set_aside_and_good_files_still_run(tmp_path, monkeypatch):
+    service = _sched_service(tmp_path, monkeypatch)
+    inbox = tmp_path / "inbox" / "baf"
+    inbox.mkdir(parents=True)
+    (inbox / "broken.json").write_text("{not json", encoding="utf-8")
+    (inbox / "good.json").write_text(json.dumps([record()]), encoding="utf-8")
+    out = sched.run_schedule(service, service.store.schedule("s1", "EPA"), "2026-11-23", sleep=lambda s: None)
+    assert out["status"] == "partial" and out["records"] == 1
+    assert (inbox / "failed").is_dir() and not (inbox / "broken.json").exists()
+    last = service.store.schedule_runs("s1")[0]
+    assert last["status"] == "partial" and "broken.json" in last["error"]
+    service.engine.shutdown()
+
+
+def test_unreachable_source_retries_then_marks_failed(tmp_path, monkeypatch):
+    service = _sched_service(tmp_path, monkeypatch)
+    service.store.save_connector("c1", "EPA", "BAF API", {"kind": "rest", "name": "BAF API", "url": "https://baf.example.test/x"}, "", "u")
+
+    def down(*a, **k):
+        raise conn.ConnectorError("連不上對方（URLError）")
+    monkeypatch.setattr(conn, "fetch", down)
+    waits = []
+    out = sched.run_schedule(service, service.store.schedule("s1", "EPA"), "2026-11-23", sleep=waits.append)
+    assert out["status"] == "failed" and waits == [2, 4] and "連不上" in service.store.schedule_runs("s1")[0]["error"]
+    service.engine.shutdown()
+
+
+def test_api_connectors_schedules_and_clients(server, tmp_path):
+    base, _, service = server
+    service.settings["inbox_root"] = str(tmp_path / "inbox")
+    service.people["approver1"]["roles"].append("designer")
+    designer = login(base, "approver1")
+    reviewer = login(base, "reviewer1")
+    assert call(base, "GET", "/api/check/v1/connectors", reviewer)[0] == 403
+    status, data, _ = call(base, "POST", "/api/check/v1/connectors", designer,
+                           {"name": "BAF API", "kind": "rest", "url": "http://127.0.0.1:1/x", "secret": "tok"})
+    assert status == 400 and "保留位址" in data["error"]
+    pytest.importorskip("cryptography")
+    status, data, _ = call(base, "POST", "/api/check/v1/connectors", designer,
+                           {"name": "BAF 檔案", "kind": "folder", "folder": "baf", "secret": "tok-123"})
+    assert status == 200
+    cid = data["id"]
+    listed = call(base, "GET", "/api/check/v1/connectors", designer)[1]["connectors"]
+    assert listed[0]["has_secret"] is True and "tok-123" not in json.dumps(listed)
+    raw = service.store._one("SELECT secret FROM connectors WHERE id=?", (cid,))["secret"]
+    assert raw.startswith("enc:v1:") and "tok-123" not in raw
+    assert call(base, "POST", f"/api/check/v1/connectors/{cid}/test", designer)[1]["ok"] is True
+    bad = call(base, "POST", "/api/check/v1/schedules", designer, {"agent": "travel-fare", "connector": cid, "at": "25:00"})
+    assert bad[0] == 400
+    status, data, _ = call(base, "POST", "/api/check/v1/schedules", designer,
+                           {"agent": "travel-fare", "connector": cid, "at": "02:30", "days": "1,3,5"})
+    assert status == 200
+    rows = call(base, "GET", "/api/check/v1/schedules", designer)[1]["schedules"]
+    assert rows[0]["days_label"] == "每週一、三、五"
+    assert call(base, "POST", f"/api/check/v1/connectors/{cid}/delete", designer)[0] == 409
+    assert call(base, "POST", f"/api/check/v1/schedules/{data['id']}/run", designer)[0] == 202
+    assert wait(lambda: call(base, "GET", f"/api/check/v1/schedules/{data['id']}/runs", designer)[1]["runs"][0]["status"] != "running")
+    status, data, _ = call(base, "POST", "/api/check/v1/clients", designer, {"name": "IGSS", "agents": ["travel-fare"]})
+    assert status == 200 and data["token"].startswith("xck_")
+    assert call(base, "POST", "/api/check/v1/agents/travel-fare/check", data["token"], {"record": record()})[0] == 200
+    assert call(base, "POST", "/api/check/v1/clients/IGSS/revoke", designer)[0] == 200
+    assert call(base, "POST", "/api/check/v1/agents/travel-fare/check", data["token"], {"record": record()})[0] == 401
