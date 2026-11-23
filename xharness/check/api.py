@@ -14,8 +14,9 @@ A platform administrator without a [check.people] entry sees every agency read-o
 plus the audit trail, and can never publish decision values.
 
 The agency of every request comes from the token (client entry or [check.people]),
-never from the request body. The server binds loopback; reach it through a TLS
-front end (xConsole, nginx) like a2a-serve.
+never from the request body. Bound to loopback it may speak plain http behind a TLS
+front end; bound to any other address it speaks https only (a temporary self-signed
+certificate until [check] tls_cert/tls_key point at the agency's own).
 """
 
 from __future__ import annotations
@@ -29,6 +30,9 @@ import json
 import os
 import re
 import secrets
+import socket
+import ssl
+import subprocess  # nosec B404 -- only openssl, for the temporary self-signed certificate
 import sys
 import time
 from datetime import date
@@ -273,6 +277,7 @@ class ApiError(Exception):
 def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "xharness-check"
+        timeout = 30
         sys_version = ""
 
         def log_message(self, fmt: str, *args: Any) -> None:  # keep tokens and bodies out of logs
@@ -523,16 +528,64 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
+def tls_files(settings: dict[str, Any], host: str) -> tuple[str, str, bool]:
+    """(cert, key, self_signed). A configured pair wins; otherwise a temporary
+    self-signed certificate is made once under <home>/tls so the first start is
+    already https. Replace it with the agency's certificate via [check] tls_cert/tls_key."""
+    cert, key = str(settings.get("tls_cert") or ""), str(settings.get("tls_key") or "")
+    if cert and key:
+        return cert, key, False
+    folder = os.path.join(check_home(settings), "tls")
+    cert, key = os.path.join(folder, "self-signed.crt"), os.path.join(folder, "self-signed.key")
+    if not (os.path.exists(cert) and os.path.exists(key)):
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        names = {"localhost", socket.gethostname(), *[str(n) for n in settings.get("tls_names", [])]}
+        ips = {"127.0.0.1"} | ({host} if host not in {"0.0.0.0", "::"} else set())  # nosec B104 -- comparing, not binding
+        try:
+            ips |= set(socket.gethostbyname_ex(socket.gethostname())[2])
+        except OSError:
+            pass
+        ips |= {str(n) for n in settings.get("tls_names", []) if re.match(r"^[0-9.]+$", str(n))}
+        names = {n for n in names if n and not re.match(r"^[0-9.]+$", n)}
+        san = ",".join([f"DNS:{n}" for n in sorted(names)] + [f"IP:{ip}" for ip in sorted(ips)])
+        subprocess.run(  # nosec B603 B607 -- fixed argv, no shell, timeout; openssl only makes the temporary certificate
+            ["openssl", "req", "-x509", "-newkey", "rsa:3072", "-nodes", "-days", "397", "-subj",
+             "/CN=xHarness check (temporary self-signed)", "-addext", f"subjectAltName={san}",
+             "-keyout", key, "-out", cert], check=True, capture_output=True, timeout=60)
+        os.chmod(key, 0o600)
+    return cert, key, True
+
+
 def serve(settings: dict[str, Any], auth: dict[str, Any], host: str = "127.0.0.1", port: int | None = None) -> int:
-    if not _loopback(host) and not settings.get("allow_non_loopback"):
-        print("xharness check: 只綁本機；從別台連請前置 TLS（xConsole、nginx）", file=sys.stderr)
+    loopback = _loopback(host)
+    tls = str(settings.get("tls", "auto")).lower()
+    # Off this machine the platform speaks https only; plain http stays on loopback (behind a TLS front end).
+    use_tls = tls == "on" or (tls == "auto" and (not loopback or bool(settings.get("tls_cert"))))
+    if not loopback and not use_tls:
+        print("xharness check: 綁本機以外的位址一定要 HTTPS（[check] tls 不可為 off）", file=sys.stderr)
         return 2
     service = CheckService(settings, auth)
     if not service.users.enabled:
         print("xharness check: 沒有 [auth]，管理頁無法登入；來源系統金鑰仍可呼叫檢核 API", file=sys.stderr)
     port = port or int(settings.get("port") or DEFAULT_PORT)
     server = ThreadingHTTPServer((host, port), make_handler(service))
-    print(f"xharness check: http://{host}:{port}/  agents: {', '.join(service.agents) or '（無）'}  db: {service.store.path}",
+    scheme = "http"
+    if use_tls:
+        try:
+            cert, key, self_signed = tls_files(settings, host)
+        except (OSError, subprocess.SubprocessError) as error:
+            print(f"xharness check: 產生暫用憑證失敗（{error}）；請設定 [check] tls_cert 與 tls_key", file=sys.stderr)
+            server.server_close()
+            return 2
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(cert, key)
+        # Handshake in the request thread, not in accept(): a slow client cannot stall the listener.
+        server.socket = context.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
+        scheme = "https"
+        if self_signed:
+            print(f"xharness check: 使用暫用自簽憑證 {cert}（瀏覽器會警告；正式上線請換成機關憑證）", file=sys.stderr)
+    print(f"xharness check: {scheme}://{host}:{port}/  agents: {', '.join(service.agents) or '（無）'}  db: {service.store.path}",
           file=sys.stderr)
     try:
         server.serve_forever()

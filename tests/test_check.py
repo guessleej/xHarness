@@ -403,3 +403,42 @@ def test_api_ui_served_with_csp(server):
     with urllib.request.urlopen(base + "/", timeout=5) as response:  # nosec B310 -- loopback test server
         html = response.read().decode()
     assert "檢核平臺" in html and response.headers["Cache-Control"] == "no-store"
+
+
+# --- HTTPS ------------------------------------------------------------------
+
+def test_non_loopback_refuses_plain_http(tmp_path):
+    from xharness.check.api import serve
+    assert serve({"home": str(tmp_path), "tls": "off"}, {}, host="0.0.0.0", port=0) == 2  # nosec B104 -- refused before binding
+
+
+def test_configured_certificate_wins(tmp_path):
+    from xharness.check.api import tls_files
+    assert tls_files({"tls_cert": "/a.crt", "tls_key": "/a.key"}, "0.0.0.0") == ("/a.crt", "/a.key", False)  # nosec B104
+
+
+@pytest.mark.skipif(shutil.which("openssl") is None, reason="needs openssl")
+def test_self_signed_certificate_serves_https(tmp_path, monkeypatch):
+    import ssl
+
+    from xharness.check.api import tls_files
+    monkeypatch.setenv("XHARNESS_HOME", str(tmp_path / "home"))
+    settings = {"home": str(tmp_path / "check"), "tls_names": ["check.example.test", "10.9.8.7"]}
+    cert, key, self_signed = tls_files(settings, "0.0.0.0")  # nosec B104
+    assert self_signed and oct(os.stat(key).st_mode & 0o777) == "0o600"
+    assert tls_files(settings, "0.0.0.0")[0] == cert  # made once, reused  # nosec B104
+    service = CheckService(settings, {})
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service))
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(cert, key)
+    httpd.socket = context.wrap_socket(httpd.socket, server_side=True, do_handshake_on_connect=False)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    client = ssl.create_default_context(cafile=cert)
+    client.check_hostname = False  # SAN is checked below; the test connects by 127.0.0.1
+    with urllib.request.urlopen(f"https://127.0.0.1:{httpd.server_address[1]}/healthz", context=client, timeout=10) as response:  # nosec B310
+        assert json.loads(response.read())["ok"] is True
+    text = ssl._ssl._test_decode_cert(cert)  # noqa: SLF001 -- read back the SAN we asked for
+    sans = {value for _, value in text["subjectAltName"]}
+    assert {"localhost", "127.0.0.1", "check.example.test", "10.9.8.7"} <= sans
+    httpd.shutdown()
+    service.engine.shutdown()
