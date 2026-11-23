@@ -42,14 +42,16 @@ from urllib.parse import parse_qs, urlparse
 
 from ..identity import UserStore
 from ..session import harness_home
-from .engine import CheckEngine
-from .spec import AgentSpec, discover
+from . import declarative
+from .engine import CheckEngine, evaluate_spec
+from .spec import AgentSpec, SpecError, discover
 from .store import CASE_STATES, CheckStore, now_iso
 
 DEFAULT_PORT = 3095
 MAX_BODY = 2_000_000
 MAX_RECORDS = 500
-ROLES = {"reviewer", "approver", "operator", "auditor"}
+ROLES = {"reviewer", "approver", "operator", "auditor", "designer"}
+MAX_UPLOAD_ROWS = 5000
 PREFIX = "/api/check/v1"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 UI_PATH = os.path.join(os.path.dirname(__file__), "ui.html")
@@ -138,12 +140,31 @@ class CheckService:
         home = check_home(settings)
         self.store = engine.store if engine else CheckStore(str(settings.get("db") or os.path.join(home, "check.db")))
         self.agents = agents if agents is not None else discover([str(d) for d in settings.get("agents_dirs", [])])
+        self.code_agents = set(self.agents)  # rule packs on disk; the web designer cannot overwrite them
         secret = load_secret(str(settings.get("secret_file") or os.path.join(home, "secret")))
         self.engine = engine or CheckEngine(self.store, self.agents, secret=secret,
                                             max_parallel=int(settings.get("max_parallel", 2)))
         self.clients = Clients(str(settings.get("clients_file") or os.path.join(home, "clients.json")))
         self.users = UserStore(auth)
         self.people = {str(k): v for k, v in (settings.get("people") or {}).items() if isinstance(v, dict)}
+        self.reload_web_agents()
+
+    def reload_web_agents(self) -> None:
+        """Load the newest published version of every web-designed agent into the running registry."""
+        published = {}
+        for row in self.store.published_agents():
+            if row["agent"] in self.code_agents:
+                continue
+            try:
+                published[row["agent"]] = declarative.to_spec(row["definition"], str(row["version"]))
+            except SpecError as error:
+                print(f"[xharness check] 略過網頁設計的 {row['agent']} v{row['version']}: {error}", file=sys.stderr)
+        for agent_id in [a for a in self.agents if a not in self.code_agents and a not in published]:
+            self.agents.pop(agent_id)
+        self.agents.update(published)
+
+    def enabled(self, agent_id: str) -> bool:
+        return self.store.enabled_map().get(agent_id, True)
 
     # --- identity --------------------------------------------------------
     def caller(self, token: str) -> Caller | None:
@@ -374,7 +395,8 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
                 for agent in service.agents.values():
                     if caller.kind == "client" and caller.agents and agent.id not in caller.agents:
                         continue
-                    item = agent.public()
+                    item = agent.public() | {"source": "code" if agent.id in service.code_agents else "web",
+                                             "enabled": service.enabled(agent.id)}
                     if caller.kind == "person" and agency is not None:
                         for name, table in item["tables"].items():
                             history = service.store.table_history(agency, agent.id, name)
@@ -401,6 +423,8 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
                 return self._json(200, task)
             if caller.kind == "client":
                 raise ApiError(403, "來源系統金鑰只能呼叫檢核與任務查詢")
+            if parts[:1] == ["designs"] or (len(parts) == 3 and parts[0] == "agents" and parts[2] in ("enabled", "run")):
+                return self._design(method, parts, caller)
             if method == "GET" and route == "/runs":
                 return self._json(200, {"runs": service.store.runs(agency, limit=min(int(query.get("limit", 100)), 500))})
             if len(parts) == 2 and parts[0] == "runs" and method == "GET":
@@ -484,12 +508,136 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
                                       {"Content-Disposition": 'attachment; filename="check-audit.json"'})
             raise ApiError(404, "找不到")
 
+        # --- designer: build, validate, publish, enable, run ----------------
+        def _design(self, method: str, parts: list[str], caller: Caller) -> None:
+            if len(parts) == 3 and parts[2] == "run" and method == "POST":
+                return self._run(parts[1], caller)
+            self._need(caller, "designer")
+            store = service.store
+            if parts == ["designs"] and method == "GET":
+                web = {r["agent"]: r for r in store.published_agents()}
+                drafts = {r["agent"]: r for r in store.drafts()}
+                rows = []
+                for agent_id in sorted(set(service.agents) | set(drafts)):
+                    spec = service.agents.get(agent_id)
+                    rows.append({"id": agent_id, "name": spec.name if spec else (store.draft(agent_id) or {}).get("definition", {}).get("name", agent_id),
+                                 "source": "code" if agent_id in service.code_agents else "web",
+                                 "published_version": web[agent_id]["version"] if agent_id in web else None,
+                                 "published_at": web[agent_id]["published_at"] if agent_id in web else None,
+                                 "draft_updated": drafts[agent_id]["updated"] if agent_id in drafts else None,
+                                 "enabled": service.enabled(agent_id), "rules": len(spec.rules) if spec else 0})
+                return self._json(200, {"designs": rows, "ops": declarative.OPS, "assist_kinds": declarative.ASSIST_KINDS})
+            if parts == ["designs", "sample-fields"] and method == "POST":
+                sample = self._body().get("sample")
+                if not isinstance(sample, dict):
+                    raise ApiError(400, "請貼一筆 JSON 物件格式的樣本資料")
+                return self._json(200, {"fields": declarative.fields_from_sample(sample)})
+            if len(parts) < 2:
+                raise ApiError(404, "找不到")
+            agent_id = parts[1]
+            if agent_id in service.code_agents and not (len(parts) == 3 and parts[2] == "enabled") and method == "POST":
+                raise ApiError(409, "這支是程式規則包，請由工程師改程式；網頁上可以啟用或停用")
+            if len(parts) == 2 and method == "GET":
+                draft = store.draft(agent_id)
+                versions = store.agent_versions(agent_id)
+                if draft is None and not versions and agent_id not in service.agents:
+                    raise ApiError(404, "沒有這支 Agent")
+                return self._json(200, {"id": agent_id, "source": "code" if agent_id in service.code_agents else "web",
+                                        "draft": draft, "versions": versions, "enabled": service.enabled(agent_id)})
+            if len(parts) == 3 and parts[2] == "draft" and method == "POST":
+                definition = self._body().get("definition")
+                if not isinstance(definition, dict) or definition.get("id") != agent_id:
+                    raise ApiError(400, "定義要是物件，代號要和網址一致")
+                if len(json.dumps(definition, ensure_ascii=False)) > 500_000:
+                    raise ApiError(413, "定義太大")
+                store.save_draft(agent_id, definition, caller.name)
+                problem = ""
+                try:
+                    declarative.validate(definition)
+                except SpecError as error:
+                    problem = str(error)
+                return self._json(200, {"saved": True, "problem": problem})
+            if len(parts) == 3 and parts[2] == "validate" and method == "POST":
+                draft = store.draft(agent_id)
+                if draft is None:
+                    raise ApiError(404, "還沒有草稿")
+                try:
+                    spec = declarative.to_spec(draft["definition"], "草稿")
+                except SpecError as error:
+                    return self._json(200, {"ok": False, "problem": str(error)})
+                report = evaluate_spec(spec)
+                ready = bool(spec.cases) and all(report[k]["value"] == 1.0 for k in ("rule_coverage", "consistency", "traceability"))
+                return self._json(200, {"ok": ready, "problem": "" if ready else "三項驗證指標都要 100%，而且至少要有一個驗證案例", "report": report})
+            if len(parts) == 3 and parts[2] == "publish" and method == "POST":
+                body = self._body()
+                draft = store.draft(agent_id)
+                if draft is None:
+                    raise ApiError(404, "還沒有草稿")
+                spec = declarative.to_spec(draft["definition"], "草稿")
+                report = evaluate_spec(spec)
+                if not spec.cases or not all(report[k]["value"] == 1.0 for k in ("rule_coverage", "consistency", "traceability")):
+                    raise ApiError(409, "驗證指標沒有全部 100%，不能發布")
+                metrics = {k: report[k] for k in ("rule_coverage", "consistency", "traceability")}
+                version = store.publish_agent(agent_id, draft["definition"], caller.name, metrics, str(body.get("note", "")))
+                service.reload_web_agents()
+                store.audit(caller.name, "agent.publish", agency=caller.agency or "", target=agent_id,
+                            detail={"version": version, "digest": spec.digest[:12], "rules": len(spec.rules), "note": str(body.get("note", ""))[:200]})
+                return self._json(200, {"version": version})
+            if len(parts) == 3 and parts[2] == "rollback" and method == "POST":
+                wanted = int(self._body().get("version", 0))
+                old = next((v for v in store.agent_versions(agent_id) if v["version"] == wanted), None)
+                if old is None:
+                    raise ApiError(404, "沒有這個版本")
+                version = store.publish_agent(agent_id, old["definition"], caller.name, old["metrics"], f"回復到第 {wanted} 版")
+                store.save_draft(agent_id, old["definition"], caller.name)
+                service.reload_web_agents()
+                store.audit(caller.name, "agent.rollback", agency=caller.agency or "", target=agent_id, detail={"from": wanted, "version": version})
+                return self._json(200, {"version": version})
+            if len(parts) == 3 and parts[0] == "agents" and parts[2] == "enabled" and method == "POST":
+                if agent_id not in service.agents:
+                    raise ApiError(404, "沒有這支 Agent")
+                enabled = bool(self._body().get("enabled"))
+                store.set_enabled(agent_id, enabled, caller.name)
+                store.audit(caller.name, "agent.enable" if enabled else "agent.disable", agency=caller.agency or "", target=agent_id)
+                return self._json(200, {"enabled": enabled})
+            raise ApiError(404, "找不到")
+
+        def _run(self, agent_id: str, caller: Caller) -> None:
+            """Run now: records pasted or a CSV uploaded from the page (trigger "manual-batch")."""
+            self._need(caller, "operator")
+            agent = self._agent(agent_id, caller)
+            if caller.agency is None:
+                raise ApiError(403, "跨機關帳號不能送檢核")
+            if not service.enabled(agent.id):
+                raise ApiError(409, "這支 Agent 已停用")
+            body = self._body()
+            records = body.get("records")
+            if isinstance(body.get("csv"), str):
+                text = body["csv"].lstrip("\ufeff")
+                reader = csv.DictReader(io.StringIO(text))
+                records = [{k.strip(): (v or "").strip() for k, v in row.items() if k} for row in reader]
+            if not isinstance(records, list) or not records or not all(isinstance(r, dict) for r in records):
+                raise ApiError(400, "請貼 JSON 陣列或上傳有標題列的 CSV")
+            if len(records) > MAX_UPLOAD_ROWS:
+                raise ApiError(413, f"一次最多 {MAX_UPLOAD_ROWS} 筆")
+            result = service.engine.check(agent.id, agency=caller.agency, records=records, trigger="manual-batch",
+                                          caller=caller.name, params={"source": "csv" if "csv" in body else "json",
+                                                                      "file": str(body.get("filename", ""))[:120]})
+            hits = [r for r in result["results"] if r["findings"]]
+            return self._json(200, {"run_id": result["run_id"], "records": len(result["results"]), "with_findings": len(hits),
+                                    "findings": sum(len(r["findings"]) for r in hits), "elapsed_ms": result["elapsed_ms"],
+                                    "table_versions": result["table_versions"], "sample": hits[:50]})
+
         def _check(self, agent_id: str, caller: Caller, received: str) -> None:
             agent = self._agent(agent_id, caller)
             if caller.kind == "person":
                 self._need(caller, "operator")
             if caller.agency is None:
                 raise ApiError(403, "跨機關帳號不能送檢核")
+            if not service.enabled(agent.id):
+                if caller.kind == "client":  # 停用：來源系統照常送件，只是不再提示
+                    return self._json(200, {"disabled": True, "agent": agent.id, "results": []})
+                raise ApiError(409, "這支 Agent 已停用")
             body = self._body()
             trigger = "sync" if caller.kind == "client" else "manual"
             documents = body.get("documents") or []

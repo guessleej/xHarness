@@ -65,12 +65,20 @@ CREATE TABLE IF NOT EXISTS table_versions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, agency TEXT NOT NULL, agent TEXT NOT NULL, name TEXT NOT NULL,
   version INTEGER NOT NULL, effective_from TEXT NOT NULL, rows TEXT NOT NULL, approved_by TEXT NOT NULL,
   approved_at TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', UNIQUE(agency, agent, name, version));
+CREATE TABLE IF NOT EXISTS agent_drafts (
+  agent TEXT PRIMARY KEY, definition TEXT NOT NULL, author TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS agent_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, version INTEGER NOT NULL, definition TEXT NOT NULL,
+  published_by TEXT NOT NULL, published_at TEXT NOT NULL, metrics TEXT NOT NULL DEFAULT '{}', note TEXT NOT NULL DEFAULT '',
+  UNIQUE(agent, version));
+CREATE TABLE IF NOT EXISTS agent_state (
+  agent TEXT PRIMARY KEY, enabled INTEGER NOT NULL, actor TEXT NOT NULL, updated TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tasks (
   task_id TEXT PRIMARY KEY, agency TEXT NOT NULL, agent TEXT NOT NULL, caller TEXT NOT NULL,
   state TEXT NOT NULL, run_id TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL,
   error TEXT NOT NULL DEFAULT '');
 """
-APPEND_ONLY = ("audit", "results", "case_events", "table_versions")
+APPEND_ONLY = ("audit", "results", "case_events", "table_versions", "agent_versions")
 
 
 def now_iso() -> str:
@@ -317,6 +325,52 @@ class CheckStore:
         for row in rows:
             row["rows"] = json.loads(row["rows"])
         return rows
+
+    # --- agents designed on the web page -----------------------------------
+    def save_draft(self, agent: str, definition: dict[str, Any], author: str) -> None:
+        with self._lock:
+            self._db.execute("INSERT INTO agent_drafts(agent, definition, author, updated) VALUES (?,?,?,?) "
+                             "ON CONFLICT(agent) DO UPDATE SET definition=excluded.definition, author=excluded.author, "
+                             "updated=excluded.updated", (agent, canonical(definition), author, now_iso()))
+
+    def draft(self, agent: str) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM agent_drafts WHERE agent=?", (agent,))
+        if row:
+            row["definition"] = json.loads(row["definition"])
+        return row
+
+    def drafts(self) -> list[dict[str, Any]]:
+        return self._rows("SELECT agent, author, updated FROM agent_drafts ORDER BY updated DESC")
+
+    def publish_agent(self, agent: str, definition: dict[str, Any], by: str, metrics: dict[str, Any], note: str = "") -> int:
+        with self._lock:
+            last = self._db.execute("SELECT MAX(version) AS v FROM agent_versions WHERE agent=?", (agent,)).fetchone()
+            version = int(last["v"] or 0) + 1
+            self._db.execute("INSERT INTO agent_versions(agent, version, definition, published_by, published_at, metrics, note) "
+                             "VALUES (?,?,?,?,?,?,?)", (agent, version, canonical(definition), by, now_iso(), canonical(metrics), note[:500]))
+            return version
+
+    def agent_versions(self, agent: str) -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM agent_versions WHERE agent=? ORDER BY version DESC", (agent,))
+        for row in rows:
+            row["definition"] = json.loads(row["definition"])
+            row["metrics"] = json.loads(row["metrics"])
+        return rows
+
+    def published_agents(self) -> list[dict[str, Any]]:
+        rows = self._rows("SELECT v.* FROM agent_versions v JOIN (SELECT agent, MAX(version) AS m FROM agent_versions GROUP BY agent) l "
+                          "ON v.agent=l.agent AND v.version=l.m ORDER BY v.agent")
+        for row in rows:
+            row["definition"] = json.loads(row["definition"])
+        return rows
+
+    def set_enabled(self, agent: str, enabled: bool, actor: str) -> None:
+        with self._lock:
+            self._db.execute("INSERT INTO agent_state(agent, enabled, actor, updated) VALUES (?,?,?,?) ON CONFLICT(agent) DO UPDATE SET "
+                             "enabled=excluded.enabled, actor=excluded.actor, updated=excluded.updated", (agent, int(enabled), actor, now_iso()))
+
+    def enabled_map(self) -> dict[str, bool]:
+        return {r["agent"]: bool(r["enabled"]) for r in self._rows("SELECT agent, enabled FROM agent_state")}
 
     # --- async tasks -----------------------------------------------------
     def create_task(self, *, agency: str, agent: str, caller: str) -> str:

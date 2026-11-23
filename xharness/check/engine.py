@@ -97,8 +97,16 @@ class CheckEngine:
         self.secret = secret
         self.extractor = extractor
         self.breaker = Breaker()
-        self._pools = {agent_id: ThreadPoolExecutor(max_workers=max_parallel, thread_name_prefix=f"check-{agent_id}")
-                       for agent_id, spec in agents.items() if spec.is_async}
+        self.max_parallel = max_parallel
+        self._pools: dict[str, ThreadPoolExecutor] = {}
+        self._pool_lock = threading.Lock()
+
+    def _pool(self, agent_id: str) -> ThreadPoolExecutor:
+        """One bounded pool per agent (bulkhead), made on first use so agents published later get one too."""
+        with self._pool_lock:
+            if agent_id not in self._pools:
+                self._pools[agent_id] = ThreadPoolExecutor(max_workers=self.max_parallel, thread_name_prefix=f"check-{agent_id}")
+            return self._pools[agent_id]
 
     # --- helpers ---------------------------------------------------------
     def agent(self, agent_id: str) -> AgentSpec:
@@ -202,7 +210,7 @@ class CheckEngine:
         agent = self.agent(agent_id)
         task_id = self.store.create_task(agency=agency, agent=agent.id, caller=caller)
         self.store.audit(caller, "check.submit", agency=agency, target=task_id, detail={"agent": agent.id, "documents": len(documents)})
-        self._pools[agent.id].submit(self._work, agent, task_id, agency, record, documents, caller, received or now_iso())
+        self._pool(agent.id).submit(self._work, agent, task_id, agency, record, documents, caller, received or now_iso())
         return task_id
 
     def _extract(self, agent: AgentSpec, record: dict[str, Any], documents: list[dict[str, Any]]
@@ -250,30 +258,34 @@ class CheckEngine:
         consistency     cases whose rule ids equal the agency's expected answer / all cases
         traceability    findings carrying rule id, basis and fields-or-evidence / all findings
         """
-        agent = self.agent(agent_id)
-        tables = rulekit.Tables(rows={name: list(agent.test_tables.get(name, [])) for name in agent.tables})
-        hit: set[str] = set()
-        details, agree, findings_total, traced = [], 0, 0, 0
-        for case in agent.cases:
-            got = evaluate(agent, case.record, tables)
-            ids = sorted({f["rule_id"] for f in got})
-            hit.update(ids)
-            same = ids == sorted(set(case.expect))
-            agree += same
-            for finding in got:
-                findings_total += 1
-                traced += bool(finding["rule_id"] and finding["basis"] and (finding["fields"] or finding["evidence"]))
-            details.append({"case": case.name, "expect": sorted(set(case.expect)), "got": ids, "ok": same})
-        rule_ids = [r.id for r in agent.rules]
+        return evaluate_spec(self.agent(agent_id))
 
-        def ratio(num: int, den: int) -> dict[str, Any]:
-            return {"num": num, "den": den, "value": round(num / den, 4) if den else None}
 
-        return {
-            "agent": agent.id, "version": agent.version,
-            "rule_coverage": ratio(len(hit & set(rule_ids)), len(rule_ids)),
-            "consistency": ratio(agree, len(agent.cases)),
-            "traceability": ratio(traced, findings_total),
-            "uncovered_rules": [r for r in rule_ids if r not in hit],
-            "cases": details,
-        }
+def evaluate_spec(agent: AgentSpec) -> dict[str, Any]:
+    """Validation metrics for an agent spec (also for a draft that is not published yet)."""
+    tables = rulekit.Tables(rows={name: list(agent.test_tables.get(name, [])) for name in agent.tables})
+    hit: set[str] = set()
+    details, agree, findings_total, traced = [], 0, 0, 0
+    for case in agent.cases:
+        got = evaluate(agent, case.record, tables)
+        ids = sorted({f["rule_id"] for f in got})
+        hit.update(ids)
+        same = ids == sorted(set(case.expect))
+        agree += same
+        for finding in got:
+            findings_total += 1
+            traced += bool(finding["rule_id"] and finding["basis"] and (finding["fields"] or finding["evidence"]))
+        details.append({"case": case.name, "expect": sorted(set(case.expect)), "got": ids, "ok": same})
+    rule_ids = [r.id for r in agent.rules]
+
+    def ratio(num: int, den: int) -> dict[str, Any]:
+        return {"num": num, "den": den, "value": round(num / den, 4) if den else None}
+
+    return {
+        "agent": agent.id, "version": agent.version,
+        "rule_coverage": ratio(len(hit & set(rule_ids)), len(rule_ids)),
+        "consistency": ratio(agree, len(agent.cases)),
+        "traceability": ratio(traced, findings_total),
+        "uncovered_rules": [r for r in rule_ids if r not in hit],
+        "cases": details,
+    }

@@ -442,3 +442,117 @@ def test_self_signed_certificate_serves_https(tmp_path, monkeypatch):
     assert {"localhost", "127.0.0.1", "check.example.test", "10.9.8.7"} <= sans
     httpd.shutdown()
     service.engine.shutdown()
+
+
+# --- web designer (declarative agents) --------------------------------------
+
+from xharness.check import declarative  # noqa: E402
+
+TAXI = {
+    "id": "taxi-limit", "name": "計程車費額度檢核", "description": "單趟計程車費超過額度或缺核准文號時提示",
+    "risk": "low", "triggers": ["sync", "batch"], "business_key": "claim_id", "required": ["claim_id", "rides"],
+    "person_field": "rider", "date_field": "ride_date",
+    "tables": {"cap": {"title": "單趟額度", "key": ["unit"], "columns": [
+        {"name": "unit", "title": "單位"}, {"name": "limit", "title": "額度", "type": "number"}]}},
+    "rules": [
+        {"id": "TX-01", "title": "單趟超過額度", "basis": "機關核定計程車費額度", "each": "rides",
+         "when": {"left": {"field": "fare"}, "op": "gt",
+                  "right": {"lookup": {"table": "cap", "match": {"unit": {"record": "unit"}}, "column": "limit"}}},
+         "values": {"limit": {"lookup": {"table": "cap", "match": {"unit": {"record": "unit"}}, "column": "limit"}}},
+         "message": "第{n}趟 {fare} 元，超過額度 {limit} 元"},
+        {"id": "TX-02", "title": "缺核准文號", "basis": "短程計程車搭乘核准規定", "level": "manual",
+         "when": {"left": {"field": "approval_no"}, "op": "empty"}, "message": "{claim_id} 沒有核准文號，轉人工"},
+    ],
+    "assists": [{"id": "receipt", "kind": "extract", "model": "gemma-4-e4b-xreadable-ocr", "outputs": ["fare"], "min_confidence": 0.85}],
+    "test_tables": {"cap": [{"unit": "總務處", "limit": 300}]},
+    "cases": [
+        {"name": "都在額度內", "expect": [], "record": {"claim_id": "T1", "unit": "總務處", "approval_no": "A1", "rides": [{"fare": 250}]}},
+        {"name": "第二趟超過", "expect": ["TX-01"], "record": {"claim_id": "T2", "unit": "總務處", "approval_no": "A2", "rides": [{"fare": 100}, {"fare": 420}]}},
+        {"name": "缺文號", "expect": ["TX-02"], "record": {"claim_id": "T3", "unit": "總務處", "rides": [{"fare": 80}]}},
+    ],
+}
+
+
+def test_declarative_rules_evaluate_like_code_rules():
+    spec_ = declarative.to_spec(TAXI, "1")
+    tables = Tables(rows={"cap": [{"unit": "總務處", "limit": 300}]})
+    got = evaluate(spec_, TAXI["cases"][1]["record"], tables)
+    assert [f["rule_id"] for f in got] == ["TX-01"]
+    assert got[0]["message"] == "第2趟 420 元，超過額度 300 元" and got[0]["fields"] == ["rides.1.fare", "unit"]
+    assert evaluate(spec_, TAXI["cases"][2]["record"], tables)[0]["level"] == "manual"
+    report = __import__("xharness.check.engine", fromlist=["evaluate_spec"]).evaluate_spec(spec_)
+    assert all(report[k]["value"] == 1.0 for k in ("rule_coverage", "consistency", "traceability"))
+
+
+@pytest.mark.parametrize("op,left,right,expect", [
+    ("gt", 5, 3, True), ("gte", 3, 3, True), ("lt", "1,000", 2000, True), ("lte", 4, 3, False),
+    ("eq", "abc", "abc", True), ("ne", "1", 1, False), ("contains", "計程車費", "計程", True),
+    ("gt", "abc", 3, False), ("empty", "", None, True), ("not_empty", "x", None, True),
+])
+def test_declarative_compare(op, left, right, expect):
+    assert declarative._compare(left, op, right) is expect
+
+
+@pytest.mark.parametrize("mutate,needle", [
+    (lambda d: d.update(id="Bad ID"), "代號"),
+    (lambda d: d["rules"][0].update(id="TX-02"), "不重複"),
+    (lambda d: d["rules"][0]["when"].update(op="exec"), "比較方式"),
+    (lambda d: d["rules"][0]["when"].update(left={"python": "os.system('x')"}), "不認得"),
+    (lambda d: d["rules"][0]["when"]["right"]["lookup"].update(table="nope"), "沒有判定值表"),
+    (lambda d: d["rules"].clear(), "至少要有 1 條規則"),
+    (lambda d: d["assists"][0].update(kind="shell"), "輔助子Agent"),
+])
+def test_declarative_validation_messages(mutate, needle):
+    bad = json.loads(json.dumps(TAXI))
+    mutate(bad)
+    with pytest.raises(spec.SpecError, match=needle):
+        declarative.validate(bad)
+
+
+def test_fields_from_sample():
+    fields = declarative.fields_from_sample({"claim_id": "T1", "amount": "1,200", "ride_date": "2026-12-01", "ok": True,
+                                             "rides": [{"fare": 100, "from": "A"}]})
+    types = {f["name"]: f["type"] for f in fields}
+    assert types == {"claim_id": "text", "amount": "number", "ride_date": "date", "ok": "bool", "rides": "list"}
+    assert [f["name"] for f in fields[-1]["items"]] == ["fare", "from"]
+
+
+def test_api_design_publish_run_and_disable(server):
+    base, client_token, service = server
+    designer = login(base, "approver1")  # approver1 gets designer below
+    service.people["approver1"]["roles"].append("designer")
+    service.people["approver1"]["roles"].append("operator")
+    path = "/api/check/v1/designs/taxi-limit"
+    reviewer = login(base, "reviewer1")
+    assert call(base, "POST", path + "/draft", reviewer, {"definition": TAXI})[0] == 403
+    half = {**TAXI, "cases": TAXI["cases"][:1]}
+    status, data, _ = call(base, "POST", path + "/draft", designer, {"definition": half})
+    assert status == 200 and data["problem"] == ""
+    assert call(base, "POST", path + "/validate", designer)[1]["ok"] is False
+    assert call(base, "POST", path + "/publish", designer)[0] == 409
+    call(base, "POST", path + "/draft", designer, {"definition": TAXI})
+    assert call(base, "POST", path + "/validate", designer)[1]["ok"] is True
+    assert call(base, "POST", path + "/publish", designer, {"note": "第一版"})[1]["version"] == 1
+    assert "taxi-limit" in service.agents and service.agents["taxi-limit"].version == "1"
+    listed = {a["id"]: a for a in call(base, "GET", "/api/check/v1/agents", designer)[1]["agents"]}
+    assert listed["taxi-limit"]["source"] == "web" and listed["travel-fare"]["source"] == "code"
+    # the agency still approves the values
+    service.store.put_table(agency="EPA", agent="taxi-limit", name="cap", rows=[{"unit": "總務處", "limit": 300}],
+                            effective_from="2026-01-01", approved_by="approver1")
+    csv_text = "﻿claim_id,unit,approval_no\nT9,總務處,\nT10,總務處,A10\n"
+    status, data, _ = call(base, "POST", "/api/check/v1/agents/taxi-limit/run", designer, {"csv": csv_text, "filename": "x.csv"})
+    assert status == 200 and data["records"] == 2 and data["with_findings"] >= 1  # T9 lacks approval; rides missing -> INPUT
+    # code rule packs cannot be edited from the page
+    assert call(base, "POST", "/api/check/v1/designs/travel-fare/draft", designer, {"definition": {"id": "travel-fare"}})[0] == 409
+    # disable: source systems keep going, nothing is flagged
+    assert call(base, "POST", "/api/check/v1/agents/travel-fare/enabled", designer, {"enabled": False})[1] == {"enabled": False}
+    status, data, _ = call(base, "POST", "/api/check/v1/agents/travel-fare/check", client_token, {"record": record()})
+    assert status == 200 and data["disabled"] is True and data["results"] == []
+    call(base, "POST", "/api/check/v1/agents/travel-fare/enabled", designer, {"enabled": True})
+    # version 2 then roll back to 1
+    call(base, "POST", path + "/draft", designer, {"definition": {**TAXI, "name": "計程車費額度檢核（新）"}})
+    assert call(base, "POST", path + "/publish", designer)[1]["version"] == 2
+    assert call(base, "POST", path + "/rollback", designer, {"version": 1})[1]["version"] == 3
+    assert service.agents["taxi-limit"].name == "計程車費額度檢核"
+    actions = [a["action"] for a in service.store.audit_list(None)]
+    assert {"agent.publish", "agent.rollback", "agent.disable", "agent.enable"} <= set(actions)
