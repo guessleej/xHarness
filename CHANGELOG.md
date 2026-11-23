@@ -2,9 +2,9 @@
 
 中文 | English below
 
-## 2.0.0 — 未發布
+## 2.0.0 — 2026-11-23
 
-整併 OpenManus（MIT）有、xHarness 沒有的能力，用 xHarness 自己的架構重寫，保留零相依、審批與稽核。逐項完成後發布。
+整併 OpenManus（MIT）有、xHarness 沒有的能力，用 xHarness 自己的架構重寫，保留零相依、審批與稽核。OpenManus的評測集（GAIA類與Office類）待有裝Office的Windows測試機再補跑。
 
 - **互動式瀏覽**：`browser_view` 開一個會保留的分頁，把頁面讀成無障礙樹，每個連結、欄位、按鈕都有編號（`[e12]`）；`browser_click`、`browser_type`、`browser_press`、`browser_scroll`、`browser_tabs` 照編號操作，每做一步回傳新的頁面。使用 camofox 原生的快照與操作端點，不注入腳本。每個對話用自己的 camofox 使用者（cookie 與分頁不互通），最多 4 個分頁，閒置 30 分鐘自動關閉；長的下拉選單只留前 3 項與已選的那項。
 - **送出類動作一律問人**：點的元件名稱看起來是送出、付款、購買、登入、註冊、刪除、下載、確認等，或編號不在上一次快照裡（分辨不出是什麼），以及按 Enter、輸入後送出，就算審批模式是 auto 也要人確認（新的 `ToolContext.confirm`）。子代理遇到這類動作直接拒絕，因為它的審批會轉給上層策略，可能被靜默放行。
@@ -21,10 +21,11 @@
 - **Windows 指令保護模式**（`[sandbox] mode = "require"`，給學校與企業）：`bash`、`python_run` 等指令改用低完整性等級（Low IL）的受限權杖執行，權限只留 SeChangeNotify、Administrators 改為只拒絕，再放進工作物件，啟動器結束時整棵程序樹一起結束。工作目錄標成 Low，指令只寫得進這裡（TEMP 指到 `%LOCALAPPDATA%\Temp\Low\xharness`），寫不到使用者的文件、桌面與設定。不需要系統管理員權限、不用裝驅動。Windows 無法用這個方式切斷單一程序的網路，所以在 Windows 上設 `allow_network = false` 會直接報錯，不會假裝有效。實測（Windows 11 筆電）：`whoami /groups` 顯示 Low Mandatory Level；寫入工作目錄成功、寫入家目錄被擋；拿掉降級那一步時兩項測試都會失敗。系統管理員身分（例如 SSH）執行時，受限權杖的擁有者與預設存取清單改成使用者本人，否則程序連自己的權杖都讀不到。
 - **不相容：桌面個人版預設不包沙箱**。`xharness desktop`（安裝檔裝的個人版）是在使用者自己的電腦上替他做事，例如把下載資料夾的檔案搬到別處，設定檔沒寫 `[sandbox] mode` 時改成 `off`；寫了就照設定。伺服器節點（`xharness web`）的預設不變，仍是 `auto`。
 - **內建角色 `data-analyst`**（取自 OpenManus 的資料分析代理）：先看欄位與樣本再算，數字一律來自 `python_run`，交代空白與異常值怎麼處理，用 `chart` 出圖，寫進 Excel 時附公式並另存，不覆蓋原檔。各目錄裡同名的角色會取代它。
+- **`POST /api/tools/web_search`**：讓別的平台直接用節點的瀏覽器搜尋，不必跑代理與模型。送 `{"query","max_results"}`，回 `{"query","engine","results":[{title,url,snippet}],"problems","seconds"}`。驗證與其他API相同（帳號權杖或節點權杖，只走Authorization標頭），要帶 `X-XHarness-Client`；帳號被 `deny_tools` 拿掉 `web_search` 時回403；節點沒設 `[tools] browser` 時回404；查詢最多300字，同時最多2個搜尋。第一個使用者是xStudio模型測試台的「網路搜尋」：模型由xStudio照常經閘道呼叫，xHarness只負責搜尋。
 
 **English**
 
-Brings in what OpenManus (MIT) has and xHarness lacked, rewritten on xHarness's own design so it stays dependency-free, approved and audited. Released when every item is done.
+Brings in what OpenManus (MIT) has and xHarness lacked, rewritten on xHarness's own design so it stays dependency-free, approved and audited. The OpenManus-style evaluation runs (GAIA-like and Office tasks) follow once a Windows test machine with Office is available.
 
 - **Interactive browsing**: `browser_view` opens a tab that stays open and reads the page as an accessibility tree in which every link, field and button has a ref (`[e12]`); `browser_click`, `browser_type`, `browser_press`, `browser_scroll` and `browser_tabs` act on those refs and return the page after each step. Uses camofox's own snapshot and action endpoints, no injected scripts. Each conversation is its own camofox user (cookies and tabs are not shared), at most 4 tabs, closed after 30 idle minutes; long dropdowns keep their first 3 options and the selected one.
 - **Sending always goes to the person**: a click on an element labelled send, pay, buy, sign in, sign up, delete, download, confirm and the like, or on a ref missing from the last snapshot (we cannot tell what it is), and Enter or typing with submit, need the person's yes even under approval mode "auto" (new `ToolContext.confirm`). A child agent is refused outright: its approvals go to the parent's policy, which may say yes unasked.
@@ -41,8 +42,7 @@ Brings in what OpenManus (MIT) has and xHarness lacked, rewritten on xHarness's 
 - **Windows command protection** (`[sandbox] mode = "require"`, for schools and companies): `bash`, `python_run` and the like run with a restricted token at Low integrity -- every privilege but SeChangeNotify removed, Administrators deny-only -- inside a job object that ends the whole tree with the launcher. The working directory is labelled Low, so commands can write there (TEMP points at `%LOCALAPPDATA%\Temp\Low\xharness`) and not to the person's documents, desktop or settings. No administrator rights, no driver. Windows cannot cut one process's network this way, so `allow_network = false` is refused on Windows instead of pretending. Measured (Windows 11 laptop): `whoami /groups` shows Low Mandatory Level; writing in the working directory works, writing in the home folder is refused; both tests fail when the lowering step is removed. Run as an administrator (an SSH session, say), the restricted token's owner and default DACL become the person, or the process could not open its own token.
 - **Incompatible: the desktop app runs unconfined by default.** `xharness desktop` (the installed personal app) works on the person's own computer -- moving a file out of Downloads, say -- so without `[sandbox] mode` in the config it uses `off`; a mode in the config still wins. Server nodes (`xharness web`) keep `auto`.
 - **Built-in role `data-analyst`** (from OpenManus's data-analysis agent): looks at the columns and sample rows first, takes every number from `python_run`, says how blanks and odd values were handled, draws with `chart`, and writes formulas into a new Excel file rather than overwriting. A role of the same name in any directory replaces it.
-
-- **`POST /api/tools/web_search`**：讓別的平台直接用節點的瀏覽器搜尋，不必跑代理與模型。送 `{"query","max_results"}`，回 `{"query","engine","results":[{title,url,snippet}],"problems","seconds"}`。驗證與其他API相同（帳號權杖或節點權杖，只走Authorization標頭），要帶 `X-XHarness-Client`；帳號被 `deny_tools` 拿掉 `web_search` 時回403；節點沒設 `[tools] browser` 時回404；查詢最多300字，同時最多2個搜尋。第一個使用者是xStudio模型測試台的「網路搜尋」：模型由xStudio照常經閘道呼叫，xHarness只負責搜尋。
+- **`POST /api/tools/web_search`**: lets another platform search through the node's browser without running an agent or a model. Send `{"query","max_results"}`, get `{"query","engine","results":[{title,url,snippet}],"problems","seconds"}`. Same authentication as the rest of the API (account or node token, Authorization header only) plus `X-XHarness-Client`; 403 when the account's `deny_tools` removes `web_search`, 404 when the node has no `[tools] browser`; queries up to 300 characters, at most 2 searches at a time. First user: the "web search" switch in xStudio's model playground, where xStudio still calls the model through its gateway and xHarness only searches.
 
 ## 1.19.0 — 2026-11-09
 
