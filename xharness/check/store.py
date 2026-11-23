@@ -20,8 +20,9 @@ import os
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 TPE = timezone(timedelta(hours=8))
 GENESIS = "0" * 64
@@ -110,6 +111,21 @@ class CheckStore:
     def _one(self, sql: str, args: Iterable[Any] = ()) -> dict[str, Any] | None:
         rows = self._rows(sql, args)
         return rows[0] if rows else None
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Group writes into one commit (one fsync). Nested calls join the outer one."""
+        with self._lock:
+            if self._db.in_transaction:
+                yield
+                return
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+            self._db.execute("COMMIT")
 
     def close(self) -> None:
         with self._lock:
@@ -221,8 +237,12 @@ class CheckStore:
                              "VALUES (?,?,?, 'create', '', 'open', ?)", (case_id, ts, actor, reason))
             return case_id
 
-    def cases(self, agency: str | None, status: str = "", assignee: str = "", limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    def cases(self, agency: str | None, status: str = "", assignee: str = "", limit: int = 100, offset: int = 0,
+              agent: str = "") -> dict[str, Any]:
         where, args = [], []
+        if agent:
+            where.append("agent=?")
+            args.append(agent)
         if agency is not None:
             where.append("agency=?")
             args.append(agency)

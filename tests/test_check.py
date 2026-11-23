@@ -339,6 +339,7 @@ def test_api_review_flow(server):
     call(base, "POST", "/api/check/v1/agents/travel-fare/check", token, {"record": record()})
     reviewer = login(base, "reviewer1")
     cases = call(base, "GET", "/api/check/v1/cases?status=open", reviewer)[1]["cases"]
+    assert call(base, "GET", "/api/check/v1/cases?agent=attachment-check", reviewer)[1]["total"] == 0
     case_id = cases[0]["case_id"]
     assert call(base, "POST", f"/api/check/v1/cases/{case_id}", reviewer, {"action": "take"})[1]["status"] == "in_progress"
     done = call(base, "POST", f"/api/check/v1/cases/{case_id}", reviewer, {"action": "resolve", "note": "已說明特殊事由"})[1]

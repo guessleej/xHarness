@@ -41,8 +41,8 @@ textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:
 table{width:100%;border-collapse:collapse;font-size:15px}
 th{position:sticky;top:0;background:var(--card);text-align:left;font-size:14px;color:var(--ink2);padding:8px 10px;z-index:1}
 td{padding:9px 10px;border-top:1px solid var(--line);vertical-align:top}
-tr.click{cursor:pointer}tr.click:hover td{background:var(--tint)}
-.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:14px;font-weight:600;background:var(--mist)}
+td.nw{white-space:nowrap}tr.click{cursor:pointer}tr.click:hover td{background:var(--tint)}
+.pill{display:inline-block;white-space:nowrap;padding:2px 10px;border-radius:999px;font-size:14px;font-weight:600;background:var(--mist)}
 .pill.open{background:rgba(191,24,31,.12);color:var(--red)}.pill.in_progress{background:rgba(180,83,9,.14);color:var(--warn)}
 .pill.resolved{background:rgba(46,125,50,.14);color:var(--ok)}.pill.manual{background:rgba(14,116,144,.14);color:var(--info)}
 .pill.notice{background:rgba(191,24,31,.12);color:var(--red)}.pill.sample{background:var(--mist);color:var(--ink2)}
@@ -88,6 +88,7 @@ z-index:40;overflow:auto;padding:22px;transform:translateX(105%);transition:tran
     <h1>案件覆核</h1>
     <div class="card">
       <div class="row">
+        <select id="cAgent"><option value="">全部 Agent</option></select>
         <select id="cStatus"><option value="">全部狀態</option><option value="open">待處理</option><option value="in_progress">處理中</option><option value="resolved">已處理</option></select>
         <label class="muted"><input type="checkbox" id="cMine"> 只看我承辦的</label>
         <button class="btn" id="cReload">重新整理</button>
@@ -172,6 +173,8 @@ async function api(path,opt={}){const r=await fetch(API+path,{...opt,headers:{"C
   if(r.status===401&&path!=="/login"){logout(false);throw new Error("請重新登入")}
   const ct=r.headers.get("Content-Type")||"";const data=ct.includes("json")?await r.json():await r.blob();
   if(!r.ok)throw new Error(data.error||("HTTP "+r.status));return data}
+const ACT={create:"建立",take:"接手",resolve:"結案",reopen:"重新開啟",assign:"指派",note:"附註"},ST={open:"待處理",in_progress:"處理中",resolved:"已處理"};
+const agentName=id=>(agents.find(a=>a.id===id)||{}).name||id;
 const has=role=>me&&me.roles.includes(role);
 // IME: Enter while composing never submits
 let composing=false;document.addEventListener("compositionstart",()=>composing=true);document.addEventListener("compositionend",()=>composing=false);
@@ -189,7 +192,7 @@ async function start(){if(!token){$("login").hidden=false;$("app").hidden=true;$
   $("who").innerHTML=esc(me.name)+"｜"+esc(me.agency||"全部機關（唯讀）")+' <button class="btn" id="out">登出</button>';$("out").onclick=()=>logout(true);
   $("nav").innerHTML=TABS.filter(x=>!x[2]||has(x[2])).map(x=>`<button data-t="${x[0]}">${x[1]}</button>`).join("");
   $("nav").querySelectorAll("button").forEach(b=>b.onclick=()=>show(b.dataset.t));
-  const opts=agents.map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("");$("tAgent").innerHTML=opts;$("vAgent").innerHTML=opts;
+  const opts=agents.map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("");$("tAgent").innerHTML=opts;$("vAgent").innerHTML=opts;$("cAgent").innerHTML='<option value="">全部 Agent</option>'+opts;
   await loadSetup();show(tab)}
 async function logout(call){if(call){try{await api("/logout",{method:"POST"})}catch(e){}}token="";sessionStorage.removeItem("xck");me=null;start()}
 $("loginForm").onsubmit=async e=>{e.preventDefault();$("lerr").textContent="";
@@ -200,14 +203,15 @@ async function loadSetup(){const steps=(await api("/setup")).steps;const done=st
   $("setupTitle").textContent=`設定順序　${done}/${steps.length} 步完成`;$("setupNext").textContent=next?`下一步：${next.step}. ${next.title}`:"已可上線使用";
   const label={done:"已完成",current:"現在做這步",blocked:"還不能做",todo:"可以先做"};
   $("track").innerHTML=steps.map(s=>`<div class="step ${s.state}" data-t="${esc(s.tab)}"><div class="n">${s.step}. ${esc(s.title)}　<span class="muted">${label[s.state]}</span></div><p>${esc(s.why)}</p><p>${esc(s.detail)}</p></div>`).join("");
-  $("track").querySelectorAll(".step").forEach(el=>el.onclick=()=>{const t=el.dataset.t;if(t&&$("nav").querySelector(`[data-t="${t}"]`))show(t)});
+  $("track").querySelectorAll(".step").forEach((el,i)=>el.onclick=()=>{const t=el.dataset.t;if(!t||!$("nav").querySelector(`[data-t="${t}"]`))return;
+    if(steps[i].agent){$("vAgent").value=steps[i].agent;fillTables()}show(t)});
   $("setupCard").hidden=done===steps.length}
 
 // --- cases
-$("cStatus").onchange=loadCases;$("cMine").onchange=loadCases;$("cReload").onclick=loadCases;
-async function loadCases(){const q=new URLSearchParams({status:$("cStatus").value,mine:$("cMine").checked?"1":""});const d=await api("/cases?"+q);
+$("cStatus").onchange=loadCases;$("cAgent").onchange=loadCases;$("cMine").onchange=loadCases;$("cReload").onclick=loadCases;
+async function loadCases(){const q=new URLSearchParams({status:$("cStatus").value,agent:$("cAgent").value,mine:$("cMine").checked?"1":""});const d=await api("/cases?"+q);
   $("cCount").textContent=`共 ${d.total} 件${d.total>d.cases.length?`，顯示最新 ${d.cases.length} 件，請用篩選縮小範圍`:""}`;
-  $("cRows").innerHTML=d.cases.map(c=>`<tr class="click" data-id="${esc(c.case_id)}"><td><span class="pill ${esc(c.status)}">${esc(c.status_label)}</span></td><td>${esc(c.reason)}</td><td>${esc(c.agent)}</td><td>${esc(c.business_key)}</td><td>${esc(c.assignee)}</td><td>${t(c.updated)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">沒有案件</td></tr>';
+  $("cRows").innerHTML=d.cases.map(c=>`<tr class="click" data-id="${esc(c.case_id)}"><td class="nw"><span class="pill ${esc(c.status)}">${esc(c.status_label)}</span></td><td>${esc(c.reason)}</td><td class="nw">${esc(agentName(c.agent))}</td><td class="nw">${esc(c.business_key)}</td><td class="nw">${esc(c.assignee)}</td><td class="nw">${t(c.updated)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">沒有案件</td></tr>';
   $("cRows").querySelectorAll("tr.click").forEach(r=>r.onclick=()=>caseDrawer(r.dataset.id))}
 function findingHtml(f){const lv={notice:"提示",manual:"轉人工",sample:"抽審"}[f.level]||f.level;
   const ev=(f.evidence||[]).map(e=>`${esc(e.doc||"")} 第${esc(e.page||"?")}頁 ${esc(e.field||"")}=${esc(e.value||"")}`).join("；");
@@ -219,7 +223,7 @@ async function caseDrawer(id){openCase=id;const c=await api("/cases/"+encodeURIC
    <div class="row" style="margin-top:8px"><button class="btn" data-a="note">加附註</button><span id="dErr" class="err"></span></div>`:'<p class="muted">你沒有覆核角色，只能檢視。</p>';
   $("dBody").innerHTML=`<h1 style="font-size:22px">${esc(c.reason)}</h1><p><span class="pill ${esc(c.status)}">${esc(c.status_label)}</span>　<span class="muted">${esc(c.agent)}｜業務鍵 ${esc(c.business_key)}｜承辦 ${esc(c.assignee||"未指派")}</span></p>
    <h2>提示與證據（${c.results.length}）</h2>${c.results.map(findingHtml).join("")}${acts}
-   <h2 style="margin-top:18px">歷程</h2><div class="events">${c.events.map(e=>`<div>${t(e.ts)}　${esc(e.actor)}　${esc(e.action)}${e.from_status!==e.to_status?`（${esc(e.from_status)}→${esc(e.to_status)}）`:""}　${esc(e.note)}</div>`).join("")}</div>`;
+   <h2 style="margin-top:18px">歷程</h2><div class="events">${c.events.map(e=>`<div>${t(e.ts)}　${esc(e.actor)}　${esc(ACT[e.action]||e.action)}${e.from_status!==e.to_status?`（${esc(ST[e.from_status]||"新案")}→${esc(ST[e.to_status]||e.to_status)}）`:""}　${esc(e.note)}</div>`).join("")}</div>`;
   $("dBody").querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>caseAct(b.dataset.a));openDrawer()}
 async function caseAct(action){const body={action,note:($("dNote")||{}).value||"",assignee:($("dAssignee")||{}).value||""};
   if(action==="assign"&&!body.assignee){$("dErr").textContent="請填要指派的帳號";return}
@@ -262,7 +266,7 @@ async function loadTable(){if(!$("vTable").value)fillTables();const a=$("vAgent"
   const edit=has("approver")&&me.agency;$("vEdit").hidden=!edit;
   $("vHead").innerHTML="<tr>"+def.columns.map(c=>`<th>${esc(c.title)}</th>`).join("")+(edit?"<th></th>":"")+"</tr>";drawRows(edit);
   $("vHist").innerHTML=(d.history||[]).map(h=>`<tr><td>${h.version}</td><td>${esc(h.effective_from)}</td><td>${h.rows.length}</td><td>${esc(h.approved_by)}</td><td>${t(h.approved_at)}</td><td>${esc(h.note)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">沒有版本</td></tr>';
-  if(!$("vEff").value)$("vEff").value=new Date(Date.now()+864e5).toISOString().slice(0,10)}
+  if(!$("vEff").value)$("vEff").value=new Date(Date.now()+8*3600e3).toISOString().slice(0,10)}
 function drawRows(edit){$("vRows").innerHTML=trows.map((r,i)=>"<tr>"+tdef.columns.map(c=>edit?`<td><input data-i="${i}" data-c="${esc(c.name)}" value="${esc(r[c.name])}" ${c.type==="number"?'inputmode="decimal"':""}></td>`:`<td>${esc(r[c.name])}</td>`).join("")+(edit?`<td><button class="btn" data-del="${i}">刪</button></td>`:"")+"</tr>").join("")||`<tr><td colspan="${tdef.columns.length+1}" class="muted">沒有資料</td></tr>`;
   $("vRows").querySelectorAll("input").forEach(el=>el.oninput=()=>{trows[+el.dataset.i][el.dataset.c]=el.value});
   $("vRows").querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{trows.splice(+b.dataset.del,1);drawRows(true)})}
@@ -274,7 +278,7 @@ $("vPub").onclick=async()=>{$("vErr").textContent="";if(!$("vNote").value.trim()
 // --- runs
 $("rReload").onclick=loadRuns;
 async function loadRuns(){const d=await api("/runs?limit=200");
-  $("rRows").innerHTML=d.runs.map(r=>`<tr class="click" data-id="${esc(r.run_id)}"><td>${t(r.received)}</td><td>${esc(r.agent)} v${esc(r.agent_version)}</td><td>${esc(r.trigger)}</td><td>${r.records}</td><td>${r.elapsed_ms==null?"":r.elapsed_ms+" ms"}</td><td>${esc(r.status)}</td><td>${esc(r.run_id)}</td></tr>`).join("")||'<tr><td colspan="7" class="muted">還沒有執行紀錄</td></tr>';
+  $("rRows").innerHTML=d.runs.map(r=>`<tr class="click" data-id="${esc(r.run_id)}"><td class="nw">${t(r.received)}</td><td>${esc(agentName(r.agent))} v${esc(r.agent_version)}</td><td>${esc(r.trigger)}</td><td>${r.records}</td><td>${r.elapsed_ms==null?"":r.elapsed_ms+" ms"}</td><td>${esc(r.status)}</td><td>${esc(r.run_id)}</td></tr>`).join("")||'<tr><td colspan="7" class="muted">還沒有執行紀錄</td></tr>';
   $("rRows").querySelectorAll("tr.click").forEach(r=>r.onclick=async()=>{const run=await api("/runs/"+encodeURIComponent(r.dataset.id));
     $("dBody").innerHTML=`<h1 style="font-size:22px">執行 ${esc(run.run_id)}</h1><p class="muted">${esc(run.agent)} v${esc(run.agent_version)}｜規則指紋 ${esc(run.agent_digest.slice(0,12))}｜判定值版本 ${esc(JSON.stringify(run.table_versions))}｜資料基準 ${esc(run.data_basis)}｜觸發 ${esc(run.trigger)}｜呼叫者 ${esc(run.caller)}</p><p class="muted">收到 ${t(run.received)}｜完成 ${t(run.finished)}｜${esc(run.elapsed_ms)} ms</p>`+(run.results.map(findingHtml).join("")||"<p>這次沒有提示。</p>");openDrawer()})}
 
@@ -283,7 +287,7 @@ $("sGo").onclick=loadStats;
 async function loadStats(){const q=new URLSearchParams({since:$("sSince").value,until:$("sUntil").value});const d=await api("/stats?"+q);
   const total=d.by_rule.reduce((s,r)=>s+r.n,0);const runs=d.runs.reduce((s,r)=>s+r.n,0);const ms=d.runs.length?Math.max(...d.runs.map(r=>r.max_ms||0)):0;
   $("sKpi").innerHTML=`<div>提示<b>${total}</b></div><div>執行<b>${runs}</b></div><div>待處理案件<b>${d.cases.open||0}</b></div><div>已處理案件<b>${d.cases.resolved||0}</b></div><div>最慢一次<b>${ms.toFixed?ms.toFixed(0):ms} ms</b></div>`;
-  $("sRows").innerHTML=d.by_rule.map(r=>`<tr><td>${esc(r.agent)}</td><td>${esc(r.rule_id)} ${esc(r.rule_title)}</td><td>${esc(r.level)}</td><td>${r.n}</td></tr>`).join("")||'<tr><td colspan="4" class="muted">這段期間沒有提示</td></tr>'}
+  $("sRows").innerHTML=d.by_rule.map(r=>`<tr><td>${esc(agentName(r.agent))}</td><td>${esc(r.rule_id)} ${esc(r.rule_title)}</td><td class="nw">${esc({notice:"提示",manual:"轉人工",sample:"抽審"}[r.level]||r.level)}</td><td>${r.n}</td></tr>`).join("")||'<tr><td colspan="4" class="muted">這段期間沒有提示</td></tr>'}
 $("sCsv").onclick=async()=>{const q=new URLSearchParams({since:$("sSince").value,until:$("sUntil").value});const blob=await api("/export.csv?"+q);
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="check-export.csv";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000)};
 

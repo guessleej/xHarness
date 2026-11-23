@@ -176,11 +176,12 @@ class CheckService:
     # --- setup track -----------------------------------------------------
     def setup(self, caller: Caller) -> list[dict[str, Any]]:
         agency = caller.agency
-        missing = []
+        missing, first_agent = [], ""
         for agent in self.agents.values():
             for name in agent.tables:
                 if agency is not None and self.store.table_at(agency, agent.id, name, "9999-12-31")[0] == 0:
                     missing.append(f"{agent.name}／{agent.tables[name].title}")
+                    first_agent = first_agent or agent.id
         clients = [c for c in self.clients.listing() if agency is None or c["agency"] == agency]
         runs = self.store.runs(agency, limit=1)
         cases = self.store.cases(agency, status="resolved", limit=1)["total"]
@@ -205,7 +206,8 @@ class CheckService:
                 state, current = "current", True
             else:
                 state = "todo"
-            out.append({"step": index, "title": title, "why": why, "state": state, "detail": detail, "tab": tab})
+            out.append({"step": index, "title": title, "why": why, "state": state, "detail": detail, "tab": tab,
+                        "agent": first_agent if index == 1 else ""})
         return out
 
     # --- decision tables -------------------------------------------------
@@ -398,7 +400,7 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
                 status = query.get("status", "")
                 if status and status not in CASE_STATES:
                     raise ApiError(400, "狀態只能是 " + "、".join(CASE_STATES))
-                return self._json(200, service.store.cases(agency, status=status, assignee=assignee,
+                return self._json(200, service.store.cases(agency, status=status, assignee=assignee, agent=query.get("agent", ""),
                                                            limit=min(int(query.get("limit", 200)), 500)) | {"states": CASE_STATES})
             if len(parts) == 2 and parts[0] == "cases":
                 if method == "GET":

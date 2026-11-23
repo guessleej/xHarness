@@ -23,6 +23,7 @@ from .spec import AgentSpec
 from .store import TPE, CheckStore, canonical, now_iso, sha256
 
 LEVELS = {"notice", "manual", "sample"}
+CHUNK = 200  # records per commit: one fsync per chunk, and the write lock is never held for a whole batch
 Extractor = Callable[[AgentSpec, dict[str, Any], list[dict[str, Any]]], tuple[dict[str, Any], list[dict[str, Any]]]]
 
 
@@ -152,30 +153,10 @@ class CheckEngine:
                                       params=params, received=received)
         out = []
         try:
-            for record in records:
-                record = dict(record)
-                extra_evidence: list[dict[str, Any]] = []
-                override = None
-                if prepared is not None:
-                    record, extra_evidence, override = prepared(record)
-                key = str(rulekit.dig(record, agent.business_key, ""))
-                findings = override if override is not None else evaluate(agent, record, tables)
-                if not findings and self._sampled(agent, key):
-                    findings = [{"rule_id": "SAMPLE", "title": "人工抽審", "basis": f"AI風險抽審 {agent.sample_rate:.0%}",
-                                 "level": "sample", "message": "本筆無提示，依抽審比例列入人工抽審", "fields": [],
-                                 "evidence": [], "fingerprint_values": {"sample": agent.id, "key": key}}]
-                input_hash = sha256(canonical(record))
-                shown = []
-                for finding in findings:
-                    finding["evidence"] = [*finding["evidence"], *extra_evidence]
-                    finding["fingerprint"] = self._fingerprint(agent, record, finding)
-                    case_id = self.store.case_for(agency=agency, agent=agent.id, business_key=key,
-                                                  fingerprint=finding["fingerprint"], reason=finding["message"], actor=caller)
-                    self.store.add_result(run_id=run_id, agency=agency, agent=agent.id, business_key=key,
-                                          finding=finding, input_hash=input_hash, case_id=case_id)
-                    shown.append({k: finding[k] for k in ("rule_id", "title", "level", "message", "basis", "fields", "evidence")}
-                                 | {"case_id": case_id})
-                out.append({"business_key": key, "findings": shown})
+            for start in range(0, len(records), CHUNK):
+                with self.store.transaction():
+                    for record in records[start:start + CHUNK]:
+                        out.append(self._one(agent, run_id, agency, caller, tables, dict(record), prepared))
         except Exception as error:
             elapsed = (time.perf_counter() - started) * 1000
             self.store.finish_run(run_id, status="error", records=len(out), elapsed_ms=elapsed, error=f"{type(error).__name__}: {error}")
@@ -188,6 +169,32 @@ class CheckEngine:
                                  "findings": sum(len(r["findings"]) for r in out), "tables": tables.versions, "basis": basis})
         return {"run_id": run_id, "agent": agent.id, "agent_version": agent.version, "data_basis": basis,
                 "table_versions": tables.versions, "elapsed_ms": round(elapsed, 2), "results": out}
+
+
+    def _one(self, agent: AgentSpec, run_id: str, agency: str, caller: str, tables: rulekit.Tables,
+             record: dict[str, Any], prepared: Any) -> dict[str, Any]:
+        extra_evidence: list[dict[str, Any]] = []
+        override = None
+        if prepared is not None:
+            record, extra_evidence, override = prepared(record)
+        key = str(rulekit.dig(record, agent.business_key, ""))
+        findings = override if override is not None else evaluate(agent, record, tables)
+        if not findings and self._sampled(agent, key):
+            findings = [{"rule_id": "SAMPLE", "title": "人工抽審", "basis": f"AI風險抽審 {agent.sample_rate:.0%}",
+                         "level": "sample", "message": "本筆無提示，依抽審比例列入人工抽審", "fields": [],
+                         "evidence": [], "fingerprint_values": {"sample": agent.id, "key": key}}]
+        input_hash = sha256(canonical(record))
+        shown = []
+        for finding in findings:
+            finding["evidence"] = [*finding["evidence"], *extra_evidence]
+            finding["fingerprint"] = self._fingerprint(agent, record, finding)
+            case_id = self.store.case_for(agency=agency, agent=agent.id, business_key=key,
+                                          fingerprint=finding["fingerprint"], reason=finding["message"], actor=caller)
+            self.store.add_result(run_id=run_id, agency=agency, agent=agent.id, business_key=key,
+                                  finding=finding, input_hash=input_hash, case_id=case_id)
+            shown.append({k: finding[k] for k in ("rule_id", "title", "level", "message", "basis", "fields", "evidence")}
+                         | {"case_id": case_id})
+        return {"business_key": key, "findings": shown}
 
     # --- async (documents) -----------------------------------------------
     def submit(self, agent_id: str, *, agency: str, record: dict[str, Any], documents: list[dict[str, Any]],

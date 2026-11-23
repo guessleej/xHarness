@@ -2,6 +2,36 @@
 
 中文 | English below
 
+## 3.0.0-beta — 未發布
+
+檢核平臺：讓很多支「檢核Agent」接上來、跑起來、管得住。判定由確定性規則做，附件辨識與模型只輔助；規則用到的數值由機關核定；結果只提示、不阻擋來源系統。第一份規則包對應環境部智慧篩選平臺案，平臺本身不綁任何一家單位。`xharness check serve` 啟動（只綁本機，埠 3095）。
+
+- **接入規格**：一支Agent一個資料夾（`agent.toml`、`rules.py`、`tables.schema.toml`、`cases/`），放進 `[check] agents_dirs` 就接上，核心不改；守衛測試確認核心程式不認得任何一支Agent。壞掉的Agent會被略過並列出原因，不影響其他Agent。
+- **規則沙箱**：`rules.py` 先經 AST 檢查（只准引用規則工具組與 datetime、decimal、math、re，不准 open／exec／雙底線屬性），再以縮減過的內建函式執行；規則丟例外一律轉人工，不會當成通過。
+- **判定值版本**：每張表每次發布都是新版本、帶生效日與核定人，舊版本不刪；檢核依資料基準日套用當時有效的版本。只有機關帳號的核定人（approver）能發布，平臺管理者（廠商）不行。
+- **結果與證據**：每筆提示帶規則編號、依據、比對欄位、證據與輸入雜湊；每次執行記 Agent 版本、規則指紋、各表判定值版本、資料基準日、收到與送出時間，可依執行識別查回。同一事件（人＋日期＋金額等）跨執行、跨Agent歸併成同一件案件。
+- **案件覆核**：待處理→處理中→已處理，接手、指派、附註、重新開啟都留歷程。中、高風險Agent依比例抽審（至少 10%），抽樣以伺服器密鑰計算，可重現。
+- **檢核 API**：來源系統用自己的金鑰（只存雜湊）呼叫；同步路徑只跑規則（.70 實測單筆 p50 10 ms、p95 24 ms，一次 500 筆 56 ms）；附件要辨識時回 202 與任務編號，辨識服務未設定、失敗或斷路器打開時標「附件無法判讀，轉人工」。機關一律取自金鑰或登入身分，不信任請求內容。
+- **稽核**：雜湊鏈只增不刪（資料庫觸發器擋 UPDATE／DELETE），驗證會指出從哪一筆斷開；結案移交可匯出整條鏈。
+- **管理頁**：案件覆核、試打檢核、判定值（表格直接編輯後發布）、執行紀錄、統計與去識別 CSV 匯出、稽核；最上方是依真實資料算出的設定順序軸。
+- **CLI**：`xharness check agents|eval|run|tables import|client add/list/remove|audit verify`；`check eval` 算規則覆蓋率、回歸一致率、可追溯率，未達 100% 時結束碼為 1。
+- 尚未包含（3.0.0 第1期）：MSSQL、單一登入、文件辨識服務本體、加密文件庫、原生 HTTPS、ODS 匯出、通知。
+
+**English**
+
+The check platform: many check agents plugged into one governed runtime. Deterministic rules decide, document reading and models only assist, the agency sets the decision values, and findings are notices that never block the source system. Start with `xharness check serve` (loopback, port 3095).
+
+- **Intake spec**: one folder per agent (`agent.toml`, `rules.py`, `tables.schema.toml`, `cases/`), dropped into `[check] agents_dirs`; the core is not changed, and a guard test checks that it names no agent. A broken agent is skipped with the reason, the others keep working.
+- **Rule sandbox**: `rules.py` passes an AST check (only the rule kit plus datetime, decimal, math and re; no open, exec or dunder access) and runs with reduced builtins; a rule that raises becomes a manual finding, never a pass.
+- **Decision table versions**: every publish is a new version with an effective date and an approver, old versions are kept; a check uses the version in force on the record's data basis date. Only an agency approver may publish; the platform administrator (the vendor) may not.
+- **Results and evidence**: each finding carries rule id, basis, compared fields, evidence and input hash; each run records agent version, rule digest, table versions, data basis date, received and sent times, and can be looked up by run id. The same event (person, date, amount ...) merges into one case across runs and agents.
+- **Case review**: open, in progress, resolved; take, assign, note and reopen are all kept as history. Medium and high risk agents sample clean records for review (at least 10%), reproducibly from the server secret.
+- **Check API**: source systems call with their own key (only its hash is stored); the sync path runs rules only (measured on .70: one record p50 10 ms, p95 24 ms; 500 records in one call 56 ms); records with documents get 202 and a task id, and are marked "cannot read, send to a person" when extraction is not configured, fails, or its breaker is open. The agency always comes from the key or the signed-in identity.
+- **Audit**: an append-only hash chain (database triggers refuse UPDATE and DELETE); verification names the first broken row; the whole chain can be exported for hand-over.
+- **Management page**: case review, try a check, decision tables (edit in place, then publish), runs, statistics with de-identified CSV export, audit; a setup track computed from real data sits on top.
+- **CLI**: `xharness check agents|eval|run|tables import|client add/list/remove|audit verify`; `check eval` reports rule coverage, consistency and traceability and exits 1 below 100%.
+- Not yet (3.0.0, phase 1): MSSQL, single sign-on, the document reading service itself, encrypted document store, native HTTPS, ODS export, notifications.
+
 ## 2.0.0 — 2026-11-23
 
 整併 OpenManus（MIT）有、xHarness 沒有的能力，用 xHarness 自己的架構重寫，保留零相依、審批與稽核。OpenManus的評測集（GAIA類與Office類）待有裝Office的Windows測試機再補跑。
