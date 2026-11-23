@@ -370,8 +370,20 @@ def make_handler(service: CheckService) -> type[BaseHTTPRequestHandler]:
             if method == "GET" and route == "/setup":
                 return self._json(200, {"steps": service.setup(caller)})
             if method == "GET" and route == "/agents":
-                return self._json(200, {"agents": [a.public() for a in service.agents.values()
-                                                   if caller.kind != "client" or not caller.agents or a.id in caller.agents]})
+                listed = []
+                for agent in service.agents.values():
+                    if caller.kind == "client" and caller.agents and agent.id not in caller.agents:
+                        continue
+                    item = agent.public()
+                    if caller.kind == "person" and agency is not None:
+                        for name, table in item["tables"].items():
+                            history = service.store.table_history(agency, agent.id, name)
+                            table["current"] = ({"version": history[0]["version"], "effective_from": history[0]["effective_from"],
+                                                 "approved_by": history[0]["approved_by"], "rows": len(history[0]["rows"])}
+                                                if history else None)
+                        item["open_cases"] = service.store.cases(agency, status="open", agent=agent.id, limit=1)["total"]
+                    listed.append(item)
+                return self._json(200, {"agents": listed})
             if len(parts) == 3 and parts[0] == "agents" and parts[2] == "check" and method == "POST":
                 return self._check(parts[1], caller, received)
             if len(parts) == 3 and parts[0] == "agents" and parts[2] == "samples" and method == "GET":

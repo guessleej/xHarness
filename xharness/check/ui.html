@@ -77,6 +77,15 @@ z-index:40;overflow:auto;padding:22px;transform:translateX(105%);transition:tran
 .drawer.on{transform:none}.drawer .x{float:right}
 .events{font-size:14px}.events div{padding:6px 0;border-top:1px solid var(--line)}
 .grid input{width:100%}
+.agrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:18px}
+.agent h2{margin:0}.agent .sub{font-size:14px;color:var(--ink2);margin:2px 0 10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+.facts div{background:var(--mist);border-radius:12px;padding:8px 12px;font-size:14px;color:var(--ink2)}.facts b{display:block;font-size:20px;color:var(--ink)}
+.agent h3{font-size:16px;margin:14px 0 6px}
+.rl{list-style:none;padding:0;margin:0}.rl li{padding:7px 0;border-top:1px solid var(--line);font-size:15px}.rl li span{color:var(--ink2);font-size:14px;display:block}
+.howto ol{margin:6px 0 0;padding-left:22px}.howto li{margin:4px 0}.howto code{background:var(--mist);padding:1px 6px;border-radius:6px;font-size:14px}
+@media (max-width:900px){.agrid{grid-template-columns:1fr}}
 .kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:12px}
 .kpi div{background:var(--mist);border-radius:12px;padding:12px 14px}.kpi b{display:block;font-size:26px}
 .login{width:min(420px,100%)}
@@ -136,6 +145,17 @@ main{padding:16px}.track{grid-template-columns:1fr 1fr}
       </div>
       <div class="scroll" style="margin-top:12px"><table><thead><tr><th>狀態</th><th>原因</th><th>Agent</th><th>業務鍵</th><th>承辦</th><th>更新</th></tr></thead><tbody id="cRows"></tbody></table></div>
     </div>
+  </div>
+
+  <div data-tab="agents" hidden>
+    <p class="muted" style="margin-top:-6px">平臺上接了哪些檢核Agent、各有哪些規則、判定值與驗證狀態。新增一支不必改平臺本身。</p>
+    <div class="agrid" id="aGrid"></div>
+    <div class="card howto" style="margin-top:18px"><h2>新增一支檢核Agent</h2>
+      <ol><li>複製一支現有Agent的資料夾（例如核銷附件缺漏檢核），改 <code>agent.toml</code> 的代號、名稱與必要欄位。</li>
+      <li>在 <code>rules.py</code> 寫規則：每條一個函式，帶規則編號、依據與提示文字；只能做計算，不能連網或讀寫檔案，平臺載入前會先檢查。</li>
+      <li>在 <code>tables.schema.toml</code> 定義判定值表的欄位；數值由機關在「判定值」頁核定，不寫在程式裡。</li>
+      <li>在 <code>cases/</code> 放驗證案例與機關核定的標準答案，三項驗證指標都要 100%。</li>
+      <li>資料夾放進設定檔 <code>[check] agents_dirs</code> 指定的目錄，重新啟動服務後就會出現在這一頁。</li></ol></div>
   </div>
 
   <div data-tab="try" hidden>
@@ -220,6 +240,7 @@ document.addEventListener("keydown",e=>{if(e.key==="Enter"&&(composing||e.isComp
 
 const I={
 cases:'<path d="M4 13l2.5-7h11L20 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M4 13h4l1.5 2.5h5L16 13h4"/>',
+agents:'<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><path d="M16.5 13v7M13 16.5h7"/>',
 try:'<path d="M10 3v6L5 18a2 2 0 0 0 1.8 3h10.4A2 2 0 0 0 19 18l-5-9V3"/><path d="M8.5 3h7"/><path d="M7.5 14h9"/>',
 tables:'<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
 runs:'<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M12 7v5l3 2"/>',
@@ -228,14 +249,14 @@ audit:'<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.
 const icon=k=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[k]}</svg>`;
 // [group, why, [tab, label, role]]
 const NAV=[["日常作業","每天處理",[["cases","案件覆核",null],["try","試打檢核","operator"]]],
-  ["規則設定","機關核定",[["tables","判定值",null]]],
+  ["規則設定","機關核定",[["agents","檢核Agent",null],["tables","判定值",null]]],
   ["查核追溯","對帳與留痕",[["runs","執行紀錄",null],["stats","統計匯出",null],["audit","稽核","auditor"]]]];
 const TABS=NAV.flatMap(g=>g[2].map(x=>[...x,g[0]]));
 function show(name){tab=name;const def=TABS.find(x=>x[0]===name)||TABS[0];
   document.querySelectorAll("#nav button").forEach(b=>{b.classList.toggle("on",b.dataset.t===name);b.toggleAttribute("aria-current",b.dataset.t===name)});
   document.querySelectorAll("[data-tab]").forEach(s=>s.hidden=s.dataset.tab!==name);
   $("crumb").textContent=def[3];$("pageTitle").textContent=def[1];$("shell").classList.remove("open");
-  ({cases:loadCases,try:prepTry,tables:loadTable,runs:loadRuns,stats:loadStats,audit:loadAudit})[name]()}
+  ({cases:loadCases,agents:loadAgents,try:prepTry,tables:loadTable,runs:loadRuns,stats:loadStats,audit:loadAudit})[name]()}
 async function badge(){try{const d=await api("/cases?status=open&limit=1");const el=$("nav").querySelector('[data-t="cases"] .badge');
   if(el){el.textContent=d.total>999?"999+":d.total;el.hidden=!d.total}}catch(e){}}
 const fold=v=>{$("shell").classList.toggle("rail",v);try{localStorage.setItem("xck-rail",v?"1":"")}catch(e){}
@@ -293,6 +314,30 @@ async function caseAct(action){const body={action,note:($("dNote")||{}).value||"
 function openDrawer(){$("drawer").classList.add("on");$("drawer").setAttribute("aria-hidden","false")}
 $("dClose").onclick=()=>{$("drawer").classList.remove("on");$("drawer").setAttribute("aria-hidden","true")};
 document.addEventListener("keydown",e=>{if(e.key==="Escape")$("dClose").click()});
+
+// --- agents (清冊)
+async function loadAgents(){agents=(await api("/agents")).agents;const risk={low:"低風險",medium:"中風險",high:"高風險"};
+  const trig={sync:"送出前同步檢核",batch:"每日批次"};
+  const evals=await Promise.all(agents.map(a=>api(`/agents/${encodeURIComponent(a.id)}/eval`).catch(()=>null)));
+  const pct=m=>m&&m.value!=null?Math.round(m.value*100)+"%":"—";
+  $("aGrid").innerHTML=agents.map((a,i)=>{const ev=evals[i];const tables=Object.entries(a.tables);
+    const ready=tables.filter(([,t])=>t.current).length;const ok=ev&&["rule_coverage","consistency","traceability"].every(k=>ev[k].value===1);
+    return `<div class="card agent"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><h2>${esc(a.name)}</h2>
+      <div class="sub">${esc(a.id)}｜v${esc(a.version)}｜規則指紋 ${esc(a.digest)}</div></div>
+      <span class="pill ${tables.length&&ready<tables.length?"open":"resolved"}">${tables.length&&ready<tables.length?"判定值未齊":"可上線"}</span></div>
+     <div>${esc(a.description)}</div>
+     <div class="chips"><span class="pill ${a.risk==="low"?"sample":"in_progress"}">${risk[a.risk]||a.risk}${a.sample_rate?`・抽審 ${Math.round(a.sample_rate*100)}%`:""}</span>
+      ${a.triggers.map(t=>`<span class="pill sample">${trig[t]||t}</span>`).join("")}${a.needs.length?'<span class="pill manual">附件走非同步辨識</span>':""}</div>
+     <div class="facts"><div>規則<b>${a.rules.length}</b></div><div>判定值表<b>${ready}/${tables.length}</b></div><div>待處理案件<b>${a.open_cases??"—"}</b></div></div>
+     <h3>規則</h3><ul class="rl">${a.rules.map(r=>`<li><b>${esc(r.id)}</b> ${esc(r.title)}<span>依據：${esc(r.basis)}</span></li>`).join("")}</ul>
+     <h3>判定值表</h3><ul class="rl">${tables.map(([n,t])=>`<li>${esc(t.title)}<span>${t.current?`第 ${t.current.version} 版，${t.current.rows} 列，${esc(t.current.effective_from)} 生效，核定人 ${esc(t.current.approved_by)}`:"尚未核定：規則會轉人工"}</span></li>`).join("")||'<li class="muted">不需要判定值</li>'}</ul>
+     <h3>驗證案例 <span class="muted">${ev?ev.cases.length+" 個":""}</span></h3>
+     <div class="facts"><div>規則覆蓋率<b>${pct(ev&&ev.rule_coverage)}</b></div><div>回歸一致率<b>${pct(ev&&ev.consistency)}</b></div><div>可追溯率<b>${pct(ev&&ev.traceability)}</b></div></div>
+     ${ok?"":'<p class="err">驗證指標未達 100%，請先修規則或案例</p>'}
+     <div class="row" style="margin-top:6px">${has("operator")?`<button class="btn primary" data-go="try" data-a="${esc(a.id)}">用這支試打</button>`:""}
+      ${tables.length?`<button class="btn" data-go="tables" data-a="${esc(a.id)}">看判定值</button>`:""}<button class="btn" data-go="cases" data-a="${esc(a.id)}">看案件</button></div></div>`}).join("");
+  $("aGrid").querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{const id=b.dataset.a,go=b.dataset.go;
+    if(go==="try")$("tAgent").value=id;if(go==="tables"){$("vAgent").value=id;fillTables()}if(go==="cases")$("cAgent").value=id;show(go)})}
 
 // --- try
 let samples=[];
