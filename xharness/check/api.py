@@ -227,7 +227,7 @@ class CheckService:
             ("填判定值", "規則用到的上限、名單、額度都由機關核定；沒填，規則一律轉人工。", not missing,
              f"還缺：{'、'.join(missing[:3])}{'…' if len(missing) > 3 else ''}" if missing else "全部判定值表都已核定", "tables"),
             ("發來源系統金鑰", "BAF、IGSS 等系統要用自己的金鑰呼叫檢核 API。", bool(clients),
-             f"已發 {len(clients)} 組" if clients else "由平臺管理者以 xharness check client add 發給", ""),
+             f"已發 {len(clients)} 組" if clients else "到「API金鑰」發一組給來源系統", "clients"),
             ("試打一次檢核", "用一筆樣本確認提示內容與依據條文正確。", bool(runs), "已有執行紀錄" if runs else "到「試打檢核」送一筆", "try"),
             ("覆核第一件案件", "提示會成為待處理案件，權責人員處理後留下歷程。", cases > 0,
              f"已處理 {cases} 件" if cases else "到「案件覆核」接手一件", "cases"),

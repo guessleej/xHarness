@@ -180,6 +180,22 @@ main{padding:16px}.track{grid-template-columns:1fr 1fr}
     <div class="navbtns"><button class="btn" id="dPrev">上一步</button><span id="dProblem" class="err"></span><button class="btn primary" id="dNext">下一步</button></div>
   </div>
 
+  <div data-tab="connectors" hidden>
+    <p class="muted" style="margin-top:-6px">平臺從哪裡拿資料：REST API 由平臺去對方網址拉，檔案交換由對方把 CSV／JSON 放進收件匣。對方的金鑰加密後才存，只走 Authorization 標頭。</p>
+    <div class="agrid" id="cnList"></div>
+    <div class="card" style="margin-top:18px" id="cnForm"></div>
+  </div>
+  <div data-tab="schedules" hidden>
+    <p class="muted" style="margin-top:-6px">到點自動從介接取數、跑檢核，結果變成案件。時間是台北時間；伺服器停機錯過的話，回來後補跑當天那一次。</p>
+    <div class="card"><div class="scroll"><table><thead><tr><th>檢核Agent</th><th>來源介接</th><th>時間</th><th>狀態</th><th>上一次</th><th></th></tr></thead><tbody id="scRows"></tbody></table></div></div>
+    <div class="card" id="scForm"></div>
+  </div>
+  <div data-tab="clients" hidden>
+    <p class="muted" style="margin-top:-6px">來源系統（BAF、IGSS…）呼叫檢核 API 用的金鑰。金鑰只在建立時顯示一次，平臺只存雜湊；遺失就撤銷重發。</p>
+    <div class="card"><div class="scroll"><table><thead><tr><th>名稱</th><th>可呼叫的Agent</th><th>建立時間</th><th></th></tr></thead><tbody id="clRows"></tbody></table></div></div>
+    <div class="card" id="clForm"></div>
+  </div>
+
   <div data-tab="try" hidden>
     <div class="card">
       <p class="muted">送一筆樣本，看提示內容與依據是否正確。這裡送的檢核會記成「manual」觸發，和來源系統送的分開統計。</p>
@@ -266,6 +282,9 @@ cases:'<path d="M4 13l2.5-7h11L20 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d=
 agents:'<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><path d="M16.5 13v7M13 16.5h7"/>',
 try:'<path d="M10 3v6L5 18a2 2 0 0 0 1.8 3h10.4A2 2 0 0 0 19 18l-5-9V3"/><path d="M8.5 3h7"/><path d="M7.5 14h9"/>',
 tables:'<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+connectors:'<path d="M9 7H6a4 4 0 0 0 0 8h3"/><path d="M15 7h3a4 4 0 0 1 0 8h-3"/><path d="M8 11h8"/>',
+schedules:'<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M12 13v3l2 1"/>',
+clients:'<circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M21 12v2"/>',
 runs:'<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M12 7v5l3 2"/>',
 stats:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
 audit:'<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>'};
@@ -273,13 +292,14 @@ const icon=k=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke
 // [group, why, [tab, label, role]]
 const NAV=[["日常作業","每天處理",[["cases","案件覆核",null],["try","試打檢核","operator"]]],
   ["規則設定","機關核定",[["agents","檢核Agent",null],["tables","判定值",null]]],
+  ["介接與排程","資料怎麼進來",[["connectors","來源介接","designer"],["schedules","排程","designer"],["clients","API金鑰","designer"]]],
   ["查核追溯","對帳與留痕",[["runs","執行紀錄",null],["stats","統計匯出",null],["audit","稽核","auditor"]]]];
 const TABS=NAV.flatMap(g=>g[2].map(x=>[...x,g[0]]));
 function show(name){tab=name;const navName=name==="design"?"agents":name;const def=name==="design"?["design","設計檢核Agent",null,"規則設定／檢核Agent"]:(TABS.find(x=>x[0]===name)||TABS[0]);
   document.querySelectorAll("#nav button").forEach(b=>{b.classList.toggle("on",b.dataset.t===navName);b.toggleAttribute("aria-current",b.dataset.t===navName)});
   document.querySelectorAll("[data-tab]").forEach(s=>s.hidden=s.dataset.tab!==name);
   $("crumb").textContent=def[3];$("pageTitle").textContent=def[1];$("shell").classList.remove("open");
-  ({cases:loadCases,agents:loadAgents,design:()=>{},try:prepTry,tables:loadTable,runs:loadRuns,stats:loadStats,audit:loadAudit})[name]()}
+  ({cases:loadCases,agents:loadAgents,design:()=>{},connectors:loadConnectors,schedules:loadSchedules,clients:loadClients,try:prepTry,tables:loadTable,runs:loadRuns,stats:loadStats,audit:loadAudit})[name]()}
 async function badge(){try{const d=await api("/cases?status=open&limit=1");const el=$("nav").querySelector('[data-t="cases"] .badge');
   if(el){el.textContent=d.total>999?"999+":d.total;el.hidden=!d.total}}catch(e){}}
 const fold=v=>{$("shell").classList.toggle("rail",v);try{localStorage.setItem("xck-rail",v?"1":"")}catch(e){}
@@ -567,6 +587,95 @@ function runDrawer(id){const a=agents.find(x=>x.id===id);$("dBody").innerHTML=`<
        <button class="btn primary" id="rCases">到案件覆核看全部</button>`;
       $("rCases").onclick=()=>{$("dClose").click();$("cAgent").value=id;show("cases")};badge()}
     catch(e){$("rErr").textContent=e.message}finally{$("rGo").disabled=false}};openDrawer()}
+
+// --- 來源介接 -------------------------------------------------------------------
+let CN={connectors:[],kinds:{}},cnEdit=null;
+async function loadConnectors(){CN=await api("/connectors");drawConnectors();cnForm(cnEdit)}
+function drawConnectors(){$("cnList").innerHTML=CN.connectors.map(c=>`<div class="card agent"><div class="row" style="justify-content:space-between"><h2>${esc(c.name)}</h2>
+   <span class="pill sample">${esc(CN.kinds[c.config.kind]||c.config.kind)}</span></div>
+   <div class="sub">${c.config.kind==="rest"?esc(c.config.url):"收件匣／"+esc(c.config.folder)}${c.config.records_path?"｜資料在 "+esc(c.config.records_path):""}</div>
+   <div class="muted">欄位對應 ${Object.keys(c.config.mapping||{}).length} 個｜${c.has_secret?"已存金鑰（加密）":"沒有金鑰"}｜${esc(c.actor)} ${t(c.updated)}</div>
+   <div class="row" style="margin-top:10px"><button class="btn primary" data-cntest="${esc(c.id)}">測試連線</button><button class="btn" data-cnedit="${esc(c.id)}">編輯</button><button class="btn" data-cndel="${esc(c.id)}">刪除</button></div>
+   <div data-cnout="${esc(c.id)}"></div></div>`).join("")||'<div class="card muted">還沒有任何介接，從下面新增第一個。</div>';
+  $("cnList").querySelectorAll("[data-cnedit]").forEach(b=>b.onclick=()=>{cnEdit=CN.connectors.find(c=>c.id===b.dataset.cnedit);cnForm(cnEdit);$("cnForm").scrollIntoView({behavior:"smooth"})});
+  $("cnList").querySelectorAll("[data-cndel]").forEach(b=>b.onclick=async()=>{if(!confirm("刪除這個介接？"))return;try{await api(`/connectors/${b.dataset.cndel}/delete`,{method:"POST"});loadConnectors()}catch(e){alert(e.message)}});
+  $("cnList").querySelectorAll("[data-cntest]").forEach(b=>b.onclick=async()=>{const out=$("cnList").querySelector(`[data-cnout="${b.dataset.cntest}"]`);out.innerHTML='<p class="muted">連線中…</p>';
+    const r=await api(`/connectors/${b.dataset.cntest}/test`,{method:"POST"});
+    out.innerHTML=r.ok?`<p><span class="pill resolved">連線成功</span>　取到 ${r.note.records} 筆${r.note.files&&r.note.files.length?"（"+esc(r.note.files.join("、"))+"）":""}${r.note.failed_files&&r.note.failed_files.length?`<span class="err">　讀不了：${esc(r.note.failed_files.join("、"))}</span>`:""}</p>
+      <textarea rows="6" readonly spellcheck="false">${esc(JSON.stringify(r.preview,null,1))}</textarea><p class="muted">只預覽前 5 筆，不會檢核、也不會搬動檔案。</p>`:`<p class="err">${esc(r.problem)}</p>`})}
+function cnForm(c){const x=c?c.config:{kind:"rest",mapping:{}};const map=Object.entries(x.mapping||{});
+  $("cnForm").innerHTML=`<h2>${c?"編輯介接："+esc(c.name):"新增來源介接"}</h2>
+  <div class="fgrid"><label>名稱<input id="cnName" value="${esc(c?c.name:"")}" placeholder="例：BAF 每日核銷匯出"></label>
+   <label>方式<select id="cnKind">${opt(Object.entries(CN.kinds),x.kind)}</select></label></div>
+  <div id="cnRest" ${x.kind==="rest"?"":"hidden"} style="margin-top:12px"><div class="fgrid">
+   <label>網址<small>只收 http／https；本機與保留位址會被擋</small><input id="cnUrl" value="${esc(x.url||"")}" placeholder="https://baf.example.gov.tw/api/claims?date=today"></label>
+   <label>資料在哪一層<small>例：data.items；最外層就是清單則留空</small><input id="cnPath" value="${esc(x.records_path||"")}"></label>
+   <label>對方給的金鑰<small>${c&&c.has_secret?"已存，留空＝不變":"沒有可留空"}${CN.crypto?"":"（這台缺加密套件，無法存金鑰）"}</small><input id="cnSecret" type="password" autocomplete="new-password" ${CN.crypto?"":"disabled"}></label></div>
+   ${c&&c.has_secret?'<label class="muted"><input type="checkbox" id="cnClear"> 清除已存的金鑰</label>':""}</div>
+  <div id="cnFolder" ${x.kind==="folder"?"":"hidden"} style="margin-top:12px"><div class="fgrid">
+   <label>收件匣資料夾<small>${CN.inbox_root?"在平臺收件匣底下，例：baf/daily；讀過的檔會移到 processed/":"平臺管理者還沒設定 [check] inbox_root"}</small><input id="cnDir" value="${esc(x.folder||"")}"></label></div></div>
+  <h3 style="font-size:16px;margin:14px 0 4px">欄位對應 <span class="muted">（對方欄位名稱和我們一樣就不用設）</span></h3>
+  <div id="cnMap">${(map.length?map:[["",""]]).map(([a,b])=>`<div class="row" style="margin:4px 0"><input data-ma value="${esc(a)}" placeholder="我們的欄位（例：claim_id）">←<input data-mb value="${esc(b)}" placeholder="對方的欄位（例：data.no）"></div>`).join("")}</div>
+  <button class="btn" id="cnAddMap">加一組對應</button>
+  <div class="row" style="margin-top:14px"><button class="btn primary" id="cnSave">${c?"儲存":"建立"}</button>${c?'<button class="btn" id="cnCancel">取消編輯</button>':""}<span class="err" id="cnErr"></span></div>`;
+  $("cnKind").onchange=()=>{$("cnRest").hidden=$("cnKind").value!=="rest";$("cnFolder").hidden=$("cnKind").value!=="folder"};
+  $("cnAddMap").onclick=()=>$("cnMap").insertAdjacentHTML("beforeend",'<div class="row" style="margin:4px 0"><input data-ma placeholder="我們的欄位">←<input data-mb placeholder="對方的欄位"></div>');
+  if($("cnCancel"))$("cnCancel").onclick=()=>{cnEdit=null;cnForm(null)};
+  $("cnSave").onclick=async()=>{const mapping={};$("cnMap").querySelectorAll(".row").forEach(r=>{const a=r.querySelector("[data-ma]").value.trim(),b=r.querySelector("[data-mb]").value.trim();if(a&&b)mapping[a]=b});
+    const body={id:c?c.id:undefined,name:$("cnName").value,kind:$("cnKind").value,url:$("cnUrl").value,records_path:$("cnPath").value,folder:$("cnDir").value,mapping};
+    const sec=$("cnSecret").value;if(sec)body.secret=sec;if($("cnClear")&&$("cnClear").checked)body.secret="";
+    try{await api("/connectors",{method:"POST",body:JSON.stringify(body)});cnEdit=null;loadConnectors();loadSetup()}catch(e){$("cnErr").textContent=e.message}}}
+
+// --- 排程 -----------------------------------------------------------------------
+let SC={schedules:[]},scEdit=null;
+async function loadSchedules(){[SC,CN]=await Promise.all([api("/schedules"),api("/connectors")]);
+  const st={done:["resolved","完成"],partial:["in_progress","部分失敗"],failed:["open","失敗"],running:["sample","執行中"],skipped:["sample","略過"]};
+  $("scRows").innerHTML=SC.schedules.map(x=>{const c=CN.connectors.find(c=>c.id===x.connector);const l=x.last;
+    return `<tr><td>${esc(agentName(x.agent))}</td><td>${esc(c?c.name:"（已刪除）")}</td><td class="nw">${esc(x.days_label)} ${esc(x.at)}</td>
+     <td><span class="pill ${x.enabled?"resolved":"sample"}">${x.enabled?"啟用":"暫停"}</span></td>
+     <td>${l?`<span class="pill ${st[l.status]?st[l.status][0]:"sample"}">${st[l.status]?st[l.status][1]:esc(l.status)}</span> ${t(l.started)}　${l.records} 筆${l.error?`<div class="${l.status==="failed"?"err":"muted"}">${esc(l.error)}</div>`:""}`:'<span class="muted">還沒跑過</span>'}</td>
+     <td class="nw"><button class="btn" data-scrun="${esc(x.id)}">立即跑一次</button> <button class="btn" data-schist="${esc(x.id)}">紀錄</button> <button class="btn" data-scedit="${esc(x.id)}">編輯</button> <button class="btn" data-scdel="${esc(x.id)}">刪</button></td></tr>`}).join("")||'<tr><td colspan="6" class="muted">還沒有排程</td></tr>';
+  const R=$("scRows");
+  R.querySelectorAll("[data-scrun]").forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent="執行中…";await api(`/schedules/${b.dataset.scrun}/run`,{method:"POST"});setTimeout(loadSchedules,2500)});
+  R.querySelectorAll("[data-scedit]").forEach(b=>b.onclick=()=>{scEdit=SC.schedules.find(x=>x.id===b.dataset.scedit);scForm()});
+  R.querySelectorAll("[data-scdel]").forEach(b=>b.onclick=async()=>{if(!confirm("刪除這個排程？"))return;await api(`/schedules/${b.dataset.scdel}/delete`,{method:"POST"});loadSchedules()});
+  R.querySelectorAll("[data-schist]").forEach(b=>b.onclick=async()=>{const d=await api(`/schedules/${b.dataset.schist}/runs`);
+    $("dBody").innerHTML=`<h1 style="font-size:22px">排程執行紀錄</h1>`+(d.runs.map(r=>`<div class="finding"><div class="t">${esc(r.trigger==="manual"?"手動":"排程")}　${esc(r.slot)}　<span class="pill ${st[r.status]?st[r.status][0]:"sample"}">${st[r.status]?st[r.status][1]:esc(r.status)}</span></div>
+      <div class="b">開始 ${t(r.started)}｜完成 ${t(r.finished)}｜${r.records} 筆｜執行識別 ${esc(r.run_id||"—")}${r.snapshot&&r.snapshot.sha256?"｜資料雜湊 "+esc(r.snapshot.sha256.slice(0,12))+"｜取數時間 "+esc(r.snapshot.basis):""}</div>${r.error?`<div class="err">${esc(r.error)}</div>`:""}</div>`).join("")||"<p>還沒跑過。</p>");openDrawer()});
+  scForm()}
+function scForm(){const x=scEdit||{agent:"",connector:"",at:"02:00",days:"weekdays",enabled:true};const custom=!["daily","weekdays"].includes(x.days);
+  $("scForm").innerHTML=`<h2>${scEdit?"編輯排程":"新增排程"}</h2>${CN.connectors.length?"":'<p class="err">要先到「來源介接」建一個介接，排程才有地方取資料。</p>'}
+  <div class="fgrid"><label>檢核Agent<select id="scAgent">${opt([["","請選"],...agents.filter(a=>a.enabled!==false).map(a=>[a.id,a.name])],x.agent)}</select></label>
+   <label>來源介接<select id="scConn">${opt([["","請選"],...CN.connectors.map(c=>[c.id,c.name])],x.connector)}</select></label>
+   <label>時間<small>台北時間</small><input type="time" id="scAt" value="${esc(x.at)}"></label>
+   <label>哪幾天<select id="scDays">${opt([["daily","每天"],["weekdays","週一到週五"],["custom","指定星期幾"]],custom?"custom":x.days)}</select></label></div>
+  <div class="row" id="scDow" ${custom?"":"hidden"} style="margin-top:8px">${"一二三四五六日".split("").map((d,i)=>`<label><input type="checkbox" value="${i+1}" ${custom&&x.days.split(",").includes(String(i+1))?"checked":""}> 週${d}</label>`).join("")}</div>
+  <label class="muted" style="display:block;margin-top:8px"><input type="checkbox" id="scOn" ${x.enabled?"checked":""}> 啟用</label>
+  <div class="row" style="margin-top:12px"><button class="btn primary" id="scSave">${scEdit?"儲存":"建立"}</button>${scEdit?'<button class="btn" id="scCancel">取消編輯</button>':""}<span class="err" id="scErr"></span></div>`;
+  $("scDays").onchange=()=>{$("scDow").hidden=$("scDays").value!=="custom"};if($("scCancel"))$("scCancel").onclick=()=>{scEdit=null;scForm()};
+  $("scSave").onclick=async()=>{let days=$("scDays").value;if(days==="custom")days=[...$("scDow").querySelectorAll("input:checked")].map(c=>c.value).join(",");
+    try{await api("/schedules",{method:"POST",body:JSON.stringify({id:scEdit?scEdit.id:undefined,agent:$("scAgent").value,connector:$("scConn").value,at:$("scAt").value,days,enabled:$("scOn").checked})});
+      scEdit=null;loadSchedules()}catch(e){$("scErr").textContent=e.message}}}
+
+// --- API 金鑰 -------------------------------------------------------------------
+async function loadClients(){const d=await api("/clients");
+  $("clRows").innerHTML=d.clients.map(c=>`<tr><td>${esc(c.name)}</td><td>${c.agents.length?c.agents.map(a=>esc(agentName(a))).join("、"):"全部"}</td><td>${t(c.created)}</td>
+    <td><button class="btn" data-clrev="${esc(c.name)}">撤銷</button></td></tr>`).join("")||'<tr><td colspan="4" class="muted">還沒有金鑰</td></tr>';
+  $("clRows").querySelectorAll("[data-clrev]").forEach(b=>b.onclick=async()=>{if(!confirm(`撤銷「${b.dataset.clrev}」？用這組金鑰的系統會立刻呼叫失敗。`))return;await api(`/clients/${encodeURIComponent(b.dataset.clrev)}/revoke`,{method:"POST"});loadClients();loadSetup()});
+  $("clForm").innerHTML=`<h2>發一組新金鑰</h2><div class="fgrid"><label>名稱<small>英數，例：BAF、IGSS</small><input id="clName"></label></div>
+   <div class="row" style="margin-top:8px"><span class="muted">可呼叫：</span>${agents.map(a=>`<label><input type="checkbox" value="${esc(a.id)}"> ${esc(a.name)}</label>`).join("")}<span class="muted">（都不勾＝全部）</span></div>
+   <div class="row" style="margin-top:12px"><button class="btn primary" id="clAdd">產生金鑰</button><span class="err" id="clErr"></span></div><div id="clOut"></div>`;
+  $("clAdd").onclick=async()=>{const sel=[...$("clForm").querySelectorAll("input[type=checkbox]:checked")].map(c=>c.value);
+    try{const r=await api("/clients",{method:"POST",body:JSON.stringify({name:$("clName").value,agents:sel})});const a=sel[0]||agents[0].id;
+      $("clOut").innerHTML=`<div class="finding" style="margin-top:12px"><div class="t">金鑰只顯示這一次，請交給對方存進機密設定</div>
+       <div class="row"><code id="clTok" style="word-break:break-all">${esc(r.token)}</code><button class="btn" id="clCopy">複製</button></div>
+       <div class="b" style="margin-top:8px">呼叫範例（送出前檢核；附件要辨識時會回 202 與任務編號）：</div>
+       <textarea rows="5" readonly spellcheck="false">curl -X POST ${location.origin}/api/check/v1/agents/${a}/check \\
+  -H "Authorization: Bearer <上面的金鑰>" -H "Content-Type: application/json" \\
+  -d '{"record": {...}}'</textarea></div>`;
+      $("clCopy").onclick=()=>navigator.clipboard.writeText(r.token).then(()=>$("clCopy").textContent="已複製");loadClients2()}catch(e){$("clErr").textContent=e.message}}}
+async function loadClients2(){const d=await api("/clients");$("clRows").innerHTML=d.clients.map(c=>`<tr><td>${esc(c.name)}</td><td>${c.agents.length?c.agents.map(a=>esc(agentName(a))).join("、"):"全部"}</td><td>${t(c.created)}</td><td><button class="btn" data-clrev="${esc(c.name)}">撤銷</button></td></tr>`).join("");
+  $("clRows").querySelectorAll("[data-clrev]").forEach(b=>b.onclick=async()=>{if(!confirm(`撤銷「${b.dataset.clrev}」？`))return;await api(`/clients/${encodeURIComponent(b.dataset.clrev)}/revoke`,{method:"POST"});loadClients()});loadSetup()}
 
 // --- try
 let samples=[];
