@@ -1,0 +1,36 @@
+# PR 的 AI 程式審查：在內網 NAS 的自建 runner 執行 /usr/local/bin/ci-ai-review，
+# 交給地端模型（.27 Qwen）找問題並以一則留言貼回 PR。只是建議，不影響合併。
+#
+# 用 pull_request_target：執行的是目標分支上這份檔案，PR 改不到它，NAS 只跑可信的版本。
+# 工作只透過 API 讀 diff，不 checkout PR 的程式碼，所以沒有 pull_request_target 常見的注入風險。
+name: AI 審查
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # 外部 fork 的 PR 不在內網執行；Dependabot 的 PR 拿不到寫入權杖，貼不了留言
+    if: >-
+      ${{ !github.event.pull_request.draft
+          && !github.event.pull_request.head.repo.fork
+          && github.event.pull_request.user.login != 'dependabot[bot]' }}
+    runs-on: [self-hosted, nas]
+    timeout-minutes: 20
+    # 審查只是建議：runner 缺程式或模型掛掉也不能擋住合併
+    continue-on-error: true
+    steps:
+      - name: 地端模型審查
+        run: python3 /usr/local/bin/ci-ai-review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
