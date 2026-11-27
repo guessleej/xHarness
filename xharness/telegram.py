@@ -188,10 +188,11 @@ class TelegramBridge:
                 return
             self.asking.pop(chat, None)  # stale: fall through and treat it as a new task
         conv = self._conversation(chat)
+        start = len(conv.events)  # 同一段對話的舊回合事件已經送過，只轉送這回合的
         if not self.app.send(conv, text):
             self.send(chat, "上一個任務還在跑；先 /stop 或等它結束。")
             return
-        threading.Thread(target=self._relay, args=(chat, conv), name=f"xharness-telegram-{chat}", daemon=True).start()
+        threading.Thread(target=self._relay, args=(chat, conv, start), name=f"xharness-telegram-{chat}", daemon=True).start()
 
     def _remember(self, chat: int, message: dict[str, Any]) -> None:
         """Who knocked, for the pairing list; never what they wrote."""
@@ -295,9 +296,9 @@ class TelegramBridge:
 
     # ----- conversation -> chat -----
 
-    def _relay(self, chat: int, conv: Any) -> None:
+    def _relay(self, chat: int, conv: Any, start: int = 0) -> None:
         """Follow one task: forward tool starts and approvals, then the answer."""
-        after = 0
+        after = start
         while True:
             events = conv.wait(after, timeout=POLL_TIMEOUT_SECONDS)
             for event in events:
