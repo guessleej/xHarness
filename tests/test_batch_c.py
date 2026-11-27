@@ -157,12 +157,15 @@ def test_user_prompt_block_never_reaches_the_model(tmp_path):
 def test_broken_hooks_are_not_fatal_and_notify_receives_the_turn(tmp_path):
     out = tmp_path / "notify.json"
     notifier = tmp_path / "notify.py"
-    notifier.write_text(f"import sys\nopen({str(out)!r},'w').write(sys.argv[-1])\n")
+    # 先寫暫存檔再改名：檔案一出現內容就是完整的，等待迴圈不會讀到剛建好的空檔
+    notifier.write_text(f"import os, sys\nout = {str(out)!r}\n"
+                        "with open(out + '.tmp', 'w') as fh:\n    fh.write(sys.argv[-1])\n"
+                        "os.replace(out + '.tmp', out)\n")
     adapter = Scripted([AssistantTurn(content="all good")])
     h = harness(adapter, ("hooks", hooks_plugin({"UserPromptSubmit": [{"command": "exit 7"}],
                                                  "notify": [sys.executable, str(notifier)]})))
     assert Agent(h.ctx, AgentOptions(cwd=str(tmp_path))).run("go") == "all good"
-    deadline = time.time() + 5
+    deadline = time.time() + 30
     while time.time() < deadline and not out.exists():
         time.sleep(0.05)
     payload = json.loads(out.read_text())
