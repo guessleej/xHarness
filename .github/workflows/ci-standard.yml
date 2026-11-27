@@ -1,0 +1,34 @@
+# 標準檢查：在內網 NAS 的自建 runner 執行 /usr/local/bin/ci-standard（semgrep＋云碩自訂規則、gitleaks、osv-scanner）。
+# PR 只掃改到的檔案、只擋新增的問題；推到主分支只列報告；要看整個 repo 的舊問題就手動執行這個工作流程。
+# 結果在這個工作的摘要頁，不貼留言。
+# 規則與工具統一在 NAS 更新，各 repo 不用改這份檔案。
+name: 標準檢查
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-standard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    # 外部 fork 的 PR 不在內網執行
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on: [self-hosted, nas]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: semgrep、gitleaks、osv-scanner（只擋這次新增的問題）
+        run: /usr/local/bin/ci-standard
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
