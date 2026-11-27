@@ -1,0 +1,28 @@
+# PR 的 AI 程式審查：在內網 NAS 的自建 runner 執行 /usr/local/bin/ci-ai-review，
+# 交給地端模型（.27 Qwen）找問題並以一則留言貼回 PR。只是建議，不影響合併。
+name: AI 審查
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # 外部 fork 的 PR 不在內網執行
+    if: ${{ !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork }}
+    runs-on: [self-hosted, nas]
+    timeout-minutes: 20
+    steps:
+      - name: 地端模型審查
+        run: python3 /usr/local/bin/ci-ai-review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
