@@ -64,6 +64,19 @@ def test_task_round_trip_delivers_answer():
     assert len(app.list()) == 1 and app.list()[0]["preview"] == "問題"
 
 
+def test_second_task_in_same_chat_does_not_resend_first_answer():
+    # 第一題答完後網頁端會再呼叫一次模型產生標題，後面多備幾輪才不會被它用掉
+    app, api, bridge = bridge_with([AssistantTurn(content="第一個答案")] + [AssistantTurn(content="第二個答案")] * 3)
+    bridge.handle(message("第一題"))
+    assert api.wait_for("第一個答案")
+    deadline = time.time() + 5
+    while time.time() < deadline and app.list()[0].get("running"):
+        time.sleep(0.02)
+    bridge.handle(message("第二題"))
+    assert api.wait_for("第二個答案")
+    time.sleep(0.2)
+    assert sum("第一個答案" in t for t in api.texts()) == 1
+
 def test_approval_arrives_as_buttons_and_callback_resolves_it():
     turns = [
         AssistantTurn(content="", tool_calls=[{"id": "c1", "name": "mutate", "arguments": "{}"}]),
